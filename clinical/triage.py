@@ -1,438 +1,509 @@
-# clinical/pharmaco.py — Pharmacologie BCFI Belgique — AKIR-IAO v18.0
-# Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
-#
-# Références : BCFI — Répertoire Commenté des Médicaments — Belgique
-#              AFMPS — RCP Belgique — SFAR 2010 — CRASH-2 Lancet 2010
-#              EAACI 2023 — GINA 2023 — SFNP / ISPE 2022
+from typing import Callable, Dict, Tuple
+import unicodedata
 
-from typing import Optional, Tuple, Dict
-from config import (
-    GLYC, GLYC as _G,
-    PARA_DOSE_KG, PARA_DOSE_FIXE_G, PARA_POIDS_PIVOT_KG,
-    GLUCOSE_DOSE_KG, GLUCOSE_MAX_G,
-    ADRE_POIDS_ADULTE_KG, ADRE_DOSE_ADULTE_MG, ADRE_DOSE_KG,
-    PIRI_BOLUS_MIN, PIRI_BOLUS_MAX, PIRI_PLAFOND_LT70, PIRI_PLAFOND_GE70,
-    NALOO_ADULTE_MG, NALOO_PED_KG, NALOO_DEP_MG,
-    MORPH_MIN_KG, MORPH_MAX_KG, MORPH_PLAFOND_STD, MORPH_PLAFOND_GE100, MORPH_PALIER_MG,
-    CEFRTRX_ADULTE_G, CEFRTRX_PED_KG,
-    LITICAN_DOSE_ADULTE_MG, LITICAN_DOSE_KG_ENF, LITICAN_DOSE_MAX_ENF_MG,
-    LITICAN_DOSE_MAX_JOUR, LITICAN_POIDS_PIVOT_KG,
-    MIDAZOLAM_BUCC_KG, MIDAZOLAM_BUCC_MAX_MG,
-    MIDAZOLAM_IM_IN_KG, MIDAZOLAM_IM_IN_MAX_MG,
-    DIAZEPAM_RECT_KG, DIAZEPAM_RECT_MAX_MG,
-    DIAZEPAM_IV_KG, DIAZEPAM_IV_MAX_MG,
-    LORAZEPAM_IV_KG, LORAZEPAM_IV_MAX_MG,
-    CLONAZEPAM_IV_KG, CLONAZEPAM_IV_MAX_MG,
-    PHENOBARB_IV_KG, PHENOBARB_IV_MAX_MG, PHENOBARB_DEBIT_MG_KG_MIN,
-    LEVETI_IV_KG, LEVETI_IV_MAX_MG,
-    VALPROATE_IV_KG, VALPROATE_IV_MAX_MG, VALPROATE_IV_DEBIT_MIN,
-    FLUMAZENIL_DOSE_MG, FLUMAZENIL_MAX_MG, FLUMAZENIL_MAX_TOTAL,
-    EME_SEUIL_MIN, EME_OPERATIONNEL_MIN, EME_ETABLI_MIN,
-)
+from config import GLYC, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD, NEWS2_TRI_M, ORD
+from clinical.vitaux import si
+from clinical.french_v12 import get_protocol
 
-Rx = Tuple[Optional[Dict], Optional[str]]
-
-# ── CI AINS communes ─────────────────────────────────────────────────────────
-_CI_A = [
-    "Ulcere gastro-duodenal", "Insuffisance renale chronique",
-    "Insuffisance hepatique", "Grossesse en cours", "Chimiotherapie en cours",
-]
-def ci_ains(atcd: list) -> list:
-    return [c for c in _CI_A if c in atcd]
+TriageResult = Tuple[str, str, str]
+Handler = Callable[..., TriageResult]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ANTALGIQUES — PROTOCOLE EVA OMS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def paracetamol(poids: float) -> Rx:
-    """Paracétamol IV — palier I OMS. 15 mg/kg si < 50 kg, 1 g si ≥ 50 kg."""
-    if poids <= 0:
-        return None, "Poids invalide"
-    if poids >= PARA_POIDS_PIVOT_KG:
-        return {"dose_g": PARA_DOSE_FIXE_G, "vol": "100 ml NaCl 0,9 % — 15 min",
-                "freq": "Toutes 6 h (max 4 g/24 h)", "ref": "BCFI — Paracétamol IV"}, None
-    dg = min(round(PARA_DOSE_KG * poids / 1000, 2), PARA_DOSE_FIXE_G)
-    return {"dose_g": dg, "vol": f"{dg*1000:.0f} mg dans 100 ml NaCl 0,9 %",
-            "freq": "Toutes 6 h", "ref": "BCFI — Paracétamol IV"}, None
+def _norm(value) -> str:
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return " ".join(value.casefold().split())
 
 
-def ketorolac(poids: float, atcd: list) -> Rx:
-    """Kétorolac (Taradyl) IV — AINS palier II. 15 mg < 50 kg / 30 mg ≥ 50 kg."""
-    ci = ci_ains(atcd)
-    if ci:
-        return None, f"Contre-indiqué : {', '.join(ci)}"
-    d = 15.0 if poids < 50 else 30.0
-    return {"dose_mg": d, "admin": "IV lent 15 s", "freq": "Toutes 6 h — max 5 j",
-            "ref": "BCFI — Kétorolac (Taradyl)"}, None
+def _has(items, label: str) -> bool:
+    labels = {_norm(x) for x in (items or [])}
+    return _norm(label) in labels
 
 
-def tramadol(poids: float, atcd: list, age: float) -> Rx:
-    """Tramadol IV — opioïde faible. CI absolue : IMAO / Épilepsie."""
-    als = []
-    if "Epilepsie" in atcd:
-        als.append("CONTRE-INDIQUÉ — Épilepsie (seuil épileptogène abaissé)")
-    if "IMAO (inhibiteurs MAO)" in atcd:
-        als.append("CONTRE-INDICATION ABSOLUE — SYNDROME SÉROTONINERGIQUE FATAL avec IMAO")
-    if "Antidepresseurs ISRS/IRSNA" in atcd:
-        als.append("INTERACTION MAJEURE — ISRS/IRSNA — risque sérotoninergique")
-    d = 100.0 if poids >= 50 else round(1.5 * poids, 0)
-    return {"dose_mg": d, "admin": f"{d:.0f} mg dans 100 ml NaCl 0,9 % — IV 30 min",
-            "freq": "Toutes 6 h (max 400 mg/24 h)", "alertes": als,
-            "ref": "BCFI — Tramadol"}, None
+def _truthy(det: dict, *keys: str) -> bool:
+    nd = {_norm(k): v for k, v in (det or {}).items()}
+    return any(bool(nd.get(_norm(k))) for k in keys)
 
 
-def piritramide(poids: float, age: float, atcd: list) -> Rx:
-    """Piritramide (Dipidolor) IV — opioïde fort — titration. Réduction 50 % si ≥ 70 ans / IRC / IH."""
-    red = (age >= 70 or "Insuffisance renale chronique" in atcd
-           or "Insuffisance hepatique" in atcd)
-    f = 0.5 if red else 1.0
-    plafond = (PIRI_PLAFOND_LT70 if poids < 70 else PIRI_PLAFOND_GE70) * f
-    dmin = min(round(PIRI_BOLUS_MIN * poids * f, 2), plafond)
-    dmax = min(round(PIRI_BOLUS_MAX * poids * f, 2), plafond)
-    return {"dmin": dmin, "dmax": dmax,
-            "admin": "IV lent 1-2 min — titrer si EVA > 3 après 15 min",
-            "note": "Dose −50 % si âge ≥ 70 / IRC / IH" if red else "",
-            "ref": "BCFI — Piritramide (Dipidolor)"}, None
+def _value(det: dict, key: str, default=None):
+    nd = {_norm(k): v for k, v in (det or {}).items()}
+    return nd.get(_norm(key), default)
 
 
-def morphine(poids: float, age: float) -> Rx:
-    """Morphine IV — titration 0,05-0,10 mg/kg. Réduction 50 % si ≥ 70 ans."""
-    f = 0.5 if age >= 70 else 1.0
-    plafond = (MORPH_PLAFOND_GE100 if poids >= 100 else MORPH_PLAFOND_STD) * f
-    dmin = min(round(MORPH_MIN_KG * poids * f, 1), plafond)
-    dmax = min(round(MORPH_MAX_KG * poids * f, 1), plafond)
-    return {"dmin": dmin, "dmax": dmax, "palier": MORPH_PALIER_MG,
-            "admin": f"IV lent 2-3 min — titrer par paliers {MORPH_PALIER_MG:.0f} mg / 5-10 min",
-            "ref": "BCFI — Morphine chlorhydrate"}, None
+def _more_urgent(a: TriageResult, b: TriageResult) -> TriageResult:
+    return a if ORD.get(a[0], 99) <= ORD.get(b[0], 99) else b
 
 
-def protocole_eva(eva: int, poids: float, age: float, atcd: list,
-                  gl: Optional[float] = None) -> dict:
-    """Protocole antalgique OMS adapté à l'EVA (0-10)."""
-    als = []
-    recs = []
-    pr, _ = paracetamol(poids)
-    if pr:
-        recs.append({"nom": "Paracétamol IV", "dose": f"{pr['dose_g']} g",
-                     "d": pr["vol"], "note": pr["freq"], "ref": pr["ref"], "p": "1"})
-    if eva >= 4:
-        kr, ke = ketorolac(poids, atcd)
-        if kr:
-            recs.append({"nom": "Kétorolac IV (Taradyl)", "dose": f"{kr['dose_mg']} mg",
-                         "d": kr["admin"], "note": kr["freq"], "ref": kr["ref"], "p": "2"})
-        elif ke:
-            als.append(ke)
-        tr, _ = tramadol(poids, atcd, age)
-        if tr:
-            al_t = tr.get("alertes", [])
-            if not any("ABSOLU" in a or "INDIQUÉ" in a for a in al_t):
-                recs.append({"nom": "Tramadol IV", "dose": f"{tr['dose_mg']:.0f} mg",
-                             "d": tr["admin"], "note": tr["freq"], "ref": tr["ref"],
-                             "p": "2", "al": al_t})
+def _selected_french_result(motif: str, det: dict) -> TriageResult | None:
+    level = _value(det, "french_level")
+    if not level:
+        return None
+    level = str(level)
+    protocol = get_protocol(motif) or {}
+    criterion = _value(det, "french_criterion", "") or protocol.get("motif", motif)
+    return level, f"FRENCH v1.2 - {criterion}", "FRENCH v1.2"
+
+
+def _triage_acr(**_) -> TriageResult:
+    return "1", "ACR confirme - RCP immediate", "FRENCH Tri 1"
+
+
+def _triage_hypotension(pas, fc, **_) -> TriageResult:
+    if pas <= 70:
+        return "1", f"PAS {pas} mmHg <= 70 - collapsus", "FRENCH Tri 1"
+    if pas <= 90 or (pas <= 100 and fc > 100):
+        return "2", f"PAS {pas} mmHg - choc debutant", "FRENCH Tri 2"
+    if pas <= 100:
+        return "3B", f"PAS {pas} mmHg - valeur limite", "FRENCH Tri 3B"
+    return "4", "PAS normale", "FRENCH Tri 4"
+
+
+def _triage_sca(fc, spo2, det, **_) -> TriageResult:
+    ecg = _value(det, "ecg", "Normal")
+    doul = _value(det, "douleur", "Atypique")
+    if ecg == "Anormal typique SCA" or "typique" in _norm(doul):
+        return "1", "SCA - ECG anormal ou douleur typique", "FRENCH Tri 1"
+    if _truthy(det, "douleur_intense", "douleur persistante"):
+        return "2", "Douleur thoracique intense ou persistante", "FRENCH Tri 2"
+    if fc >= 120 or spo2 < 94:
+        return "2", "Douleur thoracique instable", "FRENCH Tri 2"
+    if _value(det, "frcv", 0) >= 2:
+        return "2", "Douleur coronaire probable avec facteurs de risque", "FRENCH Tri 2"
+    return "3A", "Douleur thoracique stable", "FRENCH Tri 3A"
+
+
+def _triage_arythmie(fc, det, **_) -> TriageResult:
+    if fc >= 180 or fc <= 30:
+        return "1", f"FC {fc} bpm - arythmie extreme", "FRENCH Tri 1"
+    if fc >= 150 or fc <= 40:
+        return "2", f"FC {fc} bpm - arythmie severe", "FRENCH Tri 2"
+    if _truthy(det, "tol_mal", "mauvaise tolerance", "syncope", "douleur"):
+        return "2", "Arythmie mal toleree", "FRENCH Tri 2"
+    return "3B", f"FC {fc} bpm - arythmie toleree", "FRENCH Tri 3B"
+
+
+def _triage_hta(pas, fc, det, **_) -> TriageResult:
+    if pas >= 220:
+        return "2", f"PAS {pas} mmHg >= 220 - urgence hypertensive", "FRENCH Tri 2"
+    if _truthy(det, "sf", "neuro", "douleur thoracique", "dyspnee") or (pas >= 180 and fc > 100):
+        return "2", "HTA avec signes fonctionnels", "FRENCH Tri 2"
+    if pas >= 180:
+        return "3B", "HTA severe sans signe fonctionnel", "FRENCH Tri 3B"
+    return "4", "HTA moderee", "FRENCH Tri 4"
+
+
+def _triage_anaphylaxie(spo2, pas, gcs, det, **_) -> TriageResult:
+    if spo2 < 94 or pas < 90 or gcs < 15:
+        return "1", "Anaphylaxie severe - engagement systemique", "FRENCH Tri 1"
+    if _truthy(det, "dyspnee", "urticaire", "oedeme", "vomissements"):
+        return "2", "Allergie systemique", "FRENCH Tri 2"
+    return "3B", "Reaction allergique localisee", "FRENCH Tri 3B"
+
+
+def _triage_dyspnee(spo2, fr, det, **_) -> TriageResult:
+    bpco = _truthy(det, "bpco")
+    cible = 92 if bpco else 95
+    seuil_crit = 88 if bpco else 91
+    if spo2 < seuil_crit or fr >= 40:
+        return "1", f"Detresse respiratoire SpO2 {spo2}% FR {fr}/min", "FRENCH Tri 1"
+    if spo2 < cible or fr >= 30 or _truthy(det, "parole impossible", "mots isoles"):
+        return "2", f"Dyspnee severe SpO2 {spo2}%", "FRENCH Tri 2"
+    if _truthy(det, "orthopnee", "tirage", "cyanose"):
+        return "2", "Orthopnee, tirage ou cyanose", "FRENCH Tri 2"
+    return "3B", f"Dyspnee moderee SpO2 {spo2}%", "FRENCH Tri 3B"
+
+
+def _triage_abdomen(fc, pas, det, **_) -> TriageResult:
+    shock = si(fc, pas)
+    if pas < 90 or shock >= 1.0:
+        return "2", f"Douleur abdominale avec choc (SI {shock})", "FRENCH Tri 2"
+    if _truthy(det, "grossesse", "geu"):
+        return "2", "Douleur abdominale sur grossesse - GEU a exclure", "FRENCH Tri 2"
+    if _truthy(det, "defense", "contracture"):
+        return "2", "Abdomen chirurgical", "FRENCH Tri 2"
+    if _truthy(det, "tol_mal", "vomissements incoercibles"):
+        return "3A", "Douleur abdominale mal toleree", "FRENCH Tri 3A"
+    return "3B", "Douleur abdominale toleree", "FRENCH Tri 3B"
+
+
+def _triage_digestif(fc, pas, det, **_) -> TriageResult:
+    shock = si(fc, pas)
+    if pas < 90 or shock >= 1.0 or _truthy(det, "deshydratation severe"):
+        return "2", f"Trouble digestif avec signe de gravite (SI {shock})", "FRENCH Tri 2"
+    if _truthy(det, "vomissements incoercibles", "sang", "douleur intense"):
+        return "3A", "Vomissements/diarrhee mal toleres", "FRENCH Tri 3A"
+    return "4", "Vomissements/diarrhee bien toleres", "FRENCH Tri 4"
+
+
+def _triage_hemo_digestive(fc, pas, det, **_) -> TriageResult:
+    shock = si(fc, pas)
+    if pas < 90 or shock >= 1.0 or _truthy(det, "malaise", "syncope"):
+        return "1", f"Hemorragie digestive instable (SI {shock})", "FRENCH Tri 1"
+    if fc >= 110 or _truthy(det, "abondant", "melena"):
+        return "2", "Hemorragie digestive probable", "FRENCH Tri 2"
+    return "3A", "Saignement digestif stable", "FRENCH Tri 3A"
+
+
+def _triage_colique(pas, gcs, det, **_) -> TriageResult:
+    if gcs < 15 or pas < 90:
+        return "2", "Douleur lombaire avec alteration clinique", "FRENCH Tri 2"
+    if _truthy(det, "fievre", "anurie", "rein unique", "grossesse"):
+        return "2", "Colique nephretique compliquee", "FRENCH Tri 2"
+    if _truthy(det, "eva forte", "vomissements"):
+        return "3A", "Colique nephretique mal toleree", "FRENCH Tri 3A"
+    return "3B", "Colique nephretique stable", "FRENCH Tri 3B"
+
+
+def _triage_avc(gcs, det, **_) -> TriageResult:
+    delai = _value(det, "delai", 99)
+    try:
+        delai = float(delai)
+    except (TypeError, ValueError):
+        delai = 99
+    if delai <= 4.5:
+        return "1", f"AVC {delai:g} h - fenetre thrombolyse", "FRENCH Tri 1"
+    if delai <= 24:
+        return "2", f"AVC {delai:g} h - filiere neurovasculaire urgente", "FRENCH Tri 2"
+    if _truthy(det, "def_prog", "deficit progressif") or gcs < 15:
+        return "2", "Deficit progressif ou alteration GCS", "FRENCH Tri 2"
+    return "2", "Deficit neurologique - bilan urgent", "FRENCH Tri 2"
+
+
+def _triage_tc(gcs, det, **_) -> TriageResult:
+    if gcs <= 8:
+        return "1", f"TC grave - GCS {gcs}/15", "FRENCH Tri 1"
+    if gcs <= 12 or _truthy(det, "aod", "anticoagulant", "convulsion", "vomissements repetes", "otorragie"):
+        return "2", f"TC GCS {gcs}/15 ou critere TDM urgent", "FRENCH Tri 2"
+    if _truthy(det, "pdc", "perte de connaissance"):
+        return "3A", "TC avec perte de connaissance", "FRENCH Tri 3A"
+    return "4", "TC benin", "FRENCH Tri 4"
+
+
+def _triage_coma(gcs, gl, **_) -> TriageResult:
+    if gl and gl < GLYC["hs"]:
+        return "2", f"Hypoglycemie {gl} mg/dl - glucose IV", "FRENCH Tri 2"
+    if gcs <= 8:
+        return "1", f"Coma profond - GCS {gcs}/15", "FRENCH Tri 1"
+    if gcs <= 13:
+        return "2", f"Alteration de conscience - GCS {gcs}/15", "FRENCH Tri 2"
+    return "2", "Alteration de conscience", "FRENCH Tri 2"
+
+
+def _triage_cephalee(det, **_) -> TriageResult:
+    if _truthy(det, "brutal", "foudroyante"):
+        return "1", "Cephalee foudroyante - HSA suspectee", "FRENCH Tri 1"
+    if _truthy(det, "nuque", "fievre", "deficit", "confusion"):
+        return "2", "Cephalee avec signe de gravite", "FRENCH Tri 2"
+    return "3B", "Cephalee sans signe de gravite", "FRENCH Tri 3B"
+
+
+def _triage_convulsions(det, gcs, **_) -> TriageResult:
+    if _truthy(det, "en_cours", "multi", "etat de mal"):
+        return "2", "Crise en cours, multiple ou EME", "FRENCH Tri 2"
+    if _truthy(det, "tc", "traumatisme cranien"):
+        return "2", "Convulsion apres traumatisme cranien", "FRENCH Tri 2"
+    if _truthy(det, "confusion", "conf") or gcs < 15:
+        return "2", "Confusion post-critique persistante", "FRENCH Tri 2"
+    return "3B", "Convulsion recuperee", "FRENCH Tri 3B"
+
+
+def _triage_confusion(gcs, temp, det, **_) -> TriageResult:
+    if gcs <= 13:
+        return "2", f"Syndrome confusionnel avec GCS {gcs}/15", "FRENCH Tri 2"
+    if temp >= 38.5 or _truthy(det, "brutal", "agitation"):
+        return "2", "Confusion aigue avec facteur de gravite", "FRENCH Tri 2"
+    return "3A", "Syndrome confusionnel stable", "FRENCH Tri 3A"
+
+
+def _triage_malaise(n2, gl, det, **_) -> TriageResult:
+    if gl and gl < GLYC["hs"]:
+        return "2", f"Malaise hypoglycemique {gl} mg/dl", "FRENCH Tri 2"
+    if n2 >= 2 or _truthy(det, "anom_vit", "douleur thoracique", "syncope effort"):
+        return "2", "Malaise avec anomalie vitale ou signe d'alerte", "FRENCH Tri 2"
+    return "3B", "Malaise recupere", "FRENCH Tri 3B"
+
+
+def _triage_trauma_axial(fc, pas, spo2, det, **_) -> TriageResult:
+    if _truthy(det, "penetrant", "pen") or _norm(_value(det, "cin", "")) == "haute":
+        return "1", "Traumatisme penetrant ou haute cinetique", "FRENCH Tri 1"
+    if si(fc, pas) >= 1.0 or spo2 < 94:
+        return "2", f"Traumatisme avec signe de choc SI {si(fc, pas)}", "FRENCH Tri 2"
+    return "2", "Traumatisme axial - evaluation urgente", "FRENCH Tri 2"
+
+
+def _triage_trauma_distal(det, **_) -> TriageResult:
+    if _truthy(det, "isch", "ischemie"):
+        return "1", "Ischemie distale", "FRENCH Tri 1"
+    if _truthy(det, "impotence", "imp") and _truthy(det, "deformation", "deform"):
+        return "2", "Fracture deplacee avec impotence totale", "FRENCH Tri 2"
+    if _truthy(det, "impotence", "imp", "deformation", "deform"):
+        return "3A", "Traumatisme distal avec impotence ou deformation", "FRENCH Tri 3A"
+    return "4", "Traumatisme distal modere", "FRENCH Tri 4"
+
+
+def _triage_hemorragie(fc, pas, det, **_) -> TriageResult:
+    shock = si(fc, pas)
+    if pas < 90 or shock >= 1.0 or _truthy(det, "massive", "incontrolable"):
+        return "1", f"Hemorragie active instable (SI {shock})", "FRENCH Tri 1"
+    if fc >= 110 or _truthy(det, "anticoagulant", "aod"):
+        return "2", "Hemorragie active stable mais a risque", "FRENCH Tri 2"
+    return "3A", "Hemorragie active controlee", "FRENCH Tri 3A"
+
+
+def _triage_fievre(fc, pas, temp, det, **_) -> TriageResult:
+    if _truthy(det, "purpura", "neff"):
+        return "1", "Fievre + purpura - ceftriaxone immediate", "FRENCH Tri 1"
+    if temp >= 40 or temp <= 35.2 or _truthy(det, "confusion", "conf"):
+        return "2", f"Fievre avec critere de gravite (T {temp} C)", "FRENCH Tri 2"
+    if _truthy(det, "tol_mal") or pas < 100 or si(fc, pas) >= 1.0:
+        return "3B", "Fievre mal toleree", "FRENCH Tri 3B"
+    return "5", "Fievre bien toleree", "FRENCH Tri 5"
+
+
+def _triage_ped_fievre_nourr(temp, age, **_) -> TriageResult:
+    if age <= 0.25 and temp >= 38.0:
+        return "2", "Nourrisson <= 3 mois febrile", "FRENCH Pediatrie Tri 2"
+    return "3A", "Nourrisson avec suspicion infectieuse", "FRENCH Pediatrie Tri 3A"
+
+
+def _triage_ped_fievre(fc, temp, age, det, **_) -> TriageResult:
+    if _truthy(det, "purpura", "neff"):
+        return "1", "Fievre pediatrique + purpura", "FRENCH Pediatrie Tri 1"
+    if temp >= 40 or _truthy(det, "somnolence", "geignement", "marbrures"):
+        return "2", "Fievre enfant avec signe de gravite", "FRENCH Pediatrie Tri 2"
+    if fc >= _fc_tachy_ped(age):
+        return "3A", "Fievre enfant avec tachycardie", "FRENCH Pediatrie Tri 3A"
+    return "4", "Fievre enfant bien toleree", "FRENCH Pediatrie Tri 4"
+
+
+def _fc_tachy_ped(age) -> int:
+    if age < 1 / 12:
+        return 160
+    if age < 1:
+        return 150
+    if age < 5:
+        return 140
+    return 120
+
+
+def _triage_ped_gastro(fc, pas, age, det, **_) -> TriageResult:
+    if _truthy(det, "deshydratation severe", "lethargie", "sang"):
+        return "2", "Gastro-enterite pediatrique avec signe de gravite", "FRENCH Pediatrie Tri 2"
+    if _value(det, "vomissements_h", 0) >= 6 or fc >= _fc_tachy_ped(age):
+        return "3A", "Vomissements frequents ou tachycardie", "FRENCH Pediatrie Tri 3A"
+    if pas < 70 + 2 * max(age, 1):
+        return "2", "Suspicion choc pediatrique", "FRENCH Pediatrie Tri 2"
+    return "4", "Gastro-enterite pediatrique toleree", "FRENCH Pediatrie Tri 4"
+
+
+def _triage_ped_epilepsie(gcs, det, **_) -> TriageResult:
+    if _truthy(det, "en_cours", "etat de mal") or gcs < 15:
+        return "2", "Crise epileptique pediatrique active ou non recuperee", "FRENCH Pediatrie Tri 2"
+    if _truthy(det, "premiere crise", "fievre"):
+        return "3A", "Crise pediatrique a evaluer", "FRENCH Pediatrie Tri 3A"
+    return "3B", "Crise pediatrique recuperee", "FRENCH Pediatrie Tri 3B"
+
+
+def _triage_ped_asthme(spo2, fr, det, **_) -> TriageResult:
+    if spo2 < 92 or fr >= 40 or _truthy(det, "silence auscultatoire", "epuisement"):
+        return "1", "Asthme pediatrique severe", "FRENCH Pediatrie Tri 1"
+    if spo2 < 95 or _truthy(det, "tirage", "parole impossible"):
+        return "2", "Asthme pediatrique avec detresse", "FRENCH Pediatrie Tri 2"
+    return "3A", "Bronchospasme pediatrique modere", "FRENCH Pediatrie Tri 3A"
+
+
+def _triage_purpura(temp, det, **_) -> TriageResult:
+    if _truthy(det, "purpura", "neff", "non effacable"):
+        return "1", "Purpura non effacable - ceftriaxone immediate", "SPILF/SFP"
+    if temp >= 38.0:
+        return "2", "Purpura febrile - suspicion fulminans", "FRENCH Tri 2"
+    return "3B", "Petechies - bilan hemostase", "FRENCH Tri 3B"
+
+
+def _triage_erytheme(temp, det, **_) -> TriageResult:
+    if temp >= 38.5 or _truthy(det, "extension rapide", "necrose", "douleur intense"):
+        return "2", "Erytheme etendu avec signe de gravite", "FRENCH Tri 2"
+    return "3B", "Erytheme etendu stable", "FRENCH Tri 3B"
+
+
+def _triage_accouchement(det, **_) -> TriageResult:
+    if _truthy(det, "poussee", "tete visible", "contractions rapprochees"):
+        return "1", "Accouchement imminent", "FRENCH Tri 1"
+    return "2", "Travail obstetrical probable", "FRENCH Tri 2"
+
+
+def _triage_grossesse(det, pas, **_) -> TriageResult:
+    if pas < 90 or _truthy(det, "douleur intense", "saignement abondant", "syncope"):
+        return "2", "Complication de grossesse avec signe de gravite", "FRENCH Tri 2"
+    return "3A", "Complication de grossesse stable", "FRENCH Tri 3A"
+
+
+def _triage_metrorragie(fc, pas, det, **_) -> TriageResult:
+    shock = si(fc, pas)
+    if pas < 90 or shock >= 1.0 or _truthy(det, "abondant", "grossesse"):
+        return "2", "Saignement gynecologique a risque", "FRENCH Tri 2"
+    return "3A", "Metrorragie stable", "FRENCH Tri 3A"
+
+
+def _triage_hypoglycemie(gcs, gl, **_) -> TriageResult:
+    if gl and gl < GLYC["hs"]:
+        return "2", f"Hypoglycemie severe {gl} mg/dl - glucose IV", "FRENCH Tri 2"
+    if gcs < 15:
+        return "2", f"Hypoglycemie avec alteration GCS {gcs}/15", "FRENCH Tri 2"
+    return "3B", "Hypoglycemie legere - resucrage oral", "FRENCH Tri 3B"
+
+
+def _triage_hyperglycemie(gcs, det, gl=None, **_) -> TriageResult:
+    if _truthy(det, "ceto", "dyspnee de kussmaul") or gcs < 15:
+        return "2", "Cetoacidose ou alteration de conscience", "FRENCH Tri 2"
+    if gl and gl >= GLYC["Hs2"]:
+        return "3A", f"Hyperglycemie severe {gl} mg/dl", "FRENCH Tri 3A"
+    return "4", "Hyperglycemie toleree", "FRENCH Tri 4"
+
+
+def _triage_non_urgent(**_) -> TriageResult:
+    return "5", "Consultation non urgente", "FRENCH Tri 5"
+
+
+_TRIAGE_DISPATCH: Dict[str, Handler] = {
+    "Arret cardio-respiratoire": _triage_acr,
+    "Hypotension arterielle": _triage_hypotension,
+    "Douleur thoracique / SCA": _triage_sca,
+    "Tachycardie / tachyarythmie": _triage_arythmie,
+    "Bradycardie / bradyarythmie": _triage_arythmie,
+    "Palpitations": _triage_arythmie,
+    "Hypertension arterielle": _triage_hta,
+    "Allergie / anaphylaxie": _triage_anaphylaxie,
+    "Dyspnee / insuffisance respiratoire": _triage_dyspnee,
+    "Dyspnee / insuffisance cardiaque": _triage_dyspnee,
+    "Douleur abdominale": _triage_abdomen,
+    "Vomissements / Diarrhee": _triage_digestif,
+    "Hematemese / Rectorragie": _triage_hemo_digestive,
+    "Colique nephretique / Douleur lombaire": _triage_colique,
+    "AVC / Deficit neurologique": _triage_avc,
+    "Traumatisme cranien": _triage_tc,
+    "Alteration de conscience / Coma": _triage_coma,
+    "Cephalee": _triage_cephalee,
+    "Convulsions / EME": _triage_convulsions,
+    "Syndrome confusionnel": _triage_confusion,
+    "Malaise": _triage_malaise,
+    "Traumatisme thorax/abdomen/rachis cervical": _triage_trauma_axial,
+    "Traumatisme bassin/hanche/femur": _triage_trauma_axial,
+    "Traumatisme membre / epaule": _triage_trauma_distal,
+    "Hemorragie active": _triage_hemorragie,
+    "Fievre": _triage_fievre,
+    "Pediatrie - Fievre <= 3 mois": _triage_ped_fievre_nourr,
+    "Pediatrie - Fievre enfant (3 mois - 15 ans)": _triage_ped_fievre,
+    "Pediatrie - Vomissements / Gastro-enterite": _triage_ped_gastro,
+    "Pediatrie - Crise epileptique": _triage_ped_epilepsie,
+    "Pediatrie - Asthme / Bronchospasme": _triage_ped_asthme,
+    "Petechie / Purpura": _triage_purpura,
+    "Erytheme etendu": _triage_erytheme,
+    "Accouchement imminent": _triage_accouchement,
+    "Complication grossesse T1/T2": _triage_grossesse,
+    "Menorragie / Metrorragie": _triage_metrorragie,
+    "Hypoglycemie": _triage_hypoglycemie,
+    "Hyperglycemie / Cetoacidose": _triage_hyperglycemie,
+    "Renouvellement ordonnance": _triage_non_urgent,
+    "Examen administratif": _triage_non_urgent,
+    "Autre motif": _triage_non_urgent,
+}
+
+_MOTIF_INDEX: Dict[str, Handler] = {_norm(k): v for k, v in _TRIAGE_DISPATCH.items()}
+
+
+def french_triage(motif, det, fc, pas, spo2, fr, gcs, temp, age, n2, gl=None) -> TriageResult:
+    fc = fc or 80
+    pas = pas or 120
+    spo2 = spo2 or 98
+    fr = fr or 16
+    gcs = gcs or 15
+    temp = temp or 37.0
+    age = age if age is not None else 45
+    n2 = n2 or 0
+    det = det or {}
+
+    try:
+        if n2 >= NEWS2_TRI_M:
+            return "M", f"NEWS2 {n2} >= {NEWS2_TRI_M} - engagement vital", "NEWS2 Tri M"
+        if _truthy(det, "purpura", "neff", "non effacable"):
+            return "1", "Purpura non effacable - ceftriaxone immediate", "SPILF/SFP"
+        if pas <= 70 or gcs <= 8:
+            return "1", "Critere vital majeur", "Triage transversal"
+
+        selected = _selected_french_result(motif, det)
+        protocol = get_protocol(motif)
+        handler = _MOTIF_INDEX.get(_norm(motif))
+        if selected:
+            result = selected
+        elif handler:
+            result = handler(
+                motif=motif, det=det, fc=fc, pas=pas, spo2=spo2, fr=fr,
+                gcs=gcs, temp=temp, age=age, n2=n2, gl=gl,
+            )
+        elif protocol:
+            result = (
+                protocol["default"],
+                f"FRENCH v1.2 - niveau par defaut - {protocol['motif']}",
+                "FRENCH v1.2",
+            )
+        else:
+            result = "3B", f"Evaluation standard - {motif}", "FRENCH Tri 3B"
+
+        if n2 >= NEWS2_RISQUE_ELEVE:
+            result = _more_urgent(result, ("2", f"NEWS2 {n2} >= {NEWS2_RISQUE_ELEVE} - risque eleve", "NEWS2 Tri 2"))
+        elif n2 >= NEWS2_RISQUE_MOD:
+            result = _more_urgent(result, ("3A", f"NEWS2 {n2} >= {NEWS2_RISQUE_MOD} - risque modere", "NEWS2 Tri 3A"))
+
+        if spo2 < 90 or fr >= 35 or fc >= 150 or fc <= 40 or pas <= 90:
+            result = _more_urgent(result, ("2", "Anomalie vitale transversale", "Triage transversal"))
+        if gl and gl < GLYC["hs"]:
+            result = _more_urgent(result, ("2", f"Hypoglycemie severe {gl} mg/dl", "Triage transversal"))
+
+        return result
+    except Exception as e:
+        return "2", f"Erreur moteur de triage : {e}", "Securite Tri 2"
+
+
+def verifier_coherence(fc, pas, spo2, fr, gcs, temp, eva, motif, atcd, det, n2, gl=None):
+    danger, alertes = [], []
+    atcd = atcd or []
+    det = det or {}
+
+    if _has(atcd, "IMAO (inhibiteurs MAO)"):
+        danger.append("IMAO - Tramadol contre-indique (syndrome serotoninergique)")
+    if _has(atcd, "Antidepresseurs ISRS/IRSNA"):
+        alertes.append("ISRS/IRSNA - Tramadol deconseille - preferer Dipidolor ou Morphine")
+    if gl:
+        if gl < GLYC["hs"]:
+            danger.append(f"Hypoglycemie severe {gl} mg/dl - glucose IV")
+        elif gl < GLYC["hm"]:
+            alertes.append(f"Hypoglycemie moderee {gl} mg/dl - corriger avant antalgique")
+        elif gl >= GLYC["Hs2"]:
+            alertes.append(f"Hyperglycemie severe {gl} mg/dl")
+
+    shock = si(fc, pas)
+    if shock >= 1.0:
+        danger.append(f"Shock Index {shock} >= 1.0 - etat de choc probable")
+    if spo2 < 90:
+        danger.append(f"SpO2 {spo2}% - oxygene et avis medical urgent")
+    if fr >= 30:
+        alertes.append(f"FR {fr}/min - tachypnee")
+    if fc >= 150 or fc <= 40:
+        danger.append(f"FC {fc} bpm - arythmie critique")
+    if gcs < 15:
+        alertes.append(f"GCS {gcs}/15 - alteration neurologique")
+    if temp >= 40 or temp <= 35:
+        alertes.append(f"Temperature {temp} C - anomalie thermique severe")
     if eva >= 7:
-        pi, _ = piritramide(poids, age, atcd)
-        if pi:
-            recs.append({"nom": "Piritramide IV (Dipidolor)",
-                         "dose": f"{pi['dmin']}-{pi['dmax']} mg",
-                         "d": pi["admin"], "note": pi["note"], "ref": pi["ref"], "p": "3"})
-    return {"als": als, "recs": recs}
+        alertes.append(f"EVA {eva}/10 - antalgie rapide a prioriser")
+    if _has(atcd, "Anticoagulants/AOD") and "traumatisme cranien" in _norm(motif):
+        danger.append("TC sous AOD/AVK - TDM urgente")
+    if _truthy(det, "purpura", "neff", "non effacable"):
+        danger.append("Purpura non effacable - ceftriaxone immediate")
+    if n2 >= NEWS2_RISQUE_ELEVE:
+        danger.append(f"NEWS2 {n2} - appel medical immediat")
+    elif n2 >= NEWS2_RISQUE_MOD:
+        alertes.append(f"NEWS2 {n2} - surveillance rapprochee")
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# URGENCES VITALES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def naloxone(poids: float, age: float, dep: bool = False) -> Rx:
-    """Naloxone (Narcan) IV — antidote opioïdes. 3 protocoles : adulte / pédiatrique / dépendance."""
-    als = []
-    if dep:
-        d = NALOO_DEP_MG
-        a = f"{d} mg IV / 2 min — titration douce"
-        n = "Dépendance — objectif : ventilation, pas levée totale"
-        als.append("Risque de syndrome de sevrage si surdosage")
-    elif age < 18:
-        d = min(round(NALOO_PED_KG * poids, 3), NALOO_ADULTE_MG)
-        a = f"{d} mg IV (0,01 mg/kg)"
-        n = f"Pédiatrique : {d} mg pour {poids} kg"
-    else:
-        d = NALOO_ADULTE_MG
-        a = f"{d} mg IV — répéter / 2-3 min (max 10 mg)"
-        n = "Si pas de réponse à 10 mg : reconsidérer le diagnostic"
-    return {"dose": d, "admin": a, "note": n, "alertes": als,
-            "surv": "Demi-vie courte 30-90 min — surveiller resédation",
-            "ref": "BCFI — Naloxone (Narcan)"}, None
-
-
-def adrenaline(poids: float) -> Rx:
-    """Adrénaline IM — anaphylaxie. Face antéro-latérale cuisse."""
-    if poids <= 0:
-        return None, "Poids invalide"
-    d = ADRE_DOSE_ADULTE_MG if poids >= ADRE_POIDS_ADULTE_KG else min(
-        round(ADRE_DOSE_KG * poids, 3), ADRE_DOSE_ADULTE_MG)
-    n = "0,5 ml sol 1 mg/ml" if poids >= ADRE_POIDS_ADULTE_KG else f"0,01 mg/kg = {d} mg"
-    return {"dose_mg": d, "voie": "IM face antéro-lat cuisse", "note": n,
-            "rep": "Répéter 5-15 min si pas d'amélioration",
-            "ref": "BCFI — Adrénaline Sterop 1 mg/ml — EAACI 2023"}, None
-
-
-def glucose(poids: float, gl: Optional[float] = None) -> Rx:
-    """Glucose 30 % IV — hypoglycémie sévère. Désactivé si glycémie None."""
-    if gl is None:
-        return None, "Glycémie non mesurée — protocole désactivé"
-    dg = min(round(GLUCOSE_DOSE_KG * poids, 1), GLUCOSE_MAX_G)
-    dm = round(dg / GLUCOSE_DOSE_KG, 0)
-    return {"dose_g": dg, "vol": f"{dm:.0f} ml Glucose 30 % IV lent 5 min",
-            "ctrl": "Glycémie de contrôle à 15 min",
-            "ref": "BCFI — Glucose 30 % (Glucosie)"}, None
-
-
-def ceftriaxone(poids: float, age: float) -> Rx:
-    """Ceftriaxone IV — purpura fulminans / méningite. Ne pas attendre si purpura."""
-    dg = (CEFRTRX_ADULTE_G if age >= 18
-          else min(round(CEFRTRX_PED_KG * poids, 1), CEFRTRX_ADULTE_G))
-    n = "Ne pas attendre le médecin si purpura" if age >= 18 else f"100 mg/kg = {dg*1000:.0f} mg"
-    return {"dose_g": dg, "admin": "IV 3-5 min ou IM si VVP impossible", "note": n,
-            "ref": "BCFI — Ceftriaxone — SPILF/SFP 2017"}, None
-
-
-def litican(poids: float, age: float, atcd: list) -> Rx:
-    """Litican IM — tiémonium méthylsulfate — antispasmodique. PROTOCOLE LOCAL HAINAUT."""
-    if poids <= 0:
-        return None, "Poids invalide"
-    ci = []
-    if "Glaucome" in atcd or "Glaucome par fermeture de l'angle" in atcd:
-        ci.append("Glaucome (CI absolue)")
-    if "Adenome prostatique" in atcd or "Retention urinaire" in atcd:
-        ci.append("Rétention urinaire")
-    if "Grossesse en cours" in atcd:
-        ci.append("Grossesse — données insuffisantes")
-    if ci:
-        return None, f"Contre-indication : {' | '.join(ci)}"
-    if poids >= LITICAN_POIDS_PIVOT_KG and age >= 15:
-        dose = LITICAN_DOSE_ADULTE_MG
-        note = "1 ampoule 2 ml (40 mg/2 ml)"
-    else:
-        dose = min(round(LITICAN_DOSE_KG_ENF * poids, 1), LITICAN_DOSE_MAX_ENF_MG)
-        note = f"1 mg/kg = {dose} mg pour {poids} kg"
-    return {"dose_mg": dose, "dose_note": note,
-            "voie": "IM profond — quadrant supéro-externe fessier ou cuisse",
-            "volume": f"{dose/20:.1f} ml de solution 20 mg/ml",
-            "freq": f"Si besoin après 4-6 h — max {LITICAN_DOSE_MAX_JOUR:.0f} mg/24 h",
-            "attention": "NE PAS INJECTER EN IV — risque de bradycardie",
-            "ref": "BCFI — Tiémonium (Litican) — Protocole local Hainaut"}, None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# NOUVEAUX PROTOCOLES (session 2025)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def salbutamol(poids: float, age: float, gravite: str = "moderee") -> Rx:
-    """Salbutamol (Ventolin) nébulisation — bronchospasme / asthme. GINA 2023."""
-    if poids <= 0:
-        return None, "Poids invalide"
-    if age >= 18:
-        dose = 5.0 if gravite == "severe" else 2.5
-        note = f"{dose} mg ({dose/5:.1f} ml sol 5 mg/ml) + NaCl 0,9 % qs 3 ml"
-    else:
-        dose = min(max(round(0.15 * poids, 2), 1.25), 5.0 if age >= 2 else 2.5)
-        note = f"0,15 mg/kg = {dose} mg ({dose/5:.2f} ml sol 5 mg/ml) + NaCl 0,9 % qs 3 ml"
-    return {"dose_mg": dose, "volume": round(dose/5.0, 2),
-            "dilution": "Compléter à 3-4 ml avec NaCl 0,9 %",
-            "debit_o2": "6-8 l/min — 15-20 min",
-            "admin": note,
-            "rep": "Répéter toutes les 20-30 min si besoin (max 3 doses)",
-            "ref": "BCFI — Salbutamol (Ventolin) — GINA 2023"}, None
-
-
-def furosemide(poids: float, age: float, atcd: list) -> Rx:
-    """Furosémide (Lasix) IV — OAP cardiogénique. 0,5-1 mg/kg."""
-    ci = []
-    if "Insuffisance renale chronique" in atcd:
-        ci.append("IRC — adapter la dose (risque ototoxicité)")
-    dose_min = min(round(0.5 * poids, 0), 100.0)
-    dose_max = min(round(1.0 * poids, 0), 200.0)
-    return {"dose_min": dose_min, "dose_max": dose_max,
-            "admin": f"{dose_min:.0f}-{dose_max:.0f} mg IV lent 2-5 min",
-            "surv": "Diurèse attendue 5-15 min — surveiller kaliémie",
-            "ci_list": ci,
-            "ref": "BCFI — Furosémide (Lasix)"}, None
-
-
-def ondansetron(poids: float, age: float) -> Rx:
-    """Ondansétron (Zofran) IV/IM — antiémétique. 0,1 mg/kg enfant / 4 mg adulte."""
-    if age >= 18:
-        dose = 4.0
-        note = "4 mg IV lent ou IM — répéter 8 mg si besoin après 4 h"
-    else:
-        dose = min(round(0.1 * poids, 2), 4.0)
-        note = f"0,1 mg/kg = {dose} mg IV lent (dilué dans 50 ml NaCl 0,9 %)"
-    return {"dose_mg": dose, "admin": note,
-            "qt": "Attention allongement QT — ECG si ATCD arythmie",
-            "ref": "BCFI — Ondansétron (Zofran)"}, None
-
-
-def acide_tranexamique(poids: float, delai_h: float = 0.0) -> Rx:
-    """Acide tranexamique (Exacyl) IV — hémorragie active. Fenêtre < 3 h (CRASH-2)."""
-    if delai_h > 3.0:
-        return None, f"Délai {delai_h:.1f} h > 3 h — fenêtre thérapeutique dépassée (CRASH-2)"
-    return {"dose_charge": "1 g IV en 10 min",
-            "dose_entretien": "1 g IV en 8 h (médecin)",
-            "admin": "Diluer 1 g dans 100 ml NaCl 0,9 % — perfuser en 10 min",
-            "fenetre": f"Délai depuis traumatisme : {delai_h:.1f} h — bénéfice si < 3 h",
-            "surv": "Surveiller signes thrombotiques — PA — diurèse",
-            "ref": "CRASH-2 — Lancet 2010 — BCFI — Acide tranexamique (Exacyl)"}, None
-
-
-def methylprednisolone(poids: float, indication: str = "anaphylaxie") -> Rx:
-    """Méthylprednisolone (Solu-Médrol) IV — corticoïde d'urgence."""
-    ind = indication.lower()
-    if "anaph" in ind:
-        dose = min(round(1.5 * poids, 0), 125.0)
-        note = f"Anaphylaxie — {dose:.0f} mg IV lent 5 min (adjuvant adrénaline)"
-    elif "asthme" in ind:
-        dose = min(round(1.5 * poids, 0), 80.0)
-        note = f"Asthme — {dose:.0f} mg IV lent 5 min (effets en 4-6 h)"
-    elif "bpco" in ind:
-        dose = 40.0
-        note = "Exacerbation BPCO — 40 mg IV / 6 h — 5 jours"
-    else:
-        dose = min(round(1.5 * poids, 0), 125.0)
-        note = f"{dose:.0f} mg IV lent 5 min"
-    return {"dose_mg": dose, "admin": note,
-            "delai": "Effets anti-inflammatoires en 4-6 h",
-            "ref": "BCFI — Méthylprednisolone (Solu-Médrol) — EAACI 2023"}, None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PROTOCOLE ÉPILEPSIE PÉDIATRIQUE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def protocole_epilepsie_ped(
-    poids: float, age: float, duree_min: float,
-    en_cours: bool, atcd: list,
-    gl: Optional[float] = None,
-) -> dict:
-    """
-    Protocole EME pédiatrique 4 lignes — SFNP / ISPE 2022 / EpiCARE 2023.
-
-    Ligne 1 : Midazolam buccal / IM-IN / Diazépam rectal (IAO autonome)
-    Ligne 2 : Lorazépam / Clonazépam / Diazépam IV (médecin + VVP)
-    Ligne 3 : Lévétiracétam / Valproate / Phénobarbital IV (réanimation)
-    Antidote : Flumazénil
-    """
-    # Alerte glycémie — prioritaire
-    glycemie_alerte = None
-    if gl is None:
-        glycemie_alerte = ("Glycémie NON MESURÉE — Réaliser IMMÉDIATEMENT "
-                           "(hypoglycémie = cause curable)")
-    elif gl < 54:
-        glycemie_alerte = (f"HYPOGLYCÉMIE SÉVÈRE {gl} mg/dl "
-                           "— Glucose 30 % IV AVANT tout antiépileptique")
-
-    # Buccolam® — volumes par tranche d'âge AMM
-    if   age < 1:   buccolam_vol = "2,5 mg / 0,5 ml"
-    elif age < 5:   buccolam_vol = "5 mg / 1 ml"
-    elif age < 10:  buccolam_vol = "7,5 mg / 1,5 ml"
-    else:           buccolam_vol = "10 mg / 2 ml"
-
-    # Ligne 1a — Midazolam buccal
-    d_mb = min(round(MIDAZOLAM_BUCC_KG * poids, 1), MIDAZOLAM_BUCC_MAX_MG)
-    ligne1a = {"med": "Midazolam buccal (Buccolam®)", "dose_mg": d_mb,
-               "volume": buccolam_vol,
-               "admin": "Déposer entre la gencive et la joue",
-               "delai": "Effet en 5-10 min", "peut_repeter": "1 seule dose",
-               "ref": "BCFI — Midazolam buccal (Buccolam)"}
-
-    # Ligne 1b — Midazolam IM / intranasale
-    d_mi = min(round(MIDAZOLAM_IM_IN_KG * poids, 1), MIDAZOLAM_IM_IN_MAX_MG)
-    vol_in = round(d_mi / 5.0, 2)
-    ligne1b = {"med": "Midazolam IM / Intranasale", "dose_mg": d_mi,
-               "voie_im": f"IM cuisse — {round(d_mi/5,1)} ml sol 5 mg/ml",
-               "voie_in": (f"IN : {round(vol_in/2,2)} ml / narine — atomiseur MAD"),
-               "delai": "Effet en 5-10 min",
-               "ref": "BCFI — Midazolam (Dormicum)"}
-
-    # Ligne 1c — Diazépam rectal
-    d_dr = min(round(DIAZEPAM_RECT_KG * poids, 1), DIAZEPAM_RECT_MAX_MG)
-    ligne1c = {"med": "Diazépam rectal (Stesolid®)", "dose_mg": d_dr,
-               "admin": "Tube rectal préchauffé — maintien 2 min",
-               "delai": "Effet en 5-15 min", "ref": "BCFI — Diazépam rectal"}
-
-    # Ligne 2 — Benzodiazépines IV
-    d_lo = min(round(LORAZEPAM_IV_KG * poids, 2), LORAZEPAM_IV_MAX_MG)
-    d_cl = min(round(CLONAZEPAM_IV_KG * poids, 3), CLONAZEPAM_IV_MAX_MG)
-    d_di = min(round(DIAZEPAM_IV_KG * poids, 1), DIAZEPAM_IV_MAX_MG)
-    ligne2_lora  = {"med": "Lorazépam IV (Temesta®)", "dose_mg": d_lo,
-                    "admin": f"{d_lo} mg IV lent 2-3 min — rincer NaCl 0,9 %",
-                    "delai": "Effet en 2-5 min", "attention": "Surveiller SpO2 + FR",
-                    "ref": "BCFI — Lorazépam (Temesta)"}
-    ligne2_clona = {"med": "Clonazépam IV (Rivotril®)", "dose_mg": d_cl,
-                    "admin": f"{d_cl} mg dans 10 ml NaCl 0,9 % — IV lent 2-5 min",
-                    "delai": "Effet en 1-3 min", "ref": "BCFI — Clonazépam (Rivotril)"}
-    ligne2_diaz  = {"med": "Diazépam IV (Valium®)", "dose_mg": d_di,
-                    "admin": f"{d_di} mg IV lent — max 2 mg/min",
-                    "ref": "BCFI — Diazépam IV"}
-
-    # Ligne 3 — Antiépileptiques IV
-    d_lev = min(round(LEVETI_IV_KG * poids, 0), LEVETI_IV_MAX_MG)
-    d_valp = min(round(VALPROATE_IV_KG * poids, 0), VALPROATE_IV_MAX_MG)
-    d_ph  = min(round(PHENOBARB_IV_KG * poids, 0), PHENOBARB_IV_MAX_MG)
-    duree_ph = round(d_ph / (PHENOBARB_DEBIT_MG_KG_MIN * poids), 1)
-    ci_valp = ("CI formelle : enfant < 2 ans avec retard développement"
-               if age < 2 else "")
-    ligne3_leveti = {"med": "Lévétiracétam IV (Keppra®) — 1er choix",
-                     "dose_mg": d_lev,
-                     "volume": f"{round(d_lev/100,1)} ml sol 100 mg/ml",
-                     "admin": f"{d_lev:.0f} mg dans 100 ml NaCl 0,9 % — 15 min",
-                     "avantage": "Pas de sédation — monitoring minimal",
-                     "ref": "BCFI — Lévétiracétam (Keppra)"}
-    ligne3_valp   = {"med": "Valproate IV (Dépakine®) — 2e choix",
-                     "dose_mg": d_valp,
-                     "admin": (f"{d_valp:.0f} mg dans 100 ml NaCl 0,9 % — "
-                               f"perfusion ≥ {VALPROATE_IV_DEBIT_MIN:.0f} min"),
-                     "ci": ci_valp, "ref": "BCFI — Acide valproïque (Dépakine IV)"}
-    ligne3_phenob = {"med": "Phénobarbital IV — 3e choix",
-                     "dose_mg": d_ph,
-                     "admin": (f"{d_ph:.0f} mg IV — max {PHENOBARB_DEBIT_MG_KG_MIN} mg/kg/min "
-                               f"→ durée min {duree_ph} min"),
-                     "attention": "Risque dépression respiratoire — Monitoring ECG",
-                     "ref": "BCFI — Phénobarbital IV"}
-
-    # Flumazénil
-    d_fl = min(round(FLUMAZENIL_DOSE_MG * poids, 3), FLUMAZENIL_MAX_MG)
-    antidote = {"med": "Flumazénil (Anexate®)",
-                "indication": "Dépression respiratoire sévère post-benzodiazépine",
-                "dose_mg": d_fl, "dose_total": FLUMAZENIL_MAX_TOTAL,
-                "admin": (f"{d_fl} mg IV lent 15 s — "
-                          f"répétable / 60 s jusqu'à max {FLUMAZENIL_MAX_TOTAL} mg"),
-                "attention": "Demi-vie courte (1 h) — surveiller resédation",
-                "ref": "BCFI — Flumazénil (Anexate)"}
-
-    # Chronomètre clinique
-    chrono = {
-        "T0":     "Arrivée — PLS — VAS libres — O2 — Glycémie",
-        f"T+{EME_SEUIL_MIN} min": "Si crise persiste → LIGNE 2 IV (médecin)",
-        f"T+{EME_OPERATIONNEL_MIN} min": "Si crise persiste → LIGNE 3 (réanimation)",
-        f"T+{EME_ETABLI_MIN} min": "EME établi — Intubation à discuter",
-    }
-
-    surveillance = [
-        "Position latérale de sécurité (PLS) si inconscient",
-        "SpO2 en continu — O2 si < 95 %",
-        f"FR toutes les 2 min post-benzodiazépine — alarme si < 12/min",
-        "AVPU toutes les 5 min — noter l'heure de reprise de conscience",
-        "Glycémie capillaire — répéter si non faite",
-        "Température — antipyrétique si fièvre",
-        "VVP dès que possible",
-        f"APPEL MÉDECIN si crise persiste > {EME_SEUIL_MIN} min après ligne 1",
-    ]
-
-    return {
-        "glycemie_alerte": glycemie_alerte,
-        "ligne1a": ligne1a, "ligne1b": ligne1b, "ligne1c": ligne1c,
-        "ligne2_lora": ligne2_lora, "ligne2_clona": ligne2_clona, "ligne2_diaz": ligne2_diaz,
-        "ligne3_leveti": ligne3_leveti, "ligne3_valp": ligne3_valp, "ligne3_phenob": ligne3_phenob,
-        "antidote": antidote, "chrono": chrono, "surveillance": surveillance,
-        "ref": "SFNP / EpiCARE 2023 — ISPE 2022 — BCFI Belgique — Urgences Hainaut",
-    }
+    return danger, alertes
