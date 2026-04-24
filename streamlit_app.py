@@ -20,6 +20,10 @@ st.set_page_config(
 from config import *
 from clinical.news2 import calculer_news2, n2_meta
 from clinical.triage import french_triage, verifier_coherence
+from clinical.french_v12 import (
+    FRENCH_MOTS_CAT, FRENCH_MOTIFS_RAPIDES,
+    get_protocol, get_criterion_options,
+)
 from clinical.scores import (
     calculer_gcs, calculer_qsofa, calculer_timi,
     evaluer_fast, calculer_algoplus, evaluer_cfs,
@@ -29,6 +33,8 @@ from clinical.pharmaco import (
     paracetamol, ketorolac, tramadol, piritramide,
     morphine, naloxone, adrenaline, glucose, ceftriaxone,
     litican, protocole_eva, protocole_epilepsie_ped,
+    salbutamol, furosemide, ondansetron,
+    acide_tranexamique, methylprednisolone,
 )
 from persistence.registry import enregistrer_patient, charger_registre
 from persistence.audit import audit_verifier_integrite
@@ -39,6 +45,9 @@ from ui.components import (
     RX, RX_LOCK, GLYC_WIDGET, BPCO_WIDGET, SI_WIDGET,
     SBAR_RENDER, DISC, build_sbar,
 )
+
+MOTS_CAT = FRENCH_MOTS_CAT
+MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CSS HOSPITALIER
@@ -70,7 +79,7 @@ H(f"""
   <div class="app-hdr-title">AKIR-IAO v18.0 — Pro Edition</div>
   <div class="app-hdr-sub">Aide au Triage Infirmier — Urgences — Hainaut, Wallonie, Belgique</div>
   <div class="app-hdr-tags">
-    <span class="tag">FRENCH SFMU V1.1</span>
+    <span class="tag">FRENCH SFMU V1.2</span>
     <span class="tag">BCFI Belgique</span>
     <span class="tag">RGPD</span>
     <span class="tag">Dév. : Ismail Ibn-Daifa</span>
@@ -242,7 +251,7 @@ with T[2]:
 # ONGLET 4 — TRIAGE (simplifié)
 # ═══════════════════════════════════════════════════════════════════════════
 with T[3]:
-    if not motif: motif = "Fièvre"; cat = "Infectiologie"
+    if not motif: motif = "Fievre"; cat = "Infectio"
     bpco_t = "BPCO" in atcd or details.get("bpco",False)
     news2,nw = calculer_news2(fr,spo2,o2,temp,pas,fc,gcs,bpco_t)
     for w in nw: AL(w,"warning")
@@ -250,6 +259,26 @@ with T[3]:
         glt = GLYC_WIDGET("t_gl","Glycémie capillaire (mg/dl)")
         if glt: details["glycemie_mgdl"]=glt; gl_global=glt
     gl_t = details.get("glycemie_mgdl") or gl_global
+
+    proto = get_protocol(motif)
+    if proto:
+        CARD("Referentiel FRENCH v1.2", "+")
+        st.caption(f"{proto['category']} | Niveau par defaut : Tri {proto['default']}")
+        opts = get_criterion_options(motif)
+        idx = st.selectbox(
+            "Critere discriminant",
+            range(len(opts)),
+            format_func=lambda i: opts[i]["label"],
+            key=f"t_french_criterion_{proto['id'][:80]}",
+        )
+        if idx:
+            details["french_level"] = opts[idx]["level"]
+            details["french_criterion"] = opts[idx]["text"]
+        else:
+            details.pop("french_level", None)
+            details.pop("french_criterion", None)
+        CARD_END()
+
     niv,just,crit = french_triage(motif,details,fc,pas,spo2,fr,gcs,temp,age,news2,gl_t)
     N2_BANNER(news2); PURPURA(details)
     GAUGE(news2,bpco_t)

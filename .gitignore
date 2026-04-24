@@ -1,4 +1,8 @@
 .streamlit/secrets.toml
+akir_reg.json
+akir_audit.log
+akir_errors.log
+data/records/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
