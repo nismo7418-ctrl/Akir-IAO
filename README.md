@@ -1,19 +1,41 @@
-# :earth_americas: GDP dashboard template
+# 🚑 AKIR-IAO — Système Expert de Triage Urgences
 
-A simple Streamlit app showing the GDP of different countries in the world.
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://akir-iao.streamlit.app/)
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
+![Version](https://img.shields.io/badge/Version-18.0_Pro-purple.svg)
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://gdp-dashboard-template.streamlit.app/)
+**AKIR-IAO** est une application web de grade médical conçue pour assister les Infirmiers Organisateurs de l'Accueil (IAO) dans le processus de triage aux urgences.
 
-### How to run it on your own machine
+---
 
-1. Install the requirements
+## 🌟 Fonctionnalités Clés
+* **Triage Normé** : Implémentation stricte de l'algorithme **FRENCH (SFMU)**.
+* **Calculateur de Gravité** : Score **NEWS2** dynamique.
+* **Communication SBAR** : Rapports de transmission structurés.
+* **Sécurité & Audit** : Registre local persistant pour la traçabilité.
 
-   ```
-   $ pip install -r requirements.txt
-   ```
+---
 
-2. Run the app
+## 🏗️ Architecture du Projet
+```text
+├── streamlit_app.py      # Point d'entrée principal
+├── config.py             # Constantes et styles
+├── clinical/             # Logique métier
+├── persistence/          # Gestion des données
+└── ui/                   # Interface et composants
+```
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+---
+
+## 🚀 Installation Locale
+1. **Cloner le dépôt** : `git clone https://github.com/nismo7418-ctrl/Akir-IAO.git`
+2. **Installer** : `pip install -r requirements.txt`
+3. **Lancer** : `streamlit run streamlit_app.py`
+
+---
+
+## 👨‍💻 Développeur
+**Ismail Ibn-Daifa**
+
+## ⚖️ Licence
+Apache-2.0
