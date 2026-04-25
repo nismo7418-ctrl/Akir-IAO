@@ -102,6 +102,16 @@ for k, v in _DEF.items():
 
 SS = st.session_state  # Raccourci global
 
+
+def _sync_state_from_widget(widget_key: str, state_key: str) -> None:
+    """Recopie la valeur d'un widget vers l'etat canonique."""
+    SS[state_key] = SS[widget_key]
+
+
+def _mirror_state_to_widget(widget_key: str, state_key: str) -> None:
+    """Aligne un widget sur l'etat canonique avant son instanciation."""
+    SS[widget_key] = SS[state_key]
+
 # ── En-tête ───────────────────────────────────────────────────────────────────
 H("""
 <div class="app-hdr">
@@ -191,13 +201,23 @@ T = st.tabs([
 with T[0]:
     CARD("Constantes vitales", "")
     c1,c2,c3 = st.columns(3)
+    _mirror_state_to_widget("r_t", "v_temp")
+    _mirror_state_to_widget("r_fc", "v_fc")
+    _mirror_state_to_widget("r_pas", "v_pas")
+    _mirror_state_to_widget("r_sp", "v_spo2")
+    _mirror_state_to_widget("r_fr", "v_fr")
     # Écriture dans SS pour persistance inter-onglets
-    SS.v_temp = c1.number_input("Température (°C)", 30.0, 45.0, float(SS.v_temp), 0.1, key="r_t")
-    SS.v_fc   = c2.number_input("FC (bpm)",   20, 220, int(SS.v_fc),   key="r_fc")
-    SS.v_pas  = c3.number_input("PAS (mmHg)", 40, 260, int(SS.v_pas),  key="r_pas")
+    SS.v_temp = c1.number_input("Température (°C)", min_value=30.0, max_value=45.0, step=0.1,
+                                key="r_t", on_change=_sync_state_from_widget, args=("r_t", "v_temp"))
+    SS.v_fc   = c2.number_input("FC (bpm)", min_value=20, max_value=220,
+                                key="r_fc", on_change=_sync_state_from_widget, args=("r_fc", "v_fc"))
+    SS.v_pas  = c3.number_input("PAS (mmHg)", min_value=40, max_value=260,
+                                key="r_pas", on_change=_sync_state_from_widget, args=("r_pas", "v_pas"))
     c4,c5,c6 = st.columns(3)
-    SS.v_spo2 = c4.number_input("SpO2 (%)", 50, 100, int(SS.v_spo2),  key="r_sp")
-    SS.v_fr   = c5.number_input("FR (/min)",  5,  60, int(SS.v_fr),   key="r_fr")
+    SS.v_spo2 = c4.number_input("SpO2 (%)", min_value=50, max_value=100,
+                                key="r_sp", on_change=_sync_state_from_widget, args=("r_sp", "v_spo2"))
+    SS.v_fr   = c5.number_input("FR (/min)", min_value=5, max_value=60,
+                                key="r_fr", on_change=_sync_state_from_widget, args=("r_fr", "v_fr"))
     SS.v_gcs  = c6.number_input("GCS (3-15)", 3,  15, int(SS.v_gcs),  key="r_gcs")
     CARD_END()
 
@@ -244,11 +264,15 @@ with T[0]:
 with T[1]:
     CARD("Paramètres vitaux", "")
     v1,v2,v3 = st.columns(3)
-    SS.v_temp = v1.number_input("Température (°C)", 30.0, 45.0, float(SS.v_temp), 0.1, key="v_t")
-    SS.v_fc   = v1.number_input("FC (bpm)",   20, 220, int(SS.v_fc),  key="v_fc")
-    SS.v_pas  = v2.number_input("PAS (mmHg)", 40, 260, int(SS.v_pas), key="v_pas")
-    SS.v_spo2 = v2.number_input("SpO2 (%)",  50, 100, int(SS.v_spo2),key="v_sp")
-    SS.v_fr   = v3.number_input("FR (/min)",   5,  60, int(SS.v_fr),  key="v_fr")
+    _mirror_state_to_widget("v_t", "v_temp")
+    _mirror_state_to_widget("v_sp", "v_spo2")
+    SS.v_temp = v1.number_input("Température (°C)", min_value=30.0, max_value=45.0, step=0.1,
+                                key="v_t", on_change=_sync_state_from_widget, args=("v_t", "v_temp"))
+    fc_v2 = v1.number_input("FC (bpm)", min_value=20, max_value=220, key="v_fc")
+    pas_v2 = v2.number_input("PAS (mmHg)", min_value=40, max_value=260, key="v_pas")
+    SS.v_spo2 = v2.number_input("SpO2 (%)", min_value=50, max_value=100,
+                                key="v_sp", on_change=_sync_state_from_widget, args=("v_sp", "v_spo2"))
+    fr_v2 = v3.number_input("FR (/min)", min_value=5, max_value=60, key="v_fr")
     CARD_END()
 
     CARD("Glasgow Coma Scale", "")
