@@ -299,6 +299,53 @@ def VITAUX(fc: float, pas: float, spo2: float,
       f'{cols_html}</div>')
 
 
+def VITAUX(fc: float, pas: float, spo2: float,
+           fr: float, temp: float, gcs: int, bpco: bool = False) -> None:
+    """Tableau de bord des vitaux avec code couleur."""
+    from clinical.vitaux import si as shock_index  # type: ignore
+
+    sh = shock_index(fc, pas)
+    spo2_alerte = 92 if bpco else 95
+
+    def _fmt_val(val) -> str:
+        if isinstance(val, float):
+            return f"{val:.0f}" if val.is_integer() else f"{val:.1f}"
+        return str(val)
+
+    def _col(val, unit, label, low=None, high=None, inv=False):
+        ok = True
+        col = "#22C55E"
+        if low is not None and val < low:
+            ok = False
+            col = "#EF4444"
+        if high is not None and val > high:
+            ok = False
+            col = "#EF4444"
+        if inv:
+            col = "#EF4444" if ok else "#22C55E"  # inverse (ex: GCS)
+        return (f'<div style="text-align:center;padding:8px 4px;">'
+                f'<div style="font-size:1.1rem;font-weight:700;color:{col};">'
+                f'{_fmt_val(val)}{unit}</div>'
+                f'<div style="font-size:.6rem;color:#94A3B8;">{label}</div></div>')
+
+    cols_html = (
+        _col(fc, " bpm", "FC", 40, 150)
+        + _col(pas, " mmHg", "PAS", 90, 180)
+        + _col(spo2, " %", "SpO2", spo2_alerte, 100)
+        + _col(fr, "/min", "FR", 10, 30)
+        + _col(temp, " Â°C", "Temp", 35.5, 38.5)
+        + _col(gcs, "/15", "GCS", low=14, inv=True)
+        + f'<div style="text-align:center;padding:8px 4px;">'
+          f'<div style="font-size:1.1rem;font-weight:700;'
+          f'color:{"#EF4444" if sh >= 1.0 else ("#F59E0B" if sh >= 0.8 else "#22C55E")};">'
+          f'{sh}</div>'
+          f'<div style="font-size:.6rem;color:#94A3B8;">Shock Index</div></div>'
+    )
+    H(f'<div style="display:grid;grid-template-columns:repeat(7,1fr);'
+      f'background:#1E293B;border-radius:10px;margin:10px 0;">'
+      f'{cols_html}</div>')
+
+
 def SI_WIDGET(fc: float, pas: float) -> None:
     """Indicateur Shock Index."""
     sh  = round(fc / max(pas, 1), 2)
