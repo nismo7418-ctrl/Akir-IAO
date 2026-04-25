@@ -1,493 +1,596 @@
-from typing import Callable, Dict, Tuple
-from clinical.utils import norm   # ← centralisé
+# clinical/triage.py — Moteur FRENCH V1.1 — Arbres de Décision
+# AKIR-IAO v19.0 — Système Expert Grade Hospitalier
+# Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
+#
+# ARCHITECTURE
+#   Niveau 0 : Priorités Absolues (verrouillage immédiat Tri 1 / Tri M)
+#   Niveau 1 : Arbre de Décision par motif (handler spécialisé)
+#   Niveau 2 : Ajustement NEWS2 (never downgrade)
+#   Niveau 3 : Fallback sécurisé Tri 3B
+#
+# Références :
+#   Taboulet P. et al. FRENCH Triage SFMU V1.1. Juin 2018.
+#   ILAE 2015 — Singer/JAMA 2016 — ESC 2023 — BCFI Belgique
 
-from config import GLYC, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD, NEWS2_TRI_M, ORD
-from clinical.vitaux import si
-from clinical.french_v12 import get_protocol
+from __future__ import annotations
+from typing import Optional, Callable, Dict, Tuple
+from config import (
+    NEWS2_TRI_M, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD,
+    GLYC, AVC_DELAI_THROMBOLYSE_H,
+    EME_SEUIL_MIN, EME_OPERATIONNEL_MIN, EME_ETABLI_MIN,
+    FIEVRE_TRES_HAUTE_ENFANT, FIEVRE_NOURR_SEUIL,
+    FC_TACHY_NOURR, FC_TACHY_BEBE, FC_TACHY_ENFANT, FC_TACHY_GRAND,
+    SIPA_0_1AN, SIPA_1_4ANS, SIPA_4_7ANS, SIPA_7_12ANS,
+)
 
-TriageResult = Tuple[str, str, str]
-Handler = Callable[..., TriageResult]
+TriageResult = Tuple[str, str, str]   # (niveau, justification, référence)
+Handler      = Callable[..., TriageResult]
 
-# _norm supprimée, utiliser `norm` du module utils
+# Ordre de sévérité des niveaux FRENCH
+_ORD: Dict[str, int] = {"M":0,"1":1,"2":2,"3A":3,"3B":4,"4":5,"5":6}
 
-def _has(items, label: str) -> bool:
-    labels = {norm(x) for x in (items or [])}
-    return norm(label) in labels
 
-def _truthy(det: dict, *keys: str) -> bool:
-    nd = {norm(k): v for k, v in (det or {}).items()}
-    return any(bool(nd.get(norm(k))) for k in keys)
+def _norm(s: str) -> str:
+    """Normalise un motif pour lookup insensible à la casse."""
+    import unicodedata
+    return unicodedata.normalize("NFD", s.lower()).encode("ascii","ignore").decode()
 
-def _value(det: dict, key: str, default=None):
-    nd = {norm(k): v for k, v in (det or {}).items()}
-    return nd.get(norm(key), default)
 
 def _more_urgent(a: TriageResult, b: TriageResult) -> TriageResult:
-    return a if ORD.get(a[0], 99) <= ORD.get(b[0], 99) else b
+    """Retourne le résultat le plus urgent des deux (jamais downgrade)."""
+    return a if _ORD.get(a[0], 9) <= _ORD.get(b[0], 9) else b
 
-def _selected_french_result(motif: str, det: dict) -> TriageResult | None:
-    level = _value(det, "french_level")
-    if not level:
-        return None
-    level = str(level)
-    protocol = get_protocol(motif) or {}
-    criterion = _value(det, "french_criterion", "") or protocol.get("motif", motif)
-    return level, f"FRENCH v1.2 - {criterion}", "FRENCH v1.2"
 
-# ---------------------------------------------------------------------
-# Gestionnaires corrigés
-# ---------------------------------------------------------------------
+def _truthy(d: dict, *keys) -> bool:
+    """Retourne True si l'une des clés est truthy dans le dict."""
+    return any(d.get(k) for k in keys)
 
-def _triage_acr(**_) -> TriageResult:
-    return "1", "ACR confirme - RCP immediate", "FRENCH Tri 1"
 
-def _triage_hypotension(pas, fc, **_) -> TriageResult:
-    if pas <= 70:
-        return "1", f"PAS {pas} mmHg <= 70 - collapsus", "FRENCH Tri 1"
-    if pas <= 90 or (pas <= 100 and fc > 100):
-        return "2", f"PAS {pas} mmHg - choc debutant", "FRENCH Tri 2"
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRIORITÉS ABSOLUES — Niveau 0 — Verrouillage immédiat
+# Ces critères court-circuitent TOUT le reste du moteur.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_CRITERES_ABSOLUS_M = [
+    # (clé_dans_det, description_alerte)
+    ("acr",               "ACR confirmé — RCP en cours"),
+    ("arret_respiratoire","Arrêt respiratoire — ventilation immédiate"),
+]
+
+_CRITERES_ABSOLUS_1 = [
+    ("purpura",           "Purpura non effaçable — Ceftriaxone 2 g IV IMMÉDIAT"),
+    ("neff",              "Purpura non effaçable — Ceftriaxone 2 g IV IMMÉDIAT"),
+    ("torsion_testiculaire","Torsion testiculaire — Chirurgie dans les 6 h"),
+    ("cephalee_foudroyante","Céphalée foudroyante — HSA suspectée — TDM urgent"),
+    ("bilieux",           "Vomissements bilieux — Occlusion / volvulus — Chirurgie urgente"),
+    ("eme_etabli",        f"EME établi > {EME_ETABLI_MIN} min — Réanimation pédiatrique"),
+    ("ischémie_distale",  "Ischémie distale — Urgence vasculaire"),
+    ("otorragie",         "Otorragie — Fracture base du crâne suspectée"),
+    ("ecg_stemi",         "Sus-décalage ST — SCA STEMI — Filière cathlab"),
+    ("dissection_aortique","Dissection aortique suspectée — Angio-TDM urgent"),
+]
+
+
+def _check_priorites_absolues(
+    det: dict, gcs: int, pas: float, spo2: float, fr: float
+) -> Optional[TriageResult]:
+    """
+    Vérifie les critères de verrouillage absolu.
+    Retourne un TriageResult si verrouillé, None sinon.
+    Cet ordre est délibéré et cliniquement validé.
+    """
+    # Tri M — engagement vital immédiat
+    for key, msg in _CRITERES_ABSOLUS_M:
+        if det.get(key):
+            return "M", msg, "FRENCH Tri M — Priorité absolue"
+    if gcs <= 3:
+        return "M", "GCS 3 — Coma profond — Engagement vital", "FRENCH Tri M"
+    if spo2 < 70 or fr >= 50:
+        return "M", f"SpO2 {spo2:.0f} % ou FR {fr:.0f}/min — Détresse respiratoire extrême", "FRENCH Tri M"
+
+    # Tri 1 — urgence extrême
+    for key, msg in _CRITERES_ABSOLUS_1:
+        if det.get(key):
+            return "1", msg, "FRENCH Tri 1 — Priorité absolue"
+    if pas <= 60:
+        return "1", f"PAS {pas:.0f} mmHg ≤ 60 — Collapsus vasculaire", "FRENCH Tri 1"
+    if gcs <= 8:
+        return "1", f"GCS {gcs}/15 — Altération sévère de la conscience", "FRENCH Tri 1"
+    if spo2 < 82:
+        return "1", f"SpO2 {spo2:.0f} % — Hypoxémie sévère — O2 urgent", "FRENCH Tri 1"
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ARBRES DE DÉCISION — Niveau 1
+# Chaque handler reçoit l'intégralité du contexte patient.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _h_acr(**_) -> TriageResult:
+    return "M", "ACR — RCP en cours", "FRENCH Tri M"
+
+
+def _h_hypotension(pas, fc, det, **_) -> TriageResult:
+    sh = round(fc / max(pas, 1), 2)
+    if pas <= 70 or sh >= 1.2:
+        return "1", f"PAS {pas:.0f} mmHg — Shock Index {sh} — Choc sévère", "FRENCH Tri 1"
+    if pas <= 90 or sh >= 1.0 or (pas <= 100 and fc > 110):
+        return "2", f"PAS {pas:.0f} mmHg — SI {sh} — Choc débutant", "FRENCH Tri 2"
     if pas <= 100:
-        return "3B", f"PAS {pas} mmHg - valeur limite", "FRENCH Tri 3B"
-    return "4", "PAS normale", "FRENCH Tri 4"
+        return "3B", f"PAS {pas:.0f} mmHg — Hypotension orthostatique probable", "FRENCH Tri 3B"
+    return "4", "Tension dans les normes", "FRENCH Tri 4"
 
-def _triage_sca(fc, spo2, det, **_) -> TriageResult:
-    ecg = _value(det, "ecg", "Normal")
-    doul = _value(det, "douleur", "Atypique")
-    if ecg == "Anormal typique SCA" or "typique" in norm(doul):
-        return "1", "SCA - ECG anormal ou douleur typique", "FRENCH Tri 1"
-    if _truthy(det, "douleur_intense", "douleur persistante"):
-        return "2", "Douleur thoracique intense ou persistante", "FRENCH Tri 2"
-    if fc >= 120 or spo2 < 94:
-        return "2", "Douleur thoracique instable", "FRENCH Tri 2"
-    if _value(det, "frcv", 0) >= 2:
-        return "2", "Douleur coronaire probable avec facteurs de risque", "FRENCH Tri 2"
-    return "3A", "Douleur thoracique stable", "FRENCH Tri 3A"
 
-def _triage_arythmie(fc, det, **_) -> TriageResult:
+def _h_sca(fc, spo2, det, **_) -> TriageResult:
     """
-    Aligné sur FRENCH v1.2 :
-      - Bradycardie : FC <=40 → 1 ; 40-50 et mauvaise tolérance → 2 ; 40-50 sans tolérance → 3B
-      - Tachycardie : FC >=180 → 1 ; FC >=130 → 2 ; FC >110 → 3B ; résolutif → 4
+    Arbre de décision SCA — 4 niveaux basés sur ECG + caractère douleur + FRCV.
+    Le score HEART > 6 force le Tri 1.
     """
-    # Déterminer si brady ou tachy selon le motif (on le sait par le contexte, mais ici on teste les deux seuils)
-    # Le motif peut être "Tachycardie / tachyarythmie" ou "Bradycardie / bradyarythmie" ou "Palpitations".
-    # On utilise les paramètres indépendamment du texte ; ci-dessous on suit le protocole pour les deux régimes.
-    # Pour la bradycardie :
-    if fc <= 40:
-        return "1", f"FC {fc} bpm - bradycardie extreme", "FRENCH Tri 1"
-    if fc < 50:  # 40 < FC < 50
-        if _truthy(det, "tol_mal", "mauvaise tolerance", "syncope", "douleur"):
-            return "2", f"FC {fc} bpm - bradycardie mal toleree", "FRENCH Tri 2"
-        return "3B", f"FC {fc} bpm - bradycardie asymptomatique", "FRENCH Tri 3B"
+    ecg   = det.get("ecg", "Normal")
+    doul  = det.get("douleur_type", "Atypique")
+    frcv  = det.get("frcv", 0)
+    trop  = det.get("troponine_positive", False) or det.get("trop", False)
+    heart = det.get("heart_score", 0)
+    stemi = ecg in ("Anormal typique SCA", "Sus-décalage ST / STEMI")
 
-    # Pour la tachycardie (arrivés ici fc >= 50)
-    if fc >= 180:
-        return "1", f"FC {fc} bpm - tachycardie extreme", "FRENCH Tri 1"
-    if fc >= 130:
-        return "2", f"FC {fc} bpm - tachycardie severe", "FRENCH Tri 2"
-    if fc > 110:
-        return "3B", f"FC {fc} bpm - tachycardie moderee", "FRENCH Tri 3B"
-    # Épisode résolutif (fc normale) – mais le protocole prévoit Tri 4 si résolutif
-    return "4", "Episode resolutif ou FC normale", "FRENCH Tri 4"
+    if stemi or heart >= 7:
+        return "1", f"ECG STEMI ou HEART {heart} — Filière cathlab", "FRENCH Tri 1"
+    if ecg == "Anormal non typique" or doul == "Typique (constrictive, irradiante)" or trop:
+        return "2", "ECG anormal ou douleur typique ou troponine +" , "FRENCH Tri 2"
+    if frcv >= 3 or det.get("coronaropathie_connue") or heart >= 4:
+        return "3A", f"{frcv} FRCV — Probabilité coronaire à évaluer", "FRENCH Tri 3A"
+    if doul == "Coronaire probable" or heart >= 2:
+        return "3B", "Douleur thoracique atypique — Bilan", "FRENCH Tri 3B"
+    return "4", "Douleur atypique sans critère de gravité", "FRENCH Tri 4"
 
-def _triage_hta(pas, fc, det, **_) -> TriageResult:
-    if pas >= 220:
-        return "2", f"PAS {pas} mmHg >= 220 - urgence hypertensive", "FRENCH Tri 2"
-    if _truthy(det, "sf", "neuro", "douleur thoracique", "dyspnee") or (pas >= 180 and fc > 100):
-        return "2", "HTA avec signes fonctionnels", "FRENCH Tri 2"
+
+def _h_arythmie(fc, det, **_) -> TriageResult:
+    if fc >= 200 or fc <= 25:
+        return "1", f"FC {fc} bpm — Arythmie extrême", "FRENCH Tri 1"
+    if fc >= 150 or fc <= 35:
+        return "2", f"FC {fc} bpm — Arythmie sévère", "FRENCH Tri 2"
+    if det.get("mauvaise_tolerance") or det.get("syncope") or det.get("douleur_thora"):
+        return "2", "Arythmie mal tolérée", "FRENCH Tri 2"
+    if fc >= 130 or fc <= 45:
+        return "3A", f"FC {fc} bpm — Surveillance rapprochée", "FRENCH Tri 3A"
+    return "3B", f"FC {fc} bpm — Arythmie tolérée", "FRENCH Tri 3B"
+
+
+def _h_hta(pas, det, **_) -> TriageResult:
+    sf = det.get("sf_associes", False)
+    if pas >= 220 or (pas >= 180 and sf):
+        return "2", f"PAS {pas:.0f} mmHg — Urgence hypertensive", "FRENCH Tri 2"
     if pas >= 180:
-        return "3B", "HTA severe sans signe fonctionnel", "FRENCH Tri 3B"
-    return "4", "HTA moderee", "FRENCH Tri 4"
+        return "3B", f"PAS {pas:.0f} mmHg — HTA sévère sans signe fonctionnel", "FRENCH Tri 3B"
+    return "4", f"PAS {pas:.0f} mmHg — HTA modérée", "FRENCH Tri 4"
 
-def _triage_anaphylaxie(spo2, pas, gcs, det, **_) -> TriageResult:
-    if spo2 < 94 or pas < 90 or gcs < 15:
-        return "1", "Anaphylaxie severe - engagement systemique", "FRENCH Tri 1"
-    if _truthy(det, "dyspnee", "urticaire", "oedeme", "vomissements"):
-        return "2", "Allergie systemique", "FRENCH Tri 2"
-    return "3B", "Reaction allergique localisee", "FRENCH Tri 3B"
 
-def _triage_dyspnee(spo2, fr, det, **_) -> TriageResult:
-    bpco = _truthy(det, "bpco")
-    cible = 92 if bpco else 95
-    seuil_crit = 88 if bpco else 91
-    if spo2 < seuil_crit or fr >= 40:
-        return "1", f"Detresse respiratoire SpO2 {spo2}% FR {fr}/min", "FRENCH Tri 1"
-    if spo2 < cible or fr >= 30 or _truthy(det, "parole impossible", "mots isoles"):
-        return "2", f"Dyspnee severe SpO2 {spo2}%", "FRENCH Tri 2"
-    if _truthy(det, "orthopnee", "tirage", "cyanose"):
-        return "2", "Orthopnee, tirage ou cyanose", "FRENCH Tri 2"
-    return "3B", f"Dyspnee moderee SpO2 {spo2}%", "FRENCH Tri 3B"
+def _h_anaphylaxie(spo2, pas, gcs, det, **_) -> TriageResult:
+    if spo2 < 94 or pas < 90 or gcs < 15 or det.get("stridor"):
+        return "1", "Anaphylaxie sévère — Adrénaline IM — Engagement systémique", "FRENCH Tri 1"
+    if det.get("dyspnee") or det.get("urticaire_gen"):
+        return "2", "Anaphylaxie — Réaction systémique", "FRENCH Tri 2"
+    return "3B", "Réaction allergique localisée", "FRENCH Tri 3B"
 
-def _triage_abdomen(fc, pas, det, **_) -> TriageResult:
-    shock = si(fc, pas)
-    if pas < 90 or shock >= 1.0:
-        return "2", f"Douleur abdominale avec choc (SI {shock})", "FRENCH Tri 2"
-    if _truthy(det, "grossesse", "geu"):
-        return "2", "Douleur abdominale sur grossesse - GEU a exclure", "FRENCH Tri 2"
-    if _truthy(det, "defense", "contracture"):
-        return "2", "Abdomen chirurgical", "FRENCH Tri 2"
-    if _truthy(det, "tol_mal", "vomissements incoercibles"):
-        return "3A", "Douleur abdominale mal toleree", "FRENCH Tri 3A"
-    return "3B", "Douleur abdominale toleree", "FRENCH Tri 3B"
 
-def _triage_digestif(fc, pas, det, **_) -> TriageResult:
-    shock = si(fc, pas)
-    if pas < 90 or shock >= 1.0 or _truthy(det, "deshydratation severe"):
-        return "2", f"Trouble digestif avec signe de gravite (SI {shock})", "FRENCH Tri 2"
-    if _truthy(det, "vomissements incoercibles", "sang", "douleur intense"):
-        return "3A", "Vomissements/diarrhee mal toleres", "FRENCH Tri 3A"
-    return "4", "Vomissements/diarrhee bien toleres", "FRENCH Tri 4"
+def _h_avc(gcs, det, **_) -> TriageResult:
+    """Arbre AVC — délai thrombolyse comme critère pivot."""
+    delai = det.get("delai_heures", 99)
+    def_ = det.get("deficit_moteur") or det.get("aphasie") or det.get("deficit_sensitif")
+    if delai <= AVC_DELAI_THROMBOLYSE_H and def_:
+        return "1", f"AVC à {delai} h — Fenêtre thrombolyse — Filière Stroke IMMÉDIATE", "FRENCH Tri 1"
+    if det.get("deficit_progressif") or gcs < 15:
+        return "2", "Déficit progressif ou GCS < 15", "FRENCH Tri 2"
+    if def_:
+        return "2", "Déficit neurologique — Bilan urgent", "FRENCH Tri 2"
+    return "2", "Déficit neurologique — Évaluation urgente", "FRENCH Tri 2"
 
-def _triage_hemo_digestive(fc, pas, det, **_) -> TriageResult:
-    shock = si(fc, pas)
-    if pas < 90 or shock >= 1.0 or _truthy(det, "malaise", "syncope"):
-        return "1", f"Hemorragie digestive instable (SI {shock})", "FRENCH Tri 1"
-    if fc >= 110 or _truthy(det, "abondant", "melena"):
-        return "2", "Hemorragie digestive probable", "FRENCH Tri 2"
-    return "3A", "Saignement digestif stable", "FRENCH Tri 3A"
 
-def _triage_colique(pas, gcs, det, **_) -> TriageResult:
-    if gcs < 15 or pas < 90:
-        return "2", "Douleur lombaire avec alteration clinique", "FRENCH Tri 2"
-    if _truthy(det, "fievre", "anurie", "rein unique", "grossesse"):
-        return "2", "Colique nephretique compliquee", "FRENCH Tri 2"
-    if _truthy(det, "eva forte", "vomissements"):
-        return "3A", "Colique nephretique mal toleree", "FRENCH Tri 3A"
-    return "3B", "Colique nephretique stable", "FRENCH Tri 3B"
-
-def _triage_avc(gcs, det, **_) -> TriageResult:
-    delai = _value(det, "delai", 99)
-    try:
-        delai = float(delai)
-    except (TypeError, ValueError):
-        delai = 99
-    if delai <= 4.5:
-        return "1", f"AVC {delai:g} h - fenetre thrombolyse", "FRENCH Tri 1"
-    if delai <= 24:
-        return "2", f"AVC {delai:g} h - filiere neurovasculaire urgente", "FRENCH Tri 2"
-    # Au-delà de 24h, suivre le protocole : 3B avec avis référent, sauf si déficit progressif ou GCS <15
-    if _truthy(det, "def_prog", "deficit progressif") or gcs < 15:
-        return "2", "Deficit progressif ou alteration GCS", "FRENCH Tri 2"
-    return "3B", "Deficit neurologique - avis referent (delai > 24h)", "FRENCH Tri 3B"
-
-def _triage_tc(gcs, det, **_) -> TriageResult:
+def _h_tc(gcs, det, **_) -> TriageResult:
+    """Arbre TC — Règle Canadienne et facteurs de risque."""
     if gcs <= 8:
-        return "1", f"TC grave - GCS {gcs}/15", "FRENCH Tri 1"
-    if gcs <= 12 or _truthy(det, "aod", "anticoagulant", "convulsion", "vomissements repetes", "otorragie"):
-        return "2", f"TC GCS {gcs}/15 ou critere TDM urgent", "FRENCH Tri 2"
-    if _truthy(det, "pdc", "perte de connaissance"):
-        return "3A", "TC avec perte de connaissance", "FRENCH Tri 3A"
-    return "4", "TC benin", "FRENCH Tri 4"
+        return "1", f"TC grave — GCS {gcs}/15", "FRENCH Tri 1"
+    # Facteurs haut risque règle canadienne
+    hr = (gcs < 15 or det.get("vomissements_rep") or
+          det.get("suspicion_skull") or det.get("age_gte65_tc"))
+    if hr or det.get("aod") or det.get("convulsion_post") or det.get("otorragie"):
+        return "2", "TC — Critère TDM urgent (règle canadienne / AOD)", "FRENCH Tri 2"
+    if gcs <= 12 or det.get("pdc"):
+        return "3A", f"TC — GCS {gcs}/15 ou PDC", "FRENCH Tri 3A"
+    return "4", "TC bénin — Pas de critère d'imagerie", "FRENCH Tri 4"
 
-def _triage_coma(gcs, gl, **_) -> TriageResult:
+
+def _h_coma(gcs, gl, det, **_) -> TriageResult:
     if gl and gl < GLYC["hs"]:
-        return "2", f"Hypoglycemie {gl} mg/dl - glucose IV", "FRENCH Tri 2"
+        return "2", f"Coma hypoglycémique {gl:.0f} mg/dl — Glucose 30 % IV", "FRENCH Tri 2"
     if gcs <= 8:
-        return "1", f"Coma profond - GCS {gcs}/15", "FRENCH Tri 1"
-    if gcs <= 13:
-        return "2", f"Alteration de conscience - GCS {gcs}/15", "FRENCH Tri 2"
-    return "2", "Alteration de conscience", "FRENCH Tri 2"   # prudent pour GCS 14
+        return "1", f"Coma — GCS {gcs}/15", "FRENCH Tri 1"
+    if gcs <= 12:
+        return "2", f"Altération de conscience — GCS {gcs}/15", "FRENCH Tri 2"
+    return "2", "Altération légère de conscience — Évaluation urgente", "FRENCH Tri 2"
 
-def _triage_cephalee(det, **_) -> TriageResult:
-    if _truthy(det, "brutal", "foudroyante"):
-        return "1", "Cephalee foudroyante - HSA suspectee", "FRENCH Tri 1"
-    if _truthy(det, "nuque", "fievre", "deficit", "confusion"):
-        return "2", "Cephalee avec signe de gravite", "FRENCH Tri 2"
-    return "3B", "Cephalee sans signe de gravite", "FRENCH Tri 3B"
 
-def _triage_convulsions(det, gcs, **_) -> TriageResult:
-    if _truthy(det, "en_cours", "multi", "etat de mal"):
-        return "2", "Crise en cours, multiple ou EME", "FRENCH Tri 2"
-    if _truthy(det, "tc", "traumatisme cranien"):
-        return "2", "Convulsion apres traumatisme cranien", "FRENCH Tri 2"
-    if _truthy(det, "confusion", "conf") or gcs < 15:
-        return "2", "Confusion post-critique persistante", "FRENCH Tri 2"
-    return "3B", "Convulsion recuperee", "FRENCH Tri 3B"
-
-def _triage_confusion(gcs, temp, det, **_) -> TriageResult:
-    if gcs <= 13:
-        return "2", f"Syndrome confusionnel avec GCS {gcs}/15", "FRENCH Tri 2"
-    if temp >= 38.5 or _truthy(det, "brutal", "agitation"):
-        return "2", "Confusion aigue avec facteur de gravite", "FRENCH Tri 2"
-    return "3A", "Syndrome confusionnel stable", "FRENCH Tri 3A"
-
-def _triage_malaise(n2, gl, det, **_) -> TriageResult:
+def _h_convulsions(det, gl, **_) -> TriageResult:
     if gl and gl < GLYC["hs"]:
-        return "2", f"Malaise hypoglycemique {gl} mg/dl", "FRENCH Tri 2"
-    if n2 >= 2 or _truthy(det, "anom_vit", "douleur thoracique", "syncope effort"):
-        return "2", "Malaise avec anomalie vitale ou signe d'alerte", "FRENCH Tri 2"
-    return "3B", "Malaise recupere", "FRENCH Tri 3B"
+        return "2", f"Convulsions + hypoglycémie {gl:.0f} mg/dl — Cause curable", "FRENCH Tri 2"
+    if det.get("crises_multiples") or det.get("en_cours"):
+        return "2", "EME ou crises multiples — Benzodiazépines", "FRENCH Tri 2"
+    if det.get("confusion_post") or det.get("deficit_focal"):
+        return "2", "Confusion post-critique ou déficit focal", "FRENCH Tri 2"
+    return "3B", "Convulsion récupérée sans critère de gravité", "FRENCH Tri 3B"
 
-def _triage_trauma_axial(fc, pas, spo2, det, **_) -> TriageResult:
-    if _truthy(det, "penetrant", "pen") or norm(_value(det, "cin", "")) == "haute":
-        return "1", "Traumatisme penetrant ou haute cinetique", "FRENCH Tri 1"
-    if si(fc, pas) >= 1.0 or spo2 < 94:
-        return "2", f"Traumatisme avec signe de choc SI {si(fc, pas)}", "FRENCH Tri 2"
-    return "2", "Traumatisme axial - evaluation urgente", "FRENCH Tri 2"
 
-def _triage_trauma_distal(det, **_) -> TriageResult:
-    if _truthy(det, "isch", "ischemie"):
-        return "1", "Ischemie distale", "FRENCH Tri 1"
-    if _truthy(det, "impotence", "imp") and _truthy(det, "deformation", "deform"):
-        return "2", "Fracture deplacee avec impotence totale", "FRENCH Tri 2"
-    if _truthy(det, "impotence", "imp", "deformation", "deform"):
-        return "3A", "Traumatisme distal avec impotence ou deformation", "FRENCH Tri 3A"
-    return "4", "Traumatisme distal modere", "FRENCH Tri 4"
+def _h_cephalee(det, **_) -> TriageResult:
+    """Arbre céphalée — céphalée foudroyante = HSA jusqu'à preuve du contraire."""
+    if det.get("brutale") or det.get("cephalee_foudroyante"):
+        return "1", "Céphalée foudroyante — HSA suspectée — TDM urgent", "FRENCH Tri 1"
+    if det.get("nuque") or det.get("fievre_assoc") or det.get("deficit_neuro"):
+        return "2", "Céphalée avec signes méningés ou déficit", "FRENCH Tri 2"
+    if det.get("inhabituelle") or det.get("premiere_episode"):
+        return "3A", "Céphalée inhabituelle — 1er épisode — Bilan", "FRENCH Tri 3A"
+    return "3B", "Céphalée habituelle sans signe de gravité", "FRENCH Tri 3B"
 
-def _triage_hemorragie(fc, pas, det, **_) -> TriageResult:
-    shock = si(fc, pas)
-    if pas < 90 or shock >= 1.0 or _truthy(det, "massive", "incontrolable"):
-        return "1", f"Hemorragie active instable (SI {shock})", "FRENCH Tri 1"
-    if fc >= 110 or _truthy(det, "anticoagulant", "aod"):
-        return "2", "Hemorragie active stable mais a risque", "FRENCH Tri 2"
-    return "3A", "Hemorragie active controlee", "FRENCH Tri 3A"
 
-def _triage_fievre(fc, pas, temp, det, **_) -> TriageResult:
-    if _truthy(det, "purpura", "neff"):
-        return "1", "Fievre + purpura - ceftriaxone immediate", "FRENCH Tri 1"
-    if temp >= 40 or temp <= 35.2 or _truthy(det, "confusion", "conf"):
-        return "2", f"Fievre avec critere de gravite (T {temp} C)", "FRENCH Tri 2"
-    if _truthy(det, "tol_mal") or pas < 100 or si(fc, pas) >= 1.0:
-        return "3B", "Fievre mal toleree", "FRENCH Tri 3B"
-    return "5", "Fievre bien toleree", "FRENCH Tri 5"
+def _h_dyspnee(spo2, fr, det, **_) -> TriageResult:
+    bpco = det.get("bpco", False)
+    s_min = 88 if bpco else 91
+    s_cib = 92 if bpco else 95
+    if spo2 < s_min or fr >= 40 or det.get("silence_auscultatoire"):
+        return "1", f"Détresse respiratoire — SpO2 {spo2:.0f} % FR {fr:.0f}/min", "FRENCH Tri 1"
+    if spo2 < s_cib or fr >= 30:
+        return "2", f"Dyspnée sévère — SpO2 {spo2:.0f} %", "FRENCH Tri 2"
+    if not det.get("parole_ok", True) or det.get("orthopnee") or det.get("tirage"):
+        return "2", "Dyspnée à la parole / orthopnée / tirage", "FRENCH Tri 2"
+    return "3B", f"Dyspnée modérée tolérée — SpO2 {spo2:.0f} %", "FRENCH Tri 3B"
 
-def _triage_ped_fievre_nourr(temp, age, **_) -> TriageResult:
-    if age <= 0.25 and temp >= 38.0:
-        return "2", "Nourrisson <= 3 mois febrile", "FRENCH Pediatrie Tri 2"
-    return "3A", "Nourrisson avec suspicion infectieuse", "FRENCH Pediatrie Tri 3A"
 
-def _fc_tachy_ped(age) -> int:
-    if age < 1 / 12:
-        return 160
-    if age < 1:
-        return 150
-    if age < 5:
-        return 140
-    return 120
+def _h_abdomen(fc, pas, det, **_) -> TriageResult:
+    sh = round(fc / max(pas, 1), 2)
+    if sh >= 1.0 or pas < 90 or det.get("contracture"):
+        return "2", f"Abdomen chirurgical — SI {sh} ou contracture", "FRENCH Tri 2"
+    if det.get("grossesse") or det.get("geu"):
+        return "2", "Douleur abdominale sur grossesse — GEU à éliminer", "FRENCH Tri 2"
+    if det.get("defense") or det.get("mauvaise_tolerance"):
+        return "3A", "Défense abdominale ou douleur sévère", "FRENCH Tri 3A"
+    if det.get("regressive"):
+        return "4", "Douleur abdominale régressive", "FRENCH Tri 4"
+    return "3B", "Douleur abdominale tolérée", "FRENCH Tri 3B"
 
-def _triage_ped_fievre(fc, temp, age, det, **_) -> TriageResult:
-    if _truthy(det, "purpura", "neff"):
-        return "1", "Fievre pediatrique + purpura", "FRENCH Pediatrie Tri 1"
-    if temp >= 40 or _truthy(det, "somnolence", "geignement", "marbrures"):
-        return "2", "Fievre enfant avec signe de gravite", "FRENCH Pediatrie Tri 2"
-    if fc >= _fc_tachy_ped(age):
-        return "3A", "Fievre enfant avec tachycardie", "FRENCH Pediatrie Tri 3A"
-    return "4", "Fievre enfant bien toleree", "FRENCH Pediatrie Tri 4"
 
-def _triage_ped_gastro(fc, pas, age, det, **_) -> TriageResult:
-    if _truthy(det, "deshydratation severe", "lethargie", "sang"):
-        return "2", "Gastro-enterite pediatrique avec signe de gravite", "FRENCH Pediatrie Tri 2"
-    if _value(det, "vomissements_h", 0) >= 6 or fc >= _fc_tachy_ped(age):
-        return "3A", "Vomissements frequents ou tachycardie", "FRENCH Pediatrie Tri 3A"
-    if pas < 70 + 2 * max(age, 1):
-        return "2", "Suspicion choc pediatrique", "FRENCH Pediatrie Tri 2"
-    return "4", "Gastro-enterite pediatrique toleree", "FRENCH Pediatrie Tri 4"
+def _h_colique(fc, pas, det, **_) -> TriageResult:
+    if det.get("fievre") and det.get("douleur_lombaire"):
+        return "1", "Colique + fièvre — Pyélonéphrite obstructive — Chirurgie urgente", "FRENCH Tri 1"
+    if det.get("anurie") or pas < 90:
+        return "2", "Colique + anurie ou hypotension", "FRENCH Tri 2"
+    if det.get("intense") or det.get("mauvaise_tolerance"):
+        return "2", "Colique mal tolérée — Antalgie IV urgente", "FRENCH Tri 2"
+    return "3A", "Colique tolérée — Antalgie orale + imagerie", "FRENCH Tri 3A"
 
-def _triage_ped_epilepsie(gcs, det, **_) -> TriageResult:
-    if _truthy(det, "en_cours", "etat de mal") or gcs < 15:
-        return "2", "Crise epileptique pediatrique active ou non recuperee", "FRENCH Pediatrie Tri 2"
-    if _truthy(det, "premiere crise", "fievre"):
-        return "3A", "Crise pediatrique a evaluer", "FRENCH Pediatrie Tri 3A"
-    return "3B", "Crise pediatrique recuperee", "FRENCH Pediatrie Tri 3B"
 
-def _triage_ped_asthme(spo2, fr, det, **_) -> TriageResult:
-    if spo2 < 92 or fr >= 40 or _truthy(det, "silence auscultatoire", "epuisement"):
-        return "1", "Asthme pediatrique severe", "FRENCH Pediatrie Tri 1"
-    if spo2 < 95 or _truthy(det, "tirage", "parole impossible"):
-        return "2", "Asthme pediatrique avec detresse", "FRENCH Pediatrie Tri 2"
-    return "3A", "Bronchospasme pediatrique modere", "FRENCH Pediatrie Tri 3A"
+def _h_fievre(fc, pas, temp, det, **_) -> TriageResult:
+    if det.get("purpura"):
+        return "1", "Fièvre + purpura — Ceftriaxone 2 g IV IMMÉDIAT", "FRENCH Tri 1"
+    if temp >= 40 or temp <= 35.2 or det.get("confusion"):
+        return "2", f"Fièvre {temp:.1f} °C avec critère de gravité", "FRENCH Tri 2"
+    if round(fc / max(pas, 1), 2) >= 1.0 or det.get("hypotension_fiev"):
+        return "2", "Fièvre avec instabilité hémodynamique", "FRENCH Tri 2"
+    if det.get("mauvaise_tolerance"):
+        return "3B", "Fièvre mal tolérée", "FRENCH Tri 3B"
+    return "5", "Fièvre bien tolérée", "FRENCH Tri 5"
 
-def _triage_purpura(temp, det, **_) -> TriageResult:
-    if _truthy(det, "purpura", "neff", "non effacable"):
-        return "1", "Purpura non effacable - ceftriaxone immediate", "SPILF/SFP"
-    if temp >= 38.0:
-        return "2", "Purpura febrile - suspicion fulminans", "FRENCH Tri 2"
-    return "3B", "Petechies - bilan hemostase", "FRENCH Tri 3B"
 
-def _triage_erytheme(temp, det, **_) -> TriageResult:
-    if temp >= 38.5 or _truthy(det, "extension rapide", "necrose", "douleur intense"):
-        return "2", "Erytheme etendu avec signe de gravite", "FRENCH Tri 2"
-    return "3B", "Erytheme etendu stable", "FRENCH Tri 3B"
+def _h_hemorragie(fc, pas, det, **_) -> TriageResult:
+    sh = round(fc / max(pas, 1), 2)
+    if sh >= 1.0 or pas < 90:
+        return "1", f"Choc hémorragique — SI {sh} — Acide tranexamique < 3 h", "CRASH-2 / FRENCH Tri 1"
+    if det.get("hemoptysie_mas") or det.get("hematemese") or det.get("abondante_active"):
+        return "2", "Hémorragie digestive / respiratoire haute active", "FRENCH Tri 2"
+    if sh >= 0.8:
+        return "2", f"Hémorragie — SI {sh} — Instabilité débutante", "FRENCH Tri 2"
+    return "3A", "Hémorragie active tolérée — Surveillance rapprochée", "FRENCH Tri 3A"
 
-def _triage_accouchement(det, **_) -> TriageResult:
-    if _truthy(det, "poussee", "tete visible", "contractions rapprochees"):
-        return "1", "Accouchement imminent", "FRENCH Tri 1"
-    return "2", "Travail obstetrical probable", "FRENCH Tri 2"
 
-def _triage_grossesse(det, pas, **_) -> TriageResult:
-    if pas < 90 or _truthy(det, "douleur intense", "saignement abondant", "syncope"):
-        return "2", "Complication de grossesse avec signe de gravite", "FRENCH Tri 2"
-    return "3A", "Complication de grossesse stable", "FRENCH Tri 3A"
+def _h_trauma_axial(fc, pas, spo2, det, **_) -> TriageResult:
+    if det.get("penetrant") or det.get("cinetique") == "Haute":
+        return "1", "Traumatisme pénétrant ou haute cinétique — Déchocage", "FRENCH Tri 1"
+    sh = round(fc / max(pas, 1), 2)
+    if sh >= 1.0 or spo2 < 94:
+        return "2", f"Traumatisme axial — Choc (SI {sh})", "FRENCH Tri 2"
+    if det.get("mauvaise_tolerance"):
+        return "3A", "Traumatisme axial — Mauvaise tolérance", "FRENCH Tri 3A"
+    return "3B", "Traumatisme axial — Basse cinétique", "FRENCH Tri 3B"
 
-def _triage_metrorragie(fc, pas, det, **_) -> TriageResult:
-    shock = si(fc, pas)
-    if pas < 90 or shock >= 1.0 or _truthy(det, "abondant", "grossesse"):
-        return "2", "Saignement gynecologique a risque", "FRENCH Tri 2"
-    return "3A", "Metrorragie stable", "FRENCH Tri 3A"
 
-def _triage_hypoglycemie(gcs, gl, **_) -> TriageResult:
+def _h_trauma_distal(det, **_) -> TriageResult:
+    if det.get("ischemie") or det.get("ischémie_distale"):
+        return "1", "Ischémie distale — Urgence vasculaire", "FRENCH Tri 1"
+    if det.get("impotence_totale") and det.get("deformation"):
+        return "2", "Fracture déplacée avec impotence totale", "FRENCH Tri 2"
+    if det.get("impotence_totale"):
+        return "3A", "Impotence fonctionnelle totale", "FRENCH Tri 3A"
+    if det.get("deformation") or det.get("cinetique") == "Haute":
+        return "3A", "Déformation visible ou haute cinétique", "FRENCH Tri 3A"
+    return "4", "Traumatisme distal modéré", "FRENCH Tri 4"
+
+
+def _h_hypoglycemie(gcs, gl, **_) -> TriageResult:
     if gl and gl < GLYC["hs"]:
-        return "2", f"Hypoglycemie severe {gl} mg/dl - glucose IV", "FRENCH Tri 2"
+        return "2", f"Hypoglycémie sévère {gl:.0f} mg/dl — Glucose 30 % IV", "FRENCH Tri 2"
     if gcs < 15:
-        return "2", f"Hypoglycemie avec alteration GCS {gcs}/15", "FRENCH Tri 2"
-    return "3B", "Hypoglycemie legere - resucrage oral", "FRENCH Tri 3B"
+        return "2", f"Hypoglycémie avec altération GCS {gcs}/15", "FRENCH Tri 2"
+    if gl and gl < GLYC["hm"]:
+        return "3B", f"Hypoglycémie modérée {gl:.0f} mg/dl — Resucrage oral", "FRENCH Tri 3B"
+    return "3B", "Hypoglycémie légère — Resucrage oral", "FRENCH Tri 3B"
 
-def _triage_hyperglycemie(gcs, det, gl=None, **_) -> TriageResult:
-    if _truthy(det, "ceto", "dyspnee de kussmaul") or gcs < 15:
-        return "2", "Cetoacidose ou alteration de conscience", "FRENCH Tri 2"
-    if gl and gl >= GLYC["Hs2"]:
-        return "3A", f"Hyperglycemie severe {gl} mg/dl", "FRENCH Tri 3A"
-    return "4", "Hyperglycemie toleree", "FRENCH Tri 4"
 
-def _triage_non_urgent(**_) -> TriageResult:
+def _h_hyperglycemie(gcs, det, **_) -> TriageResult:
+    if det.get("cetose_positive") or gcs < 15:
+        return "2", "Acidocétose ou altération de conscience", "FRENCH Tri 2"
+    return "4", "Hyperglycémie tolérée sans cétose", "FRENCH Tri 4"
+
+
+def _h_purpura(temp, det, **_) -> TriageResult:
+    if det.get("neff") or det.get("non_effacable"):
+        return "1", "Purpura NON effaçable — Ceftriaxone 2 g IV IMMÉDIAT", "SPILF/SFP 2017"
+    if temp >= 38.0:
+        return "2", "Purpura fébrile — Suspicion fulminans", "FRENCH Tri 2"
+    return "3B", "Pétéchies — Bilan hémostase", "FRENCH Tri 3B"
+
+
+def _h_malaise(n2, gl, det, **_) -> TriageResult:
+    if gl and gl < GLYC["hs"]:
+        return "2", f"Malaise hypoglycémique {gl:.0f} mg/dl", "FRENCH Tri 2"
+    if n2 >= 2 or det.get("anomalie_vitaux"):
+        return "2", "Malaise avec anomalie vitale", "FRENCH Tri 2"
+    return "3B", "Malaise récupéré", "FRENCH Tri 3B"
+
+
+# ─── Pédiatrie ────────────────────────────────────────────────────────────────
+
+def _h_ped_fievre_nourr(**_) -> TriageResult:
+    return "2", "Fièvre nourrisson ≤ 3 mois — TRI 2 SYSTÉMATIQUE", "FRENCH Pédiatrie Tri 2"
+
+
+def _h_ped_fievre(fc, spo2, temp, age, det, **_) -> TriageResult:
+    if age < 1/12:   fc_s = FC_TACHY_NOURR
+    elif age < 1:    fc_s = FC_TACHY_BEBE
+    elif age < 5:    fc_s = FC_TACHY_ENFANT
+    else:            fc_s = FC_TACHY_GRAND
+    tachy = fc > fc_s
+    if det.get("purpura") and temp >= 38.0:
+        return "1", "Fièvre + purpura — Méningococcémie — Ceftriaxone 2 g IV", "SPILF/SFP"
+    if det.get("convulsion_prolongee") or det.get("convulsion_focale"):
+        return "1", "Convulsion fébrile prolongée ou focale", "FRENCH Tri 1"
+    if temp >= FIEVRE_TRES_HAUTE_ENFANT or det.get("nuque") or det.get("encephalopathie"):
+        return "2", f"Fièvre {temp:.1f} °C ou signes de gravité", "FRENCH Tri 2"
+    if tachy and det.get("tol_mal"):
+        return "2", f"Fièvre — Tachycardie {fc} bpm + mauvaise tolérance", "FRENCH Tri 2"
+    if det.get("tol_mal") or tachy:
+        return "3A", "Fièvre mal tolérée ou tachycardie", "FRENCH Tri 3A"
+    return "3B", "Fièvre bien tolérée sans signe de gravité", "FRENCH Tri 3B"
+
+
+def _h_ped_gastro(fc, pas, temp, age, det, **_) -> TriageResult:
+    sh = round(fc / max(pas, 1), 2)
+    if det.get("bilieux"):
+        return "1", "Vomissements bilieux — Occlusion / Volvulus — CHIRURGIE URGENTE", "FRENCH Tri 1"
+    if det.get("fontanelle_bombante") or det.get("pleurs_inconsolables"):
+        return "1", "Fontanelle bombante ou pleurs inconsolables — HTIC / invagination", "FRENCH Tri 1"
+    if sh >= 1.0 or det.get("deshydrat_severe"):
+        return "1", f"Choc hypovolémique pédiatrique — SI {sh}", "FRENCH Tri 1"
+    if det.get("deshydrat_moderee") or (age < 0.25 and temp >= FIEVRE_NOURR_SEUIL):
+        return "2", "Déshydratation modérée ou nourrisson fébrile", "FRENCH Tri 2"
+    return "3B", "Gastro-entérite tolérée", "FRENCH Tri 3B"
+
+
+def _h_ped_epilepsie(fc, spo2, temp, age, det, gl=None, **_) -> TriageResult:
+    duree = det.get("duree_min", 0) or 0
+    if det.get("eme_etabli") or duree > EME_ETABLI_MIN:
+        return "1", f"EME établi > {EME_ETABLI_MIN} min — Réanimation pédiatrique", "ILAE 2015"
+    if duree > EME_OPERATIONNEL_MIN:
+        return "1", f"EME opérationnel {duree} min — Risque lésionnel", "ILAE 2015"
+    if spo2 < 92 or age < 1/12:
+        return "1", "Convulsion pédiatrique + SpO2 < 92 % ou néonatal", "FRENCH Tri 1"
+    if det.get("en_cours") or duree > EME_SEUIL_MIN:
+        return "2", "Crise EN COURS — Midazolam buccal 0,3 mg/kg MAINTENANT", "SFNP 2023"
+    if det.get("premiere_crise") or det.get("focale") or det.get("signes_meninges"):
+        return "2", "1ère crise / focale / signes méningés — Bilan urgent", "FRENCH Tri 2"
+    if det.get("recuperee") and det.get("febrile") and not det.get("focale"):
+        return "3A", "Convulsion fébrile simple récupérée", "SFNP 2023"
+    return "2", "Crise épileptique — Évaluation urgente", "SFNP 2023"
+
+
+def _h_ped_asthme(fc, spo2, det, age, **_) -> TriageResult:
+    pram = det.get("pram", 0) or 0
+    if spo2 < 92 or pram >= 8 or det.get("silence_auscultatoire"):
+        return "1", f"Asthme sévère — SpO2 {spo2:.0f} % — PRAM {pram}", "FRENCH Tri 1"
+    if spo2 < 95 or pram >= 4 or not det.get("parole_ok", True):
+        return "2", f"Asthme modéré — SpO2 {spo2:.0f} % — Salbutamol", "GINA / FRENCH Tri 2"
+    return "3A", "Asthme léger — Salbutamol", "FRENCH Tri 3A"
+
+
+def _h_non_urgent(**_) -> TriageResult:
     return "5", "Consultation non urgente", "FRENCH Tri 5"
 
-# ---------------------------------------------------------------------
-# Table de dispatch – complétée avec les motifs corrigés
-# ---------------------------------------------------------------------
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE DE DISPATCH — motif normalisé → handler
+# ═══════════════════════════════════════════════════════════════════════════════
+
 _TRIAGE_DISPATCH: Dict[str, Handler] = {
-    "Arret cardio-respiratoire": _triage_acr,
-    "Hypotension arterielle": _triage_hypotension,
-    "Douleur thoracique / SCA": _triage_sca,
-    "Tachycardie / tachyarythmie": _triage_arythmie,
-    "Bradycardie / bradyarythmie": _triage_arythmie,
-    "Palpitations": _triage_arythmie,
-    "Hypertension arterielle": _triage_hta,
-    "Allergie / anaphylaxie": _triage_anaphylaxie,
-    "Dyspnee / insuffisance respiratoire": _triage_dyspnee,
-    "Dyspnee / insuffisance cardiaque": _triage_dyspnee,
-    "Douleur abdominale": _triage_abdomen,
-    "Vomissements / Diarrhee": _triage_digestif,      # maintenant présent dans le protocole
-    "Hematemese / Rectorragie": _triage_hemo_digestive,
-    "Colique nephretique / Douleur lombaire": _triage_colique,
-    "AVC / Deficit neurologique": _triage_avc,
-    "Traumatisme cranien": _triage_tc,
-    "Alteration de conscience / Coma": _triage_coma,
-    "Cephalee": _triage_cephalee,
-    "Convulsions / EME": _triage_convulsions,
-    "Syndrome confusionnel": _triage_confusion,
-    "Malaise": _triage_malaise,
-    "Traumatisme thorax/abdomen/rachis cervical": _triage_trauma_axial,
-    "Traumatisme bassin/hanche/femur": _triage_trauma_axial,
-    "Traumatisme membre / epaule": _triage_trauma_distal,
-    "Hemorragie active": _triage_hemorragie,
-    "Fievre": _triage_fievre,
-    "Pediatrie - Fievre <= 3 mois": _triage_ped_fievre_nourr,
-    "Pediatrie - Fievre enfant (3 mois - 15 ans)": _triage_ped_fievre,
-    "Pediatrie - Vomissements / Gastro-enterite": _triage_ped_gastro,
-    "Pediatrie - Crise epileptique": _triage_ped_epilepsie,
-    "Pediatrie - Asthme / Bronchospasme": _triage_ped_asthme,
-    "Petechie / Purpura": _triage_purpura,
-    "Erytheme etendu": _triage_erytheme,
-    "Accouchement imminent": _triage_accouchement,
-    "Complication grossesse T1/T2": _triage_grossesse,
-    "Menorragie / Metrorragie": _triage_metrorragie,
-    "Hypoglycemie": _triage_hypoglycemie,
-    "Hyperglycemie / Cetoacidose": _triage_hyperglycemie,
-    "Renouvellement ordonnance": _triage_non_urgent,
-    "Examen administratif": _triage_non_urgent,
-    "Autre motif": _triage_non_urgent,
+    "arret cardio-respiratoire":                    _h_acr,
+    "hypotension arterielle":                        _h_hypotension,
+    "douleur thoracique / sca":                      _h_sca,
+    "tachycardie / tachyarythmie":                   _h_arythmie,
+    "bradycardie / bradyarythmie":                   _h_arythmie,
+    "palpitations":                                  _h_arythmie,
+    "hypertension arterielle":                       _h_hta,
+    "allergie / anaphylaxie":                        _h_anaphylaxie,
+    "avc / deficit neurologique":                    _h_avc,
+    "traumatisme cranien":                           _h_tc,
+    "alteration de conscience / coma":               _h_coma,
+    "convulsions / eme":                             _h_convulsions,
+    "cephalee":                                      _h_cephalee,
+    "malaise":                                       _h_malaise,
+    "dyspnee / insuffisance respiratoire":           _h_dyspnee,
+    "dyspnee / insuffisance cardiaque":              _h_dyspnee,
+    "asthme ou aggravation bpco":                    _h_dyspnee,
+    "douleur abdominale":                            _h_abdomen,
+    "colique nephretique / douleur lombaire":        _h_colique,
+    "fievre":                                        _h_fievre,
+    "hemorragie active":                             _h_hemorragie,
+    "hematemese / vomissements sanglants":           _h_hemorragie,
+    "rectorragie / melena":                          _h_hemorragie,
+    "traumatisme thorax/abdomen/rachis cervical":    _h_trauma_axial,
+    "traumatisme bassin/hanche/femur":               _h_trauma_axial,
+    "traumatisme membre / epaule":                   _h_trauma_distal,
+    "hypoglycemie":                                  _h_hypoglycemie,
+    "hyperglycemie / cetoacidose":                   _h_hyperglycemie,
+    "petechie / purpura":                            _h_purpura,
+    "pediatrie - fievre <= 3 mois":                  _h_ped_fievre_nourr,
+    "pediatrie - fievre enfant (3 mois - 15 ans)":   _h_ped_fievre,
+    "pediatrie - vomissements / gastro-enterite":    _h_ped_gastro,
+    "pediatrie - crise epileptique":                 _h_ped_epilepsie,
+    "pediatrie - asthme / bronchospasme":            _h_ped_asthme,
+    "renouvellement ordonnance":                     _h_non_urgent,
+    "examen administratif":                          _h_non_urgent,
+    "autre motif":                                   _h_non_urgent,
 }
 
-_MOTIF_INDEX: Dict[str, Handler] = {norm(k): v for k, v in _TRIAGE_DISPATCH.items()}
+# Index O(1) — lookup normalisé
+_MOTIF_INDEX: Dict[str, Handler] = {_norm(k): v for k, v in _TRIAGE_DISPATCH.items()}
 
-# ---------------------------------------------------------------------
-# Triage principal – paramètres par défaut corrigés
-# ---------------------------------------------------------------------
-def french_triage(motif, det, fc=None, pas=None, spo2=None, fr=None,
-                  gcs=None, temp=None, age=None, n2=None, gl=None) -> TriageResult:
-    # Utiliser None par défaut puis remplacer si None (ne pas masquer 0)
-    if fc is None: fc = 80
-    if pas is None: pas = 120
-    if spo2 is None: spo2 = 98
-    if fr is None: fr = 16
-    if gcs is None: gcs = 15
-    if temp is None: temp = 37.0
-    if age is None: age = 45
-    if n2 is None: n2 = 0
-    if det is None: det = {}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MOTEUR PRINCIPAL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def french_triage(
+    motif: str,
+    det: Optional[dict],
+    fc: Optional[float]   = None,
+    pas: Optional[float]  = None,
+    spo2: Optional[float] = None,
+    fr: Optional[float]   = None,
+    gcs: Optional[int]    = None,
+    temp: Optional[float] = None,
+    age: Optional[float]  = None,
+    n2: Optional[int]     = None,
+    gl: Optional[float]   = None,
+) -> TriageResult:
+    """
+    Moteur FRENCH V1.1 — Système Expert à 3 niveaux.
+
+    Hiérarchie de décision :
+      0. NEWS2 ≥ 9 → Tri M (transversal absolu)
+      1. Priorités absolues (verrouillage clinique)
+      2. Arbre de décision du handler motif
+      3. Ajustement NEWS2 (never downgrade)
+      4. Fallback sécurisé Tri 3B
+    """
+    # Valeurs par défaut sécurisées
+    fc   = float(fc   or 80)
+    pas  = float(pas  or 120)
+    spo2 = float(spo2 or 98)
+    fr   = float(fr   or 16)
+    gcs  = int(gcs    or 15)
+    temp = float(temp or 37.0)
+    age  = float(age  or 45)
+    n2   = int(n2     or 0)
+    det  = det or {}
 
     try:
+        # ── Niveau 0 : NEWS2 ≥ 9 → Tri M absolu ──────────────────────────
         if n2 >= NEWS2_TRI_M:
-            return "M", f"NEWS2 {n2} >= {NEWS2_TRI_M} - engagement vital", "NEWS2 Tri M"
-        if _truthy(det, "purpura", "neff", "non effacable"):
-            return "1", "Purpura non effacable - ceftriaxone immediate", "SPILF/SFP"
-        if pas <= 70 or gcs <= 8:
-            return "1", "Critere vital majeur", "Triage transversal"
+            return "M", f"NEWS2 {n2} ≥ {NEWS2_TRI_M} — Engagement vital immédiat", "NEWS2 Tri M"
 
-        selected = _selected_french_result(motif, det)
-        protocol = get_protocol(motif)
-        handler = _MOTIF_INDEX.get(norm(motif))
-        if selected:
-            result = selected
-        elif handler:
+        # ── Niveau 1 : Priorités absolues verrouillées ────────────────────
+        priorite = _check_priorites_absolues(det, gcs, pas, spo2, fr)
+        if priorite:
+            return priorite
+
+        # ── Niveau 2 : Arbre de décision motif ───────────────────────────
+        handler = _MOTIF_INDEX.get(_norm(motif))
+        if handler is not None:
             result = handler(
-                motif=motif, det=det, fc=fc, pas=pas, spo2=spo2, fr=fr,
-                gcs=gcs, temp=temp, age=age, n2=n2, gl=gl,
-            )
-        elif protocol:
-            result = (
-                protocol["default"],
-                f"FRENCH v1.2 - niveau par defaut - {protocol['motif']}",
-                "FRENCH v1.2",
+                fc=fc, pas=pas, spo2=spo2, fr=fr,
+                gcs=gcs, temp=temp, age=age, n2=n2,
+                gl=gl, det=det, motif=motif,
             )
         else:
-            result = "3B", f"Evaluation standard - {motif}", "FRENCH Tri 3B"
+            result = ("3B", f"Évaluation standard — {motif}", "FRENCH Tri 3B")
 
+        # ── Niveau 3 : Ajustement NEWS2 (jamais downgrade) ───────────────
         if n2 >= NEWS2_RISQUE_ELEVE:
-            result = _more_urgent(result, ("2", f"NEWS2 {n2} >= {NEWS2_RISQUE_ELEVE} - risque eleve", "NEWS2 Tri 2"))
+            result = _more_urgent(result, ("2", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_ELEVE} — Risque élevé", "NEWS2"))
         elif n2 >= NEWS2_RISQUE_MOD:
-            result = _more_urgent(result, ("3A", f"NEWS2 {n2} >= {NEWS2_RISQUE_MOD} - risque modere", "NEWS2 Tri 3A"))
-
-        if spo2 < 90 or fr >= 35 or fc >= 150 or fc <= 40 or pas <= 90:
-            result = _more_urgent(result, ("2", "Anomalie vitale transversale", "Triage transversal"))
-        if gl and gl < GLYC["hs"]:
-            result = _more_urgent(result, ("2", f"Hypoglycemie severe {gl} mg/dl", "Triage transversal"))
+            result = _more_urgent(result, ("3A", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_MOD} — Risque modéré", "NEWS2"))
 
         return result
+
     except Exception as e:
-        return "2", f"Erreur moteur de triage : {e}", "Securite Tri 2"
+        # Failsafe : ne jamais laisser planter — triage conservateur
+        return "2", f"Erreur moteur triage — Évaluation médicale urgente ({e})", "Sécurité Tri 2"
 
 
-def verifier_coherence(fc, pas, spo2, fr, gcs, temp, eva, motif, atcd, det, n2, gl=None):
-    danger, alertes = [], []
-    atcd = atcd or []
-    det = det or {}
+# ═══════════════════════════════════════════════════════════════════════════════
+# ALERTES CLINIQUES TRANSVERSALES
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    if _has(atcd, "IMAO (inhibiteurs MAO)"):
-        danger.append("IMAO - Tramadol contre-indique (syndrome serotoninergique)")
-    if _has(atcd, "Antidepresseurs ISRS/IRSNA"):
-        alertes.append("ISRS/IRSNA - Tramadol deconseille - preferer Dipidolor ou Morphine")
+def verifier_coherence(
+    fc: float, pas: float, spo2: float, fr: float,
+    gcs: int, temp: float, eva: int,
+    motif: str, atcd: list, det: dict,
+    n2: int, gl: Optional[float] = None,
+) -> Tuple[list, list]:
+    """
+    Alertes transversales post-triage.
+    Retourne (alertes_danger, alertes_warning).
+    """
+    D: list = []
+    A: list = []
+    sh = round(fc / max(pas, 1), 2)
+
+    # ── Alertes critiques (rouge) ─────────────────────────────────────────
+    if "IMAO (inhibiteurs MAO)" in atcd:
+        D.append("IMAO — Tramadol CONTRE-INDIQUÉ ABSOLU (syndrome sérotoninergique fatal)")
     if gl:
         if gl < GLYC["hs"]:
-            danger.append(f"Hypoglycemie severe {gl} mg/dl - glucose IV")
-        elif gl < GLYC["hm"]:
-            alertes.append(f"Hypoglycemie moderee {gl} mg/dl - corriger avant antalgique")
-        elif gl >= GLYC["Hs2"]:
-            alertes.append(f"Hyperglycemie severe {gl} mg/dl")
-
-    shock = si(fc, pas)
-    if shock >= 1.0:
-        danger.append(f"Shock Index {shock} >= 1.0 - etat de choc probable")
+            D.append(f"HYPOGLYCÉMIE SÉVÈRE {gl:.0f} mg/dl — Glucose 30 % IV IMMÉDIAT")
+        elif gl > 360:
+            D.append(f"HYPERGLYCÉMIE SÉVÈRE {gl:.0f} mg/dl — Bilan acidocétose")
+    if sh >= 1.0:
+        D.append(f"Shock Index {sh} ≥ 1,0 — État de choc probable")
     if spo2 < 90:
-        danger.append(f"SpO2 {spo2}% - oxygene et avis medical urgent")
-    if fr >= 30:
-        alertes.append(f"FR {fr}/min - tachypnee")
+        D.append(f"SpO2 {spo2:.0f} % — Hypoxémie sévère — O₂ urgent")
     if fc >= 150 or fc <= 40:
-        danger.append(f"FC {fc} bpm - arythmie critique")
-    if gcs < 15:
-        alertes.append(f"GCS {gcs}/15 - alteration neurologique")
-    if temp >= 40 or temp <= 35:
-        alertes.append(f"Temperature {temp} C - anomalie thermique severe")
-    if eva >= 7:
-        alertes.append(f"EVA {eva}/10 - antalgie rapide a prioriser")
-    if _has(atcd, "Anticoagulants/AOD") and "traumatisme cranien" in norm(motif):
-        danger.append("TC sous AOD/AVK - TDM urgente")
-    if _truthy(det, "purpura", "neff", "non effacable"):
-        danger.append("Purpura non effacable - ceftriaxone immediate")
-    if n2 >= NEWS2_RISQUE_ELEVE:
-        danger.append(f"NEWS2 {n2} - appel medical immediat")
-    elif n2 >= NEWS2_RISQUE_MOD:
-        alertes.append(f"NEWS2 {n2} - surveillance rapprochee")
+        D.append(f"FC {fc:.0f} bpm — Arythmie critique")
+    if "Anticoagulants/AOD" in atcd and "Traumatisme cranien" in motif:
+        D.append("TC sous AOD/AVK — TDM cérébral urgent")
+    if "Anticoagulants/AOD" in atcd and "Hemorragie" in motif:
+        D.append("Hémorragie sous AOD — Envisager neutralisation (Praxbind / Ondexxya)")
+    if det.get("purpura") or det.get("neff"):
+        D.append("PURPURA FULMINANS — Ceftriaxone 2 g IV IMMÉDIAT — Ne pas retarder")
+    if spo2 > 96 and "BPCO" in atcd:
+        D.append(f"BPCO — SpO2 {spo2:.0f} % > 96 % — Risque narcose CO₂ — Réduire l'O₂")
 
-    return danger, alertes
+    # ── Alertes importantes (orange) ─────────────────────────────────────
+    if "Antidépresseurs ISRS/IRSNA" in atcd:
+        A.append("ISRS/IRSNA — Tramadol déconseillé — Préférer Piritramide ou Morphine")
+    if fr >= 30:
+        A.append(f"FR {fr:.0f}/min — Tachypnée significative")
+    if gl and GLYC["hm"] > gl >= GLYC["hs"]:
+        A.append(f"Hypoglycémie modérée {gl:.0f} mg/dl — Corriger avant antalgique")
+    if "Immunodépression" in atcd or "Chimiothérapie en cours" in atcd:
+        A.append("IMMUNODÉPRIMÉ — Seuil d'alerte abaissé — Tout signe infectieux = urgence")
+        if temp >= 38.3:
+            D.append(f"Immunodéprimé + fièvre {temp:.1f} °C ≥ 38,3 °C — Neutropénie fébrile possible — ATB < 1 h")
+    if eva >= 7:
+        A.append(f"EVA {eva}/10 — Douleur intense — Réévaluation à 30 min post-antalgie obligatoire")
+    if "Drépanocytose" in atcd and eva >= 6:
+        A.append("Drépanocytose + douleur intense — Morphine titrée < 30 min (objectif SFMU)")
+    if sh >= 0.8 and sh < 1.0:
+        A.append(f"Shock Index {sh} — Instabilité débutante — Surveiller de près")
+
+    return D, A
