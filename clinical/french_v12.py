@@ -84,3 +84,38 @@ def get_criterion_options(motif: str) -> List[dict]:
         text = criterion["text"]
         options.append({"level": level, "text": text, "label": f"Tri {level} - {text}"})
     return options
+
+
+def render_discriminants(
+    motif: str,
+    *,
+    key: Optional[str] = None,
+    label: str = "Critere discriminant",
+    index: int = 0,
+):
+    """
+    Affiche un selecteur Streamlit si disponible, sinon renvoie simplement les options.
+
+    Le module a ete tronque dans certaines revisions; cette fonction restaure
+    l'API attendue par streamlit_app.py tout en restant tolerante si elle est
+    appelee hors contexte Streamlit.
+    """
+    options = get_criterion_options(motif)
+
+    try:
+        import streamlit as st
+    except Exception:
+        return options
+
+    if not options:
+        return {"level": None, "text": "", "label": NO_CRITERION_LABEL}
+
+    index = max(0, min(index, len(options) - 1))
+    selected = st.selectbox(
+        label,
+        options,
+        index=index,
+        key=key,
+        format_func=lambda opt: opt["label"],
+    )
+    return selected
