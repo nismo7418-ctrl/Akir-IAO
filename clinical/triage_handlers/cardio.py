@@ -1,15 +1,27 @@
 from clinical.vitaux import si
 
 def _triage_acr(**_) -> tuple:
+    """
+    Triage arrêt cardio-respiratoire — RCP en cours.
+    Source : FRENCH V1.1 — Tri M immédiat.
+    """
     return "1", "ACR confirmé — RCP en cours", "FRENCH Tri 1"
 
 def _triage_hypotension(pas, fc, **_) -> tuple:
+    """
+    Triage hypotension — Choc selon PAS et FC.
+    Source : FRENCH V1.1 — Tri 1 si PAS ≤70.
+    """
     if pas <= 70: return "1", f"PAS {pas} mmHg ≤ 70 — collapsus", "FRENCH Tri 1"
     if pas <= 90 or (pas <= 100 and fc > 100): return "2", f"PAS {pas} mmHg — choc débutant", "FRENCH Tri 2"
     if pas <= 100: return "3B", f"PAS {pas} mmHg — valeur limite", "FRENCH Tri 3B"
     return "4", "PAS normale", "FRENCH Tri 4"
 
 def _triage_sca(fc, spo2, det, **_) -> tuple:
+    """
+    Triage syndrome coronarien aigu — ECG et douleur.
+    Source : FRENCH V1.1 — Tri 1 si ECG anormal ou douleur typique.
+    """
     ecg = det.get("ecg", "Normal")
     doul = det.get("douleur", "Atypique")
     if ecg == "Anormal typique SCA" or doul == "Typique (constrictive, irradiante)":
@@ -19,18 +31,30 @@ def _triage_sca(fc, spo2, det, **_) -> tuple:
     return "3A", "Douleur thoracique atypique stable", "FRENCH Tri 3A"
 
 def _triage_arythmie(fc, det, **_) -> tuple:
+    """
+    Triage arythmie — Selon FC extrême.
+    Source : FRENCH V1.1 — Tri 1 si FC ≥180 ou ≤30.
+    """
     if fc >= 180 or fc <= 30: return "1", f"FC {fc} bpm — arythmie extrême", "FRENCH Tri 1"
     if fc >= 150 or fc <= 40: return "2", f"FC {fc} bpm — arythmie sévère", "FRENCH Tri 2"
     if det.get("tol_mal"): return "2", "Arythmie mal tolérée", "FRENCH Tri 2"
     return "3B", f"FC {fc} bpm — arythmie tolérée", "FRENCH Tri 3B"
 
 def _triage_hta(pas, fc, det, **_) -> tuple:
+    """
+    Triage hypertension — Urgence selon PAS.
+    Source : FRENCH V1.1 — Tri 2 si PAS ≥220.
+    """
     if pas >= 220: return "2", f"PAS {pas} mmHg ≥ 220 — urgence hypertensive", "FRENCH Tri 2"
     if det.get("sf") or (pas >= 180 and fc > 100): return "2", "HTA avec signes fonctionnels", "FRENCH Tri 2"
     if pas >= 180: return "3B", "HTA sévère sans signe fonctionnel", "FRENCH Tri 3B"
     return "4", "HTA modérée", "FRENCH Tri 4"
 
 def _triage_anaphylaxie(spo2, pas, gcs, det, **_) -> tuple:
+    """
+    Triage anaphylaxie — Engagement systémique.
+    Source : FRENCH V1.1 — Tri 1 si détresse vitale.
+    """
     if spo2 < 94 or pas < 90 or gcs < 15: return "1", "Anaphylaxie sévère — engagement systémique", "FRENCH Tri 1"
     if det.get("dyspnee") or det.get("urticaire"): return "2", "Allergie systémique", "FRENCH Tri 2"
     return "3B", "Réaction allergique localisée", "FRENCH Tri 3B"
