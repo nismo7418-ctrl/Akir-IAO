@@ -47,7 +47,7 @@ def DISC() -> None:
       Cette application est un <strong style="color:#94A3B8;">outil d'aide à la décision clinique</strong>
       destiné aux professionnels de santé qualifiés. Elle ne se substitue en aucun cas
       au jugement clinique du praticien ni aux protocoles institutionnels en vigueur.<br>
-      Classification fondée sur la grille <strong style="color:#94A3B8;">FRENCH Triage V1.1 (SFMU 2018)</strong>
+      Classification fondée sur la grille <strong style="color:#94A3B8;">FRENCH Triage V1.2 (SFMU 2018, adaptation AKIR)</strong>
       et les protocoles <strong style="color:#94A3B8;">BCFI Belgique</strong>.
       Localisation : Urgences — Province de Hainaut, Wallonie, Belgique.<br>
       <strong style="color:#64748B;">Aucune donnée nominative n'est stockée (RGPD).</strong><br>
@@ -160,11 +160,11 @@ def VITAUX(fc: float, pas: float, spo2: float, fr: float, temp: float, gcs: int,
 
 def GAUGE(n2: int, bpco: bool = False) -> None:
     """Jauge NEWS2 visuelle."""
-    if n2 >= 9:     color = "#7C3AED"
-    elif n2 >= 7:   color = "#EF4444"
-    elif n2 >= 5:   color = "#F59E0B"
-    elif n2 >= 1:   color = "#22C55E"
-    else:           color = "#3B82F6"
+    if n2 >= 9:     color = "#991B1B"
+    elif n2 >= 7:   color = "#DC2626"
+    elif n2 >= 5:   color = "#D97706"
+    elif n2 >= 1:   color = "#2563EB"
+    else:           color = "#1D4ED8"
 
     bpco_note = " (Échelle BPCO)" if bpco else ""
     H(f'<div class="gauge-container">'
@@ -340,6 +340,75 @@ def SBAR_RENDER(s: dict) -> None:
         "📋 Télécharger la transmission SBAR (.txt)",
         data=txt,
         file_name=f"SBAR_{s['date'].replace('/','')}_{s['heure'].replace(':','')}_Tri{s['niv']}.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+
+def FRENCH_TRIAGE_PANEL(
+    niv: str,
+    justif: str,
+    n2: int,
+    *,
+    crit: str = "",
+    discriminant: Optional[dict] = None,
+    lock_priority: bool = False,
+) -> None:
+    """Regroupe le triage French V1.2 dans un container Streamlit stable et lisible."""
+    label = LABELS.get(niv, f"TRI {niv}")
+    secteur = SECTEURS.get(niv, "Évaluation")
+    delai = DELAIS.get(niv, 60)
+    disc = discriminant if isinstance(discriminant, dict) else {}
+    disc_level = disc.get("level")
+    disc_text = disc.get("text")
+    state = "error" if niv in {"M", "1", "2"} else "complete"
+
+    with st.container(border=True):
+        with st.status(f"Triage French V1.2 — {label}", state=state, expanded=True):
+            css = TCSS.get(niv, "tri-3B")
+            H(
+                f'<div class="tri-card {css}">'
+                f'<div class="tri-label">{label}</div>'
+                f'<div class="tri-just">{justif}</div>'
+                f'<div class="tri-delay">📍 {secteur} — Délai médecin ≤ {delai} min — NEWS2 {n2}</div>'
+                f'</div>'
+            )
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Priorité", label)
+            c2.metric("Secteur", secteur)
+            c3.metric("Délai cible", f"≤ {delai} min")
+            if disc_level and disc_text:
+                st.caption(f"Discriminant retenu : Tri {disc_level} — {disc_text}")
+            if crit:
+                st.caption(f"Référence clinique : {crit}")
+            if lock_priority:
+                st.error("Priorité verrouillée par le moteur French V1.2 : ne pas dégrader malgré un score secondaire plus bas.")
+
+
+def SBAR_RENDER(s: dict) -> None:
+    """Version défensive de la transmission SBAR pour éviter les KeyError en UI."""
+    s = s or {}
+    date = s.get("date", "??/??/????")
+    heure = s.get("heure", "??:??")
+    niv = s.get("niv", "?")
+    txt = f"""SBAR — AKIR-IAO v19.0
+Date : {date} {heure}
+Motif : {s.get('motif', 'Non renseigné')} ({s.get('cat', 'Non renseigné')})
+Niveau : {s.get('label', f'TRI {niv}')}
+Constantes : T {s.get('temp', '?')} | FC {s.get('fc', '?')} | PAS {s.get('pas', '?')} | SpO2 {s.get('spo2', '?')} | FR {s.get('fr', '?')} | GCS {s.get('gcs', '?')}
+NEWS2 : {s.get('n2', '?')} | Glycémie : {s.get('gl', 'Non mesurée')}
+Justification : {s.get('just', 'Non renseignée')}
+Référence FRENCH : {s.get('crit', 'Non renseignée')}
+Orientation : {s.get('secteur', 'Évaluation')} | Délai médecin cible : ≤ {s.get('delai', '?')} min
+ATCD : {s.get('atcd', 'Aucun connu')}
+Allergies : {s.get('alg', 'Aucune connue')}
+Réf. FRENCH Triage SFMU V1.2 — BCFI Belgique
+"""
+    H(f'<div class="sbar-block">{txt}</div>')
+    st.download_button(
+        "Télécharger la transmission SBAR (.txt)",
+        data=txt,
+        file_name=f"SBAR_{date.replace('/','')}_{heure.replace(':','')}_Tri{niv}.txt",
         mime="text/plain",
         use_container_width=True,
     )

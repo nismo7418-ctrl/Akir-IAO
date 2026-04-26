@@ -11,13 +11,13 @@ def load_css() -> str:
   --BG: #F0F4F8; --CARD: #FFFFFF; --B: #E2E8F0;
   --T: #1A202C; --TM: #4A5568; --TW: #FFFFFF;
   /* Triage colors */
-  --TM-bg: #4C1D95; --TM-ac: #E879F9; --TM-t: #F5F3FF;
-  --T1-bg: #7F1D1D; --T1-ac: #FCA5A5; --T1-t: #FEF2F2;
-  --T2-bg: #78350F; --T2-ac: #FDE68A; --T2-t: #FFFBEB;
-  --T3A-bg:#1E3A5F; --T3A-ac:#93C5FD; --T3A-t:#EFF6FF;
-  --T3B-bg:#164E63; --T3B-ac:#A5F3FC; --T3B-t:#ECFEFF;
-  --T4-bg: #14532D; --T4-ac: #86EFAC; --T4-t:#F0FDF4;
-  --T5-bg: #1E293B; --T5-ac: #CBD5E1; --T5-t:#F8FAFC;
+  --TM-bg: #7F1D1D; --TM-ac: #FECACA; --TM-t: #FEF2F2;
+  --T1-bg: #B91C1C; --T1-ac: #FECACA; --T1-t: #FEF2F2;
+  --T2-bg: #C2410C; --T2-ac: #FED7AA; --T2-t: #FFF7ED;
+  --T3A-bg:#075985; --T3A-ac:#BAE6FD; --T3A-t:#F0F9FF;
+  --T3B-bg:#1D4ED8; --T3B-ac:#DBEAFE; --T3B-t:#EFF6FF;
+  --T4-bg: #1E40AF; --T4-ac: #DBEAFE; --T4-t:#EFF6FF;
+  --T5-bg: #334155; --T5-ac: #E2E8F0; --T5-t:#F8FAFC;
   --ERR-bg:#FEF2F2; --ERR:#EF4444; --ERR-t:#B91C1C;
   --WRN-bg:#FFFBEB; --WRN:#F59E0B; --WRN-t:#92400E;
   --SUC-bg:#F0FDF4; --SUC:#22C55E; --SUC-t:#166534;
@@ -85,11 +85,11 @@ html, body, [class*="st-"] {
 /* Carte de triage principale */
 .tri-card {
   border-radius:var(--r); padding:20px; margin:12px 0;
-  text-align:center; box-shadow:var(--s2);
+  text-align:left; box-shadow:var(--s2);
 }
 .tri-label { font-size:1.6rem; font-weight:900; letter-spacing:-.02em; }
 .tri-just  { font-size:.8rem; margin-top:8px; opacity:.9; line-height:1.5; }
-.tri-delay { font-size:.68rem; margin-top:6px; opacity:.7; font-family:'IBM Plex Mono',monospace; }
+.tri-delay { font-size:.68rem; margin-top:10px; opacity:.82; font-family:'IBM Plex Mono',monospace; }
 
 /* ── NEWS2 BANNERS ───────────────────────────────────────────────────── */
 .n2-alert {
