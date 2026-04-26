@@ -11,13 +11,13 @@ def load_css() -> str:
   --BG: #F0F4F8; --CARD: #FFFFFF; --B: #E2E8F0;
   --T: #1A202C; --TM: #4A5568; --TW: #FFFFFF;
   /* Triage colors */
-  --TM-bg: #7F1D1D; --TM-ac: #FECACA; --TM-t: #FEF2F2;
-  --T1-bg: #B91C1C; --T1-ac: #FECACA; --T1-t: #FEF2F2;
-  --T2-bg: #C2410C; --T2-ac: #FED7AA; --T2-t: #FFF7ED;
-  --T3A-bg:#075985; --T3A-ac:#BAE6FD; --T3A-t:#F0F9FF;
-  --T3B-bg:#1D4ED8; --T3B-ac:#DBEAFE; --T3B-t:#EFF6FF;
-  --T4-bg: #1E40AF; --T4-ac: #DBEAFE; --T4-t:#EFF6FF;
-  --T5-bg: #334155; --T5-ac: #E2E8F0; --T5-t:#F8FAFC;
+  --TM-bg: #4C1D95; --TM-ac: #E879F9; --TM-t: #F5F3FF;
+  --T1-bg: #7F1D1D; --T1-ac: #FCA5A5; --T1-t: #FEF2F2;
+  --T2-bg: #78350F; --T2-ac: #FDE68A; --T2-t: #FFFBEB;
+  --T3A-bg:#1E3A5F; --T3A-ac:#93C5FD; --T3A-t:#EFF6FF;
+  --T3B-bg:#164E63; --T3B-ac:#A5F3FC; --T3B-t:#ECFEFF;
+  --T4-bg: #14532D; --T4-ac: #86EFAC; --T4-t:#F0FDF4;
+  --T5-bg: #1E293B; --T5-ac: #CBD5E1; --T5-t:#F8FAFC;
   --ERR-bg:#FEF2F2; --ERR:#EF4444; --ERR-t:#B91C1C;
   --WRN-bg:#FFFBEB; --WRN:#F59E0B; --WRN-t:#92400E;
   --SUC-bg:#F0FDF4; --SUC:#22C55E; --SUC-t:#166534;
@@ -85,11 +85,11 @@ html, body, [class*="st-"] {
 /* Carte de triage principale */
 .tri-card {
   border-radius:var(--r); padding:20px; margin:12px 0;
-  text-align:left; box-shadow:var(--s2);
+  text-align:center; box-shadow:var(--s2);
 }
 .tri-label { font-size:1.6rem; font-weight:900; letter-spacing:-.02em; }
 .tri-just  { font-size:.8rem; margin-top:8px; opacity:.9; line-height:1.5; }
-.tri-delay { font-size:.68rem; margin-top:10px; opacity:.82; font-family:'IBM Plex Mono',monospace; }
+.tri-delay { font-size:.68rem; margin-top:6px; opacity:.7; font-family:'IBM Plex Mono',monospace; }
 
 /* ── NEWS2 BANNERS ───────────────────────────────────────────────────── */
 .n2-alert {
@@ -157,8 +157,129 @@ html, body, [class*="st-"] {
 .stNumberInput input, .stTextInput input, .stSelectbox select {
   border-radius:8px!important; font-size:.9rem!important;
 }
-.stCheckbox { padding:4px 0!important; }
 .stTabs [data-baseweb="tab"] { font-size:.78rem!important; padding:6px 12px!important; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   CHECKBOXES — Visibilité et contraste renforcés
+══════════════════════════════════════════════════════════════════════ */
+
+/* Espacement et label */
+.stCheckbox, [data-testid="stCheckbox"] {
+  padding:6px 2px!important;
+}
+[data-testid="stCheckbox"] p {
+  font-size:.86rem!important; font-weight:500!important;
+  color:var(--T)!important; margin:0!important; line-height:1.45!important;
+}
+[data-testid="stCheckbox"] label {
+  cursor:pointer!important; align-items:center!important;
+  gap:10px!important; display:flex!important;
+}
+
+/* Boîte visuelle BaseWeb — état non-coché */
+[data-baseweb="checkbox"] > label > div:first-child {
+  border:2.5px solid var(--P)!important;
+  border-radius:5px!important;
+  background:#FFFFFF!important;
+  width:20px!important; height:20px!important; min-width:20px!important;
+  box-shadow:0 1px 4px rgba(0,74,153,.14)!important;
+  transition:all .15s ease!important;
+}
+
+/* Boîte visuelle — état coché */
+[data-baseweb="checkbox"][aria-checked="true"] > label > div:first-child {
+  background:var(--P)!important;
+  border-color:var(--P)!important;
+}
+
+/* Hover sur la boîte */
+[data-testid="stCheckbox"]:hover [data-baseweb="checkbox"] > label > div:first-child {
+  border-color:var(--PL)!important;
+  box-shadow:0 0 0 4px rgba(0,74,153,.18)!important;
+}
+
+/* Fallback accent-color navigateurs modernes (Chrome, Firefox, Edge) */
+input[type="checkbox"] {
+  accent-color:var(--P)!important;
+  width:18px!important; height:18px!important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SLIDERS & SELECT_SLIDER — Track, Thumb, Valeurs
+══════════════════════════════════════════════════════════════════════ */
+
+/* Conteneur global */
+[data-testid="stSlider"] {
+  padding:6px 2px 12px!important;
+}
+
+/* Label du slider */
+[data-testid="stSlider"] > div > label,
+[data-testid="stSlider"] > label {
+  font-size:.76rem!important; font-weight:600!important;
+  color:var(--TM)!important; text-transform:uppercase!important;
+  letter-spacing:.06em!important; margin-bottom:6px!important;
+}
+
+/* BaseWeb slider — track arrière-plan */
+[data-baseweb="slider"] > div {
+  height:8px!important;
+  border-radius:4px!important;
+  background:var(--B)!important;
+}
+
+/* Track — portion remplie (active) */
+[data-baseweb="slider"] [role="progressbar"] {
+  height:8px!important;
+  border-radius:4px!important;
+  background:linear-gradient(90deg, var(--PD) 0%, var(--P) 60%, var(--PL) 100%)!important;
+}
+
+/* Thumb — le curseur draggable */
+[data-baseweb="slider"] [role="slider"] {
+  width:24px!important; height:24px!important;
+  background:var(--P)!important;
+  border:3px solid #FFFFFF!important;
+  border-radius:50%!important;
+  box-shadow:0 2px 10px rgba(0,74,153,.40)!important;
+  top:50%!important; transform:translateY(-50%)!important;
+  transition:box-shadow .15s ease, transform .15s ease, background .15s ease!important;
+  cursor:grab!important;
+}
+[data-baseweb="slider"] [role="slider"]:hover,
+[data-baseweb="slider"] [role="slider"]:focus {
+  background:var(--PL)!important;
+  box-shadow:0 0 0 5px rgba(0,74,153,.22), 0 2px 10px rgba(0,74,153,.40)!important;
+  transform:translateY(-50%) scale(1.14)!important;
+}
+
+/* Valeur courante affichée sous le slider */
+[data-testid="stSlider"] p {
+  font-family:'IBM Plex Mono',monospace!important;
+  font-size:.78rem!important; font-weight:600!important;
+  color:var(--P)!important;
+}
+
+/* Étiquettes min / max (select_slider) */
+[data-testid="stTickBarMin"],
+[data-testid="stTickBarMax"] {
+  font-size:.62rem!important; color:var(--TM)!important;
+  font-family:'IBM Plex Mono',monospace!important;
+}
+
+/* ── Barre EVA visualisation HTML (injectée via Python) ──────────── */
+.eva-bar {
+  display:flex; gap:3px; margin:6px 0 10px; border-radius:6px; overflow:hidden;
+}
+.eva-cell {
+  flex:1; height:30px; display:flex; align-items:center; justify-content:center;
+  font-family:'IBM Plex Mono',monospace; font-size:.75rem; font-weight:600;
+  border-radius:4px; transition:transform .1s;
+}
+.eva-cell.active {
+  transform:scaleY(1.18); box-shadow:0 0 0 3px #1A202C;
+  font-size:.82rem; z-index:1; position:relative;
+}
 
 /* ── JAUGE NEWS2 ─────────────────────────────────────────────────────── */
 .gauge-container { 

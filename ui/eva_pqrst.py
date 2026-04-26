@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import pandas as pd
 import streamlit as st
 from clinical.utils import norm
+from ui.components import EVA_BAR
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -31,6 +32,7 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
         key=f"{key_prefix}_eva",
         help="0 = pas de douleur | 10 = douleur insupportable",
     ))
+    EVA_BAR(eva)
 
     # Feedback couleur selon EVA
     if eva >= 7:
