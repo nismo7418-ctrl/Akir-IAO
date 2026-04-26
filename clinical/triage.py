@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 import unicodedata
-from typing import Callable, Dict, Optional, Tuple, List
+from typing import Callable, Dict, List, Optional, Tuple
 from config import (
     NEWS2_TRI_M, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD,
     GLYC, AVC_DELAI_THROMBOLYSE_H, ORD,
@@ -73,9 +73,76 @@ def _selected_discriminant_result(motif: str, det: dict) -> Optional[TriageResul
         return None
 
 
+def _selected_red_flag_result(motif: str, det: dict) -> Optional[TriageResult]:
+    """
+    Red flags saisis via l'interface dynamique.
+    Le moteur retient le plus urgent des red flags cochés.
+    """
+    try:
+        selections = (det or {}).get("red_flags_selected")
+        if not isinstance(selections, list):
+            return None
+
+        best: Optional[TriageResult] = None
+        protocol = get_protocol(motif)
+        motif_label = protocol.get("motif") if protocol else motif
+
+        for item in selections:
+            if not isinstance(item, dict):
+                continue
+            level = str(item.get("level") or "").strip().upper()
+            label = str(item.get("label") or item.get("text") or "").strip()
+            rationale = str(item.get("rationale") or "Red flag clinique").strip()
+            if level not in ORD or not label:
+                continue
+
+            candidate = (
+                level,
+                f"Red flag {motif_label} — {label}",
+                rationale,
+            )
+            best = candidate if best is None else _more_urgent(best, candidate)
+
+        return best
+    except Exception:
+        return None
+
+
 def _has_atcd(det: dict, *labels: str) -> bool:
     terrain = {_norm(item) for item in (det or {}).get("atcd", [])}
     return any(_norm(label) in terrain for label in labels)
+
+
+def _is_trauma_motif(motif: str) -> bool:
+    motif_norm = _norm(motif)
+    trauma_tokens = (
+        "trauma",
+        "traumatisme",
+        "fracture",
+        "entorse",
+        "plaie",
+        "brulure",
+    )
+    return any(token in motif_norm for token in trauma_tokens)
+
+
+def _sidebar_risk_adjustment(
+    motif: str,
+    det: dict,
+    temp: float,
+    pas: float,
+) -> Optional[TriageResult]:
+    """Majoration terrain/pharmaco issue de la sidebar contextuelle."""
+    if _has_atcd(det, "Anticoagulants/AOD") and (_is_trauma_motif(motif) or bool(det.get("anticoagulants"))):
+        return "2", "Terrain anticoagulé associé à un traumatisme", "Majoration terrain"
+
+    if _has_atcd(det, "Bêta-bloquants", "Beta-bloquants") and (pas < 100 or bool(det.get("syncopal"))):
+        return "2", "Bêta-bloquants avec hypoperfusion potentielle", "Majoration terrain"
+
+    if _has_atcd(det, "Corticoïdes au long cours", "Corticoides au long cours") and temp >= 38.0 and pas <= 100:
+        return "2", "Corticothérapie chronique avec syndrome infectieux mal toléré", "Majoration terrain"
+
+    return None
 
 
 def _terrain_adjustment(
@@ -769,6 +836,10 @@ def french_triage(
         if discriminant:
             result = _more_urgent(result, discriminant)
 
+        red_flag_result = _selected_red_flag_result(motif, det)
+        if red_flag_result:
+            result = _more_urgent(result, red_flag_result)
+
         protocol = get_protocol(motif)
         handler_key = protocol.get("motif") if protocol else motif
         handler = _MOTIF_INDEX.get(_norm(handler_key)) or _MOTIF_INDEX.get(_norm(motif))
@@ -783,6 +854,10 @@ def french_triage(
         terrain_result = _terrain_adjustment(motif, det, age, temp, pas, gcs)
         if terrain_result:
             result = _more_urgent(result, terrain_result)
+
+        sidebar_result = _sidebar_risk_adjustment(motif, det, temp, pas)
+        if sidebar_result:
+            result = _more_urgent(result, sidebar_result)
 
         vital_result = _vital_adjustment(fc, pas, spo2, fr, gcs, age)
         if vital_result:
