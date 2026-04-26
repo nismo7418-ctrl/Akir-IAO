@@ -6,7 +6,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 from clinical.utils import norm
 
+try:
+    import streamlit as st
+except Exception:  # pragma: no cover - tolère les imports hors interface Streamlit
+    st = None
+
 NO_CRITERION_LABEL = "Aucun critère discriminant sélectionné"
+TRIAGE_ORDER = {"M": 0, "1": 1, "2": 2, "3A": 3, "3B": 4, "4": 5, "5": 6}
 
 
 def _row(category: str, motif: str, default: str, criteria=(), aliases=()):
@@ -28,7 +34,7 @@ FRENCH_PROTOCOL: List[dict] = [
         ("2", "Douleur thoracique typique ou signes d'instabilité"),
         ("3A", "Douleur thoracique atypique"),
         ("3B", "Douleur thoracique peu évocatrice"),
-    ], aliases=["Douleur thoracique / syndrome coronaire aigu (SCA)", "SCA", "Infarctus"]),
+    ], aliases=["Douleur thoracique / syndrome coronaire aigu (SCA)", "Douleur thoracique/syndrome coronaire aigu (SCA)", "SCA", "Infarctus"]),
     _row("Cardiovasculaire", "Tachycardie / tachyarythmie", "3A", [
         ("1", "Instabilité hémodynamique"),
         ("2", "FC > 150 bpm"),
@@ -100,20 +106,20 @@ FRENCH_PROTOCOL: List[dict] = [
         ("1", "Choc hémorragique"),
         ("2", "Saignement actif"),
         ("3A", "Saignement résolutif"),
-    ], aliases=["Hématemèse", "Rectorragie", "Méléna", "Hematémèse / vomissements sanglants", "Rectorragie / méléna"]),
+    ], aliases=["Hématemèse", "Rectorragie", "Méléna", "Hematémèse / vomissements sanglants", "Rectorragie / méléna", "Vomissement de sang / hématémèse", "Maelena/rectorragies"]),
     _row("Digestif", "Colique néphrétique / Douleur lombaire", "3B", [
         ("2", "Fièvre + douleur lombaire — Pyélonéphrite obstructive"),
         ("3A", "EVA ≥ 7"),
         ("3B", "EVA 4-6"),
         ("4", "EVA < 4"),
-    ], aliases=["Colique nephretique", "Lithiase urinaire"]),
+    ], aliases=["Colique nephretique", "Lithiase urinaire", "Douleur de la fosse lombaire/du flanc"]),
 
     # ── NEUROLOGIQUE ──────────────────────────────────────────────────────
     _row("Neurologique", "AVC / Déficit neurologique", "2", [
         ("1", "GCS < 13 ou choc"),
         ("2", "Code Stroke — BE-FAST positif"),
         ("2", "Déficit focal d'installation brutale"),
-    ], aliases=["AVC", "Stroke", "Code Stroke", "Déficit neurologique", "Déficit moteur sensitif sensoriel ou du langage / AVC"]),
+    ], aliases=["AVC", "Stroke", "Code Stroke", "Déficit neurologique", "Déficit moteur sensitif sensoriel ou du langage / AVC", "Déficit moteur, sensitif, sensoriel ou du langage/AVC"]),
     _row("Neurologique", "Traumatisme crânien", "3B", [
         ("1", "GCS < 13"),
         ("2", "PDC + vomissements ou anticoagulés"),
@@ -124,7 +130,7 @@ FRENCH_PROTOCOL: List[dict] = [
         ("1", "GCS ≤ 8 / Coma"),
         ("2", "GCS 9-12"),
         ("2", "Hypoglycémie sévère"),
-    ], aliases=["Coma", "Altération de la conscience / coma", "Alteration de conscience / Coma"]),
+    ], aliases=["Coma", "Altération de la conscience / coma", "Altération de la conscience/coma", "Alteration de conscience / Coma"]),
     _row("Neurologique", "Céphalée", "3B", [
         ("1", "Céphalée en coup de tonnerre / méningisme"),
         ("2", "Déficit neurologique associé"),
@@ -136,7 +142,7 @@ FRENCH_PROTOCOL: List[dict] = [
         ("2", "Post-critique — GCS < 13"),
         ("2", "Première crise"),
         ("3A", "Crise résolue — GCS 15"),
-    ], aliases=["Épilepsie", "Convulsions", "EME", "Crise épileptique"]),
+    ], aliases=["Épilepsie", "Convulsions", "EME", "Crise épileptique", "Convulsion hyperthermique"]),
     _row("Neurologique", "Syndrome confusionnel", "3A", [
         ("2", "Agitation + instabilité"),
         ("3A", "Confusion modérée"),
@@ -192,7 +198,7 @@ FRENCH_PROTOCOL: List[dict] = [
     # ── PÉDIATRIE ─────────────────────────────────────────────────────────
     _row("Pédiatrie", "Pédiatrie - Fièvre ≤ 3 mois", "1", [
         ("1", "Fièvre ≥ 38 °C nourrisson ≤ 3 mois"),
-    ], aliases=["Pediatrie - Fievre <= 3 mois", "Fièvre nourrisson"]),
+    ], aliases=["Pediatrie - Fievre <= 3 mois", "Fièvre nourrisson", "Fièvre ≤ 3 mois"]),
     _row("Pédiatrie", "Fièvre enfant (3 mois - 15 ans)", "4", [
         ("2", "T° ≥ 40 °C ou somnolence / geignement / marbrures"),
         ("3A", "Tachycardie pour l'âge ou mauvaise tolérance"),
@@ -201,7 +207,7 @@ FRENCH_PROTOCOL: List[dict] = [
         ("2", "Nourrisson / déshydratation sévère"),
         ("3A", "Enfant avec sang dans selles"),
         ("4", "Gastro-entérite bien tolérée"),
-    ], aliases=["Pediatrie - Vomissements / Gastro-enterite"]),
+    ], aliases=["Pediatrie - Vomissements / Gastro-enterite", "Diarrhée / vomissements du nourrisson (≤ 24 mois)"]),
     _row("Pédiatrie", "Pédiatrie - Crise épileptique", "2", [
         ("1", "Crise en cours"),
         ("2", "Post-critique / première crise"),
@@ -213,17 +219,17 @@ FRENCH_PROTOCOL: List[dict] = [
     ], aliases=["Pediatrie - Asthme / Bronchospasme"]),
 
     # ── GYNÉCOLOGIE ───────────────────────────────────────────────────────
-    _row("Gynécologie", "Accouchement imminent", "1"),
+    _row("Gynécologie", "Accouchement imminent", "1", aliases=["Accouchement imminent ou réalisé"]),
     _row("Gynécologie", "Complication grossesse T1/T2", "2", [
         ("1", "Choc / hémorragie abondante"),
         ("2", "GEU suspecté / douleur + métrorragies"),
         ("3A", "Métrorragies modérées"),
-    ], aliases=["GEU", "Grossesse extra-utérine"]),
+    ], aliases=["GEU", "Grossesse extra-utérine", "Problème de grossesse 1er et 2ème trimestre"]),
     _row("Gynécologie", "Ménorragie / Métrorragie", "3A", [
         ("2", "Instabilité hémodynamique"),
         ("3A", "Saignement abondant"),
         ("4", "Saignement modéré"),
-    ]),
+    ], aliases=["Méno-metrorragie"]),
 
     # ── MÉTABOLIQUE ───────────────────────────────────────────────────────
     _row("Métabolique", "Hypoglycémie", "2", [
@@ -336,6 +342,40 @@ def get_criterion_options(motif: str) -> List[dict]:
     return options
 
 
+def apply_discriminant_selection(
+    level: str,
+    justification: str,
+    criterion_ref: str,
+    selected: Optional[dict],
+):
+    """
+    Applique un critère discriminant FRENCH sélectionné sans jamais downgrader le triage.
+    """
+    selected = selected or {}
+    selected_level = selected.get("level")
+    selected_text = (selected.get("text") or "").strip()
+    selected_label = selected.get("label") or criterion_ref or NO_CRITERION_LABEL
+
+    if not selected_level:
+        return level, justification, criterion_ref or NO_CRITERION_LABEL
+
+    if TRIAGE_ORDER.get(selected_level, 99) < TRIAGE_ORDER.get(level, 99):
+        justification = f"{selected_text} — Critère discriminant FRENCH"
+        level = selected_level
+
+    return level, justification, selected_label
+
+
+def _widget_key(motif: str, key: Optional[str] = None) -> str:
+    base_key = key or f"french_disc_{norm(motif).replace(' ', '_')}"
+    if st is None:
+        return base_key
+    prefix = str(st.session_state.get("uid") or st.session_state.get("sid") or "session")
+    if base_key.startswith(f"{prefix}__"):
+        return base_key
+    return f"{prefix}__{base_key}"
+
+
 def render_discriminants(
     motif: str,
     *,
@@ -348,9 +388,7 @@ def render_discriminants(
     Retourne le critère sélectionné.
     """
     options = get_criterion_options(motif)
-    try:
-        import streamlit as st
-    except Exception:
+    if st is None:
         return options
 
     if not options:
@@ -361,7 +399,7 @@ def render_discriminants(
         label,
         options,
         index=index,
-        key=key,
+        key=_widget_key(motif, key),
         format_func=lambda opt: opt["label"],
     )
     return selected

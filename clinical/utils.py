@@ -4,6 +4,7 @@ import unicodedata
 
 def norm(value) -> str:
     """Normalise une chaîne pour comparaison insensible à la casse, accents, espaces."""
-    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = str(value or "").replace("≤", "<=").replace("≥", ">=").replace("/", " / ")
+    value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     return " ".join(value.casefold().split())

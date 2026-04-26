@@ -17,7 +17,8 @@ Handler = Callable[..., TriageResult]
 
 def _norm(value: str) -> str:
     """Normalise une chaîne pour comparaison insensible aux accents."""
-    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = str(value or "").replace("≤", "<=").replace("≥", ">=").replace("/", " / ")
+    value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     return " ".join(value.casefold().split())
 
@@ -76,7 +77,7 @@ def _h_thoracique(**kw) -> TriageResult:
         return "1", "Douleur thoracique avec instabilité — Tri 1", "FRENCH Tri 1"
     if det.get("typique") or fc > 120 or spo2 < 94:
         return "2", "Douleur thoracique typique / instabilité relative", "FRENCH Tri 2"
-    return "3A", "Douleur thoracique atypique — Évaluation rapide", "FRENCH Tri 3A"
+    return "3B", "Douleur thoracique atypique — Évaluation", "FRENCH Tri 3B"
 
 
 def _h_dyspnee(**kw) -> TriageResult:
@@ -140,19 +141,33 @@ def _h_tachycardie(**kw) -> TriageResult:
     fc, pas, det = kw["fc"], kw["pas"], kw["det"]
     if fc > 180 or pas < 90 or det.get("instable"):
         return "1", f"Tachycardie instable — FC {fc:.0f} / PAS {pas:.0f}", "FRENCH Tri 1"
-    if fc > 150:
+    if fc >= 130:
         return "2", f"Tachycardie sévère — FC {fc:.0f}", "FRENCH Tri 2"
-    return "3A", f"Tachycardie — FC {fc:.0f} — Évaluation ECG urgente", "FRENCH Tri 3A"
+    if fc > 110:
+        return "3A", f"Tachycardie — FC {fc:.0f} — Évaluation ECG urgente", "FRENCH Tri 3A"
+    return "3B", "Tachycardie résolutive ou sans signe de gravité", "FRENCH Tri 3B"
 
 
 def _h_bradycardie(**kw) -> TriageResult:
     """Bradycardie / bradyarythmie."""
     fc, pas, det = kw["fc"], kw["pas"], kw["det"]
-    if fc < 40 or pas < 90 or det.get("syncope"):
+    if fc <= 40 or pas < 90 or det.get("syncope"):
         return "1", f"Bradycardie instable — FC {fc:.0f}", "FRENCH Tri 1"
+    if fc < 50 and det.get("mauvaise_tolerance"):
+        return "2", f"Bradycardie mal tolérée — FC {fc:.0f}", "FRENCH Tri 2"
     if fc < 50:
-        return "2", f"Bradycardie sévère — FC {fc:.0f}", "FRENCH Tri 2"
-    return "3A", f"Bradycardie — FC {fc:.0f} — ECG urgent", "FRENCH Tri 3A"
+        return "3A", f"Bradycardie — FC {fc:.0f} — ECG urgent", "FRENCH Tri 3A"
+    return "3B", "Bradycardie résolutive ou sans signe de gravité", "FRENCH Tri 3B"
+
+
+def _h_palpitations(**kw) -> TriageResult:
+    """Palpitations."""
+    fc, det = kw["fc"], kw["det"]
+    if det.get("syncope") or det.get("malaise") or fc >= 130:
+        return "2", "Palpitations avec malaise / fréquence très élevée", "FRENCH Tri 2"
+    if fc > 110:
+        return "3A", f"Palpitations avec FC {fc:.0f} bpm", "FRENCH Tri 3A"
+    return "4", "Palpitations isolées", "FRENCH Tri 4"
 
 
 def _h_hta(**kw) -> TriageResult:
@@ -403,6 +418,51 @@ def _h_epistaxis(**kw) -> TriageResult:
     return "5", "Épistaxis peu abondant", "FRENCH Tri 5"
 
 
+def _h_accouchement(**kw) -> TriageResult:
+    """Accouchement imminent."""
+    return "1", "Accouchement imminent ou réalisé — Prise en charge obstétricale immédiate", "FRENCH Tri 1"
+
+
+def _h_grossesse_t1t2(**kw) -> TriageResult:
+    """Complication grossesse T1/T2."""
+    det, pas = kw["det"], kw["pas"]
+    if pas < 90 or det.get("abondante") or det.get("hemorragie"):
+        return "1", "Grossesse T1/T2 avec instabilité ou hémorragie abondante", "FRENCH Tri 1"
+    if det.get("grossesse") or det.get("saignement") or det.get("douleur_severe"):
+        return "2", "Grossesse T1/T2 compliquée — GEU / hémorragie à exclure", "FRENCH Tri 2"
+    return "3A", "Complication de grossesse T1/T2 — Évaluation prioritaire", "FRENCH Tri 3A"
+
+
+def _h_metrorragie(**kw) -> TriageResult:
+    """Ménorragie / Métrorragie."""
+    det, pas = kw["det"], kw["pas"]
+    if pas < 90 or det.get("grossesse") or det.get("abondante"):
+        return "2", "Métrorragie abondante ou grossesse associée", "FRENCH Tri 2"
+    if det.get("active"):
+        return "3A", "Métrorragie active — Surveillance rapprochée", "FRENCH Tri 3A"
+    return "3B", "Saignement gynécologique modéré", "FRENCH Tri 3B"
+
+
+def _h_oeil(**kw) -> TriageResult:
+    """Corps étranger / brûlure oculaire."""
+    det = kw["det"]
+    if det.get("brulure_chimique") or det.get("baisse_av") or det.get("douleur_severe"):
+        return "2", "Brûlure chimique ou baisse visuelle brutale", "FRENCH Tri 2"
+    if det.get("penetrant") or det.get("haute_energie"):
+        return "3A", "Corps étranger oculaire pénétrant suspecté", "FRENCH Tri 3A"
+    return "3A", "Corps étranger / brûlure oculaire — Évaluation ophtalmologique", "FRENCH Tri 3A"
+
+
+def _h_intoxication(**kw) -> TriageResult:
+    """Intoxication médicamenteuse."""
+    det, gcs, pas, age = kw["det"], kw["gcs"], kw["pas"], kw["age"]
+    if gcs < 15 or pas < 90 or det.get("intention_suicidaire") or det.get("toxique_cardiotrope"):
+        return "2", "Intoxication médicamenteuse avec mauvaise tolérance ou risque suicidaire", "FRENCH Tri 2"
+    if age < 18:
+        return "2", "Intoxication pédiatrique — Avis urgent", "FRENCH Tri 2"
+    return "3B", "Intoxication médicamenteuse bien tolérée", "FRENCH Tri 3B"
+
+
 def _h_non_urgent(**kw) -> TriageResult:
     """Motif non urgent / administratif."""
     return "5", "Motif non urgent — Réorientation possible", "FRENCH Tri 5"
@@ -424,19 +484,24 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "hemoptysie":                                    _h_dyspnee,
     "avc / deficit neurologique":                    _h_avc,
     "deficit moteur sensitif sensoriel ou du langage / avc": _h_avc,
+    "deficit moteur, sensitif, sensoriel ou du langage/avc": _h_avc,
     "alteration de la conscience / coma":            _h_conscience,
+    "alteration de la conscience/coma":              _h_conscience,
     "alteration de conscience / coma":               _h_conscience,
     "traumatisme cranien":                           _h_tc,
     "hypotension arterielle":                        _h_hypotension,
     "tachycardie / tachyarythmie":                   _h_tachycardie,
     "bradycardie / bradyarythmie":                   _h_bradycardie,
     "hypertension arterielle":                       _h_hta,
-    "palpitations":                                  _h_tachycardie,
+    "palpitations":                                  _h_palpitations,
     "allergie / anaphylaxie":                        _h_anaphylaxie,
     "douleur abdominale":                            _h_abdomen,
     "colique nephretique / douleur lombaire":        _h_colique,
     "vomissements / diarrhee":                       _h_abdomen,
+    "hematemese / rectorragie":                      _h_hemorragie,
     "hematemese / vomissements sanglants":           _h_hemorragie,
+    "vomissement de sang / hematemese":              _h_hemorragie,
+    "maelena/rectorragies":                          _h_hemorragie,
     "rectorragie / melena":                          _h_hemorragie,
     "fievre":                                        _h_fievre,
     "hemorragie active":                             _h_hemorragie,
@@ -456,10 +521,22 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "epistaxis":                                     _h_epistaxis,
     "troubles psychiatriques":                       _h_psychiatrie,
     "idee / comportement suicidaire":                _h_psychiatrie,
+    "accouchement imminent":                         _h_accouchement,
+    "accouchement imminent ou realise":              _h_accouchement,
+    "complication grossesse t1/t2":                  _h_grossesse_t1t2,
+    "probleme de grossesse 1er et 2eme trimestre":   _h_grossesse_t1t2,
+    "menorragie / metrorragie":                      _h_metrorragie,
+    "meno-metrorragie":                              _h_metrorragie,
+    "corps etranger / brulure oculaire":             _h_oeil,
+    "intoxication medicamenteuse":                   _h_intoxication,
     "pediatrie - fievre <= 3 mois":                  _h_ped_fievre_nourr,
+    "fievre <= 3 mois":                              _h_ped_fievre_nourr,
+    "fievre enfant (3 mois - 15 ans)":              _h_ped_fievre,
     "pediatrie - fievre enfant (3 mois - 15 ans)":   _h_ped_fievre,
     "pediatrie - vomissements / gastro-enterite":    _h_ped_gastro,
+    "diarrhee / vomissements du nourrisson (<= 24 mois)": _h_ped_gastro,
     "pediatrie - crise epileptique":                 _h_ped_epilepsie,
+    "convulsion hyperthermique":                     _h_ped_epilepsie,
     "pediatrie - asthme / bronchospasme":            _h_ped_asthme,
     "renouvellement ordonnance":                     _h_non_urgent,
     "examen administratif":                          _h_non_urgent,
