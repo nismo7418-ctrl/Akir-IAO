@@ -238,6 +238,10 @@ with st.sidebar:
     if st.button("🔄 Nouvelle session", use_container_width=True):
         for k, v in _DEF.items():
             SS[k] = v() if callable(v) else v
+        # Purge les clés widget EVA pour qu'elles se réinitialisent depuis
+        # SS.eva (= 0) au prochain render, sans être écrasées par des valeurs résiduelles.
+        for _k in [k for k in SS if k.endswith("_eva") or k == "r_eva"]:
+            del SS[_k]
         st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -283,7 +287,9 @@ with T[0]:
     GAUGE(SS.v_news2, SS.v_bpco)
 
     SS.motif = st.selectbox("Motif de recours", MOTIFS_RAPIDES, key="r_mot")
-    SS.eva   = int(st.select_slider("EVA", [str(i) for i in range(11)], "0", key="r_eva"))
+    if "r_eva" not in SS:
+        SS["r_eva"] = str(SS.eva)
+    SS.eva = int(st.select_slider("EVA", [str(i) for i in range(11)], key="r_eva"))
     EVA_BAR(SS.eva)
     det = {"eva": SS.eva, "atcd": atcd}
 
@@ -418,6 +424,7 @@ with T[3]:
     _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
 
     det = SS.det or {}
+    det["atcd"] = atcd  # garantit que les règles terrain (anticoag, grossesse, immuno…) s'appliquent même si T[2] est sauté
     if not det.get("glycemie_mgdl") and not SS.gl:
         gl_t = GLYC_WIDGET("t_gl", "Glycémie capillaire (mg/dl)")
         if gl_t:
