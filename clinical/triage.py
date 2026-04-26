@@ -5,13 +5,11 @@
 
 from __future__ import annotations
 import unicodedata
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, List
 from config import (
     NEWS2_TRI_M, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD,
-    GLYC, AVC_DELAI_THROMBOLYSE_H, ORD,
+    GLYC, AVC_DELAI_THROMBOLYSE_H,
 )
-from clinical.french_v12 import get_protocol
-from clinical.vitaux import si, sipa
 
 TriageResult = Tuple[str, str, str]
 Handler = Callable[..., TriageResult]
@@ -26,184 +24,8 @@ def _norm(value: str) -> str:
 
 def _more_urgent(r1: TriageResult, r2: TriageResult) -> TriageResult:
     """Retourne le niveau le plus urgent entre deux résultats de triage."""
-    ordre = ORD
+    ordre = {"M": 0, "1": 1, "2": 2, "3A": 3, "3B": 4, "4": 5, "5": 6}
     return r1 if ordre.get(r1[0], 9) <= ordre.get(r2[0], 9) else r2
-
-
-def _protocol_default_result(motif: str) -> TriageResult:
-    """
-    Niveau de base issu de la table FRENCH V1.2.
-    Les discriminants affichés dans l'UI proviennent de clinical/french_v12.py.
-    """
-    protocol = get_protocol(motif)
-    if not protocol:
-        return "3B", f"Évaluation standard — {motif}", "FRENCH V1.2 défaut Tri 3B"
-    level = str(protocol.get("default") or "3B")
-    label = str(protocol.get("motif") or motif)
-    return level, f"Motif {label} — niveau protocolaire de base", f"FRENCH V1.2 défaut Tri {level}"
-
-
-def _selected_discriminant_result(motif: str, det: dict) -> Optional[TriageResult]:
-    """
-    Discriminant sélectionné depuis la grille FRENCH V1.2.
-    Un niveau 1 ou 2 reste prioritaire sur les autres scores via _more_urgent.
-    """
-    try:
-        selected = (det or {}).get("french_discriminant")
-        if isinstance(selected, dict):
-            level = str(selected.get("level") or "").strip().upper()
-            text = str(selected.get("text") or "").strip()
-        elif isinstance(selected, tuple) and len(selected) >= 2:
-            level = str(selected[0] or "").strip().upper()
-            text = str(selected[1] or "").strip()
-        else:
-            return None
-
-        if level not in ORD or not text:
-            return None
-
-        protocol = get_protocol(motif)
-        motif_label = protocol.get("motif") if protocol else motif
-        return (
-            level,
-            f"Critère discriminant FRENCH V1.2 — {motif_label} — {text}",
-            f"FRENCH V1.2 discriminant Tri {level}",
-        )
-    except Exception:
-        return None
-
-
-def _selected_red_flag_result(motif: str, det: dict) -> Optional[TriageResult]:
-    """
-    Red flags saisis via l'interface dynamique.
-    Le moteur retient le plus urgent des red flags cochés.
-    """
-    try:
-        selections = (det or {}).get("red_flags_selected")
-        if not isinstance(selections, list):
-            return None
-
-        best: Optional[TriageResult] = None
-        protocol = get_protocol(motif)
-        motif_label = protocol.get("motif") if protocol else motif
-
-        for item in selections:
-            if not isinstance(item, dict):
-                continue
-            level = str(item.get("level") or "").strip().upper()
-            label = str(item.get("label") or item.get("text") or "").strip()
-            rationale = str(item.get("rationale") or "Red flag clinique").strip()
-            if level not in ORD or not label:
-                continue
-
-            candidate = (
-                level,
-                f"Red flag {motif_label} — {label}",
-                rationale,
-            )
-            best = candidate if best is None else _more_urgent(best, candidate)
-
-        return best
-    except Exception:
-        return None
-
-
-def _has_atcd(det: dict, *labels: str) -> bool:
-    terrain = {_norm(item) for item in (det or {}).get("atcd", [])}
-    return any(_norm(label) in terrain for label in labels)
-
-
-def _is_trauma_motif(motif: str) -> bool:
-    motif_norm = _norm(motif)
-    trauma_tokens = (
-        "trauma",
-        "traumatisme",
-        "fracture",
-        "entorse",
-        "plaie",
-        "brulure",
-    )
-    return any(token in motif_norm for token in trauma_tokens)
-
-
-def _sidebar_risk_adjustment(
-    motif: str,
-    det: dict,
-    temp: float,
-    pas: float,
-) -> Optional[TriageResult]:
-    """Majoration terrain/pharmaco issue de la sidebar contextuelle."""
-    if _has_atcd(det, "Anticoagulants/AOD") and (_is_trauma_motif(motif) or bool(det.get("anticoagulants"))):
-        return "2", "Terrain anticoagulé associé à un traumatisme", "Majoration terrain"
-
-    if _has_atcd(det, "Bêta-bloquants", "Beta-bloquants") and (pas < 100 or bool(det.get("syncopal"))):
-        return "2", "Bêta-bloquants avec hypoperfusion potentielle", "Majoration terrain"
-
-    if _has_atcd(det, "Corticoïdes au long cours", "Corticoides au long cours") and temp >= 38.0 and pas <= 100:
-        return "2", "Corticothérapie chronique avec syndrome infectieux mal toléré", "Majoration terrain"
-
-    return None
-
-
-def _terrain_adjustment(
-    motif: str,
-    det: dict,
-    age: float,
-    temp: float,
-    pas: float,
-    gcs: int,
-) -> Optional[TriageResult]:
-    """
-    Pondération du terrain :
-    nourrisson fébrile, immunodépression, grossesse, anticoagulants, fragilité gériatrique.
-    """
-    motif_norm = _norm(motif)
-
-    if age <= (3 / 12) and temp >= 38.0:
-        return "1", f"Nourrisson ≤ 3 mois fébrile ({temp:.1f}°C)", "Terrain pédiatrique"
-
-    if _has_atcd(det, "Immunodépression", "Chimiothérapie en cours") and temp >= 38.3:
-        return "2", f"Terrain immunodéprimé + fièvre {temp:.1f}°C", "Terrain infectieux"
-
-    if _has_atcd(det, "Grossesse") and (pas >= 160 or pas < 90 or det.get("metrorragies")):
-        return "2", "Grossesse avec instabilité tensionnelle / métrorragies", "Terrain obstétrical"
-
-    if _has_atcd(det, "Anticoagulants/AOD") and (
-        "traumatisme cranien" in motif_norm
-        or "cephalee" in motif_norm
-        or bool(det.get("perte_connaissance"))
-        or bool(det.get("trauma_cranien"))
-    ):
-        return "2", "Terrain anticoagulé avec risque neuro-hémorragique", "Terrain hémorragique"
-
-    if age >= 75 and gcs < 15:
-        return "2", f"Terrain gériatrique fragile avec GCS {gcs}/15", "Terrain gériatrique"
-
-    return None
-
-
-def _vital_adjustment(fc: float, pas: float, spo2: float, fr: float, gcs: int, age: float) -> Optional[TriageResult]:
-    """
-    Pondération par constantes vitales :
-      - Shock Index adulte
-      - SIPA pédiatrique
-    """
-    try:
-        shock_index = si(fc, pas)
-        if age < 18:
-            sipa_val, _, sipa_alert = sipa(fc, age)
-            if sipa_alert and (pas < 90 or gcs < 15):
-                return "2", f"SIPA {sipa_val:.2f} au-dessus du seuil d'âge", "Vitaux/SIPA"
-
-        if shock_index >= 1.0:
-            return "2", f"Shock Index {shock_index:.2f} — instabilité hémodynamique", "Vitaux/SI"
-
-        if spo2 < 92 or fr >= 26 or gcs <= 12:
-            return "2", f"Dégradation vitale — SpO2 {spo2:.0f}% / FR {fr:.0f} / GCS {gcs}", "Vitaux FRENCH"
-    except Exception:
-        return None
-
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -648,6 +470,63 @@ _MOTIF_INDEX: Dict[str, Handler] = {_norm(k): v for k, v in _TRIAGE_DISPATCH.ite
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# RÈGLE WORST-CASE SCENARIO — Majoration terrain
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _worst_case_terrain(
+    motif: str, det: dict, age: float,
+    fc: float, pas: float, temp: float, gcs: int,
+) -> Optional[TriageResult]:
+    """
+    Règle "Worst-Case Scenario" — Majoration automatique selon le terrain.
+    Le niveau final est TOUJOURS le plus urgent entre le motif et le terrain.
+    Source : SFMU — Critères de sur-risque terrain IAO.
+    """
+    atcd_norm = {_norm(a) for a in (det or {}).get("atcd", [])}
+    m = _norm(motif)
+
+    # Trauma + anticoagulants → Tri 2 minimum
+    is_trauma = any(t in m for t in ("trauma", "traumatisme", "fracture", "brulure", "chute"))
+    has_anticoag = any(a in atcd_norm for a in (
+        "anticoagulants/aod", "anticoagulants", "aod", "avk",
+        "antiagregatnts plaquettaires", "antiagrégants",
+    ))
+    if is_trauma and has_anticoag:
+        return "2", "Traumatisme + anticoagulants — Risque hémorragique majeur", "Worst-Case Terrain"
+
+    # Bêtabloquants + hypotension → tachycardie masquée, Tri 2
+    has_beta = any(a in atcd_norm for a in (
+        "beta-bloquants", "betabloquants", "bêta-bloquants",
+        "bêtabloquants", "beta bloquants",
+    ))
+    if has_beta and pas < 100:
+        return "2", "Bêta-bloquants + hypotension — Tachycardie réflexe masquée", "Worst-Case Terrain"
+
+    # Immunodéprimé + fièvre → aplasie fébrile, Tri 2
+    has_immuno = any(a in atcd_norm for a in (
+        "immunodepression", "immunodépression",
+        "chimiotherapie en cours", "chimiothérapie en cours",
+    ))
+    if has_immuno and temp >= 38.3:
+        return "2", "Immunodéprimé + fièvre ≥ 38.3°C — Aplasie fébrile à exclure", "Worst-Case Terrain"
+
+    # Grossesse + douleur abdominale/pelvienne → GEU, Tri 2
+    has_grossesse = "grossesse" in atcd_norm
+    if has_grossesse and any(t in m for t in ("abdomen", "douleur", "colique")):
+        return "2", "Grossesse + douleur abdominale — GEU à exclure", "Worst-Case Terrain"
+
+    # Nourrisson ≤ 3 mois + tout motif → Tri 1
+    if age > 0 and age <= 0.25:  # 3 mois = 0.25 an
+        return "1", "Nourrisson ≤ 3 mois — Tri 1 systématique (immunité immature)", "Worst-Case Terrain"
+
+    # Gériatrie ≥ 80 ans + chute/syncope → Tri 3A minimum
+    if age >= 80 and any(t in m for t in ("chute", "malaise", "syncope", "fracture")):
+        return "3A", "Patient ≥ 80 ans + chute/syncope — Bilan étiologique prioritaire", "Worst-Case Terrain"
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MOTEUR PRINCIPAL DE TRIAGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -713,6 +592,11 @@ def french_triage(
             result = _more_urgent(result, ("2", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_ELEVE} — Risque élevé", "NEWS2"))
         elif n2 >= NEWS2_RISQUE_MOD:
             result = _more_urgent(result, ("3A", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_MOD} — Risque modéré", "NEWS2"))
+
+        # ── Niveau 4 : Worst-Case Scenario terrain (jamais downgrade) ────
+        terrain = _worst_case_terrain(motif, det, age, fc, pas, temp, gcs)
+        if terrain:
+            result = _more_urgent(result, terrain)
 
         return result
 
@@ -793,82 +677,3 @@ def verifier_coherence(
         warning.append(f"Erreur vérification cohérence : {e}")
 
     return danger, warning
-
-
-def french_triage(
-    motif: str,
-    det: Optional[dict],
-    fc: Optional[float] = None,
-    pas: Optional[float] = None,
-    spo2: Optional[float] = None,
-    fr: Optional[float] = None,
-    gcs: Optional[int] = None,
-    temp: Optional[float] = None,
-    age: Optional[float] = None,
-    n2: Optional[int] = None,
-    gl: Optional[float] = None,
-) -> TriageResult:
-    """
-    Moteur FRENCH V1.2 central.
-    Les discriminants viennent de clinical/french_v12.py, les indices vitaux de clinical/vitaux.py.
-    """
-    fc = float(fc or 80)
-    pas = float(pas or 120)
-    spo2 = float(spo2 or 98)
-    fr = float(fr or 16)
-    gcs = int(gcs or 15)
-    temp = float(temp or 37.0)
-    age = float(age or 45)
-    n2 = int(n2 or 0)
-    det = det or {}
-
-    try:
-        if n2 >= NEWS2_TRI_M:
-            return "M", f"NEWS2 {n2} â‰¥ {NEWS2_TRI_M} â€” Engagement vital immÃ©diat", "NEWS2 Tri M"
-
-        priorite = _check_priorites_absolues(det, gcs, pas, spo2, fr)
-        if priorite:
-            return priorite
-
-        result = _protocol_default_result(motif)
-
-        discriminant = _selected_discriminant_result(motif, det)
-        if discriminant:
-            result = _more_urgent(result, discriminant)
-
-        red_flag_result = _selected_red_flag_result(motif, det)
-        if red_flag_result:
-            result = _more_urgent(result, red_flag_result)
-
-        protocol = get_protocol(motif)
-        handler_key = protocol.get("motif") if protocol else motif
-        handler = _MOTIF_INDEX.get(_norm(handler_key)) or _MOTIF_INDEX.get(_norm(motif))
-        if handler is not None:
-            handler_result = handler(
-                fc=fc, pas=pas, spo2=spo2, fr=fr,
-                gcs=gcs, temp=temp, age=age, n2=n2,
-                gl=gl, det=det, motif=motif,
-            )
-            result = _more_urgent(result, handler_result)
-
-        terrain_result = _terrain_adjustment(motif, det, age, temp, pas, gcs)
-        if terrain_result:
-            result = _more_urgent(result, terrain_result)
-
-        sidebar_result = _sidebar_risk_adjustment(motif, det, temp, pas)
-        if sidebar_result:
-            result = _more_urgent(result, sidebar_result)
-
-        vital_result = _vital_adjustment(fc, pas, spo2, fr, gcs, age)
-        if vital_result:
-            result = _more_urgent(result, vital_result)
-
-        if n2 >= NEWS2_RISQUE_ELEVE:
-            result = _more_urgent(result, ("2", f"NEWS2 {n2} â‰¥ {NEWS2_RISQUE_ELEVE} â€” Risque Ã©levÃ©", "NEWS2"))
-        elif n2 >= NEWS2_RISQUE_MOD:
-            result = _more_urgent(result, ("3A", f"NEWS2 {n2} â‰¥ {NEWS2_RISQUE_MOD} â€” Risque modÃ©rÃ©", "NEWS2"))
-
-        return result
-
-    except Exception as e:
-        return "2", f"Erreur moteur triage V1.2 â€” Ã‰valuation mÃ©dicale urgente ({e})", "SÃ©curitÃ© Tri 2"

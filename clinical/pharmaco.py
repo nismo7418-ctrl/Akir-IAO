@@ -114,18 +114,59 @@ def naproxene(poids: float, age: float, atcd: list) -> Result:
     }, None)
 
 
-def ketorolac(poids: float, age: float, atcd: list) -> Result:
-    """Kétorolac IV/IM — BCFI."""
+def ketorolac(poids: float, age: float, atcd: list = None) -> Result:
+    """Taradyl® (Kétorolac) IM/IV — AINS puissant — BCFI / Hainaut.
+    CI absolue : insuffisance rénale, anticoagulants, ulcère, grossesse.
+    """
+    atcd = atcd or []
+    # Contra-indications renforcées vs naproxène
+    if _has(atcd, "Insuffisance rénale chronique"):
+        return None, "CONTRE-INDIQUÉ : Insuffisance rénale chronique (risque IRA)"
+    if _has(atcd, "Anticoagulants/AOD", "Antiagrégants plaquettaires"):
+        return None, "CONTRE-INDIQUÉ : Anticoagulants / antiagrégants (risque hémorragique)"
     err = _nsaid_error(atcd)
     if err:
         return None, err
-    dose_mg = 10.0 if age >= 75 or poids < 50 else 30.0
+    # Dose adulte : 30 mg IM/IV — réduit à 15 mg si âge ≥ 65 ou poids < 50 kg
+    dose_mg = 15.0 if (age >= 65 or poids < 50) else 30.0
     return ({
         "dose_mg": dose_mg,
-        "admin": "IV lent ou IM",
-        "note": "Alternative AINS courte durée si protocole local disponible",
-        "ref": "BCFI — Kétorolac",
-        "alerts": [("Éviter > 48 h et en cas de déshydratation", "warning")],
+        "admin": "IM profonde ou IV lent 15 s — 1 injection",
+        "note": f"30 mg adulte (15 mg si ≥ 65 ans / < 50 kg) — max 5 jours — max 90 mg/j",
+        "ref": "BCFI / Taradyl® — Kétorolac IM",
+        "alerts": [
+            ("Éviter > 5 j et en cas de déshydratation", "warning"),
+            ("Dose unique recommandée aux urgences avant réévaluation", "info"),
+        ],
+    }, None)
+
+
+def diclofenac(poids: float, age: float, atcd: list = None) -> Result:
+    """Voltarène® (Diclofénac) IM — AINS — BCFI.
+    Adulte uniquement par voie IM. Enfant < 15 ans : contre-indiqué IM.
+    """
+    atcd = atcd or []
+    if age < 15:
+        return None, "CONTRE-INDIQUÉ : Voie IM non autorisée avant 15 ans (Voltarène)"
+    err = _nsaid_error(atcd)
+    if err:
+        return None, err
+    if _has(atcd, "Insuffisance rénale chronique"):
+        return None, "CONTRE-INDIQUÉ : Insuffisance rénale (diclofénac néphrotoxique)"
+    if _has(atcd, "Anticoagulants/AOD"):
+        return None, "CONTRE-INDIQUÉ : Anticoagulants (risque hémorragique)"
+    alerts: List[Alert] = [
+        ("Injection IM dans le quadrant supéro-externe de la fesse", "info"),
+        ("Ne pas répéter sans réévaluation — max 150 mg/j", "warning"),
+    ]
+    if _has(atcd, "HTA"):
+        _add(alerts, "HTA : surveillance tensionnelle sous AINS", "warning")
+    return ({
+        "dose_mg": 75.0,
+        "admin": "IM profonde quadrant supéro-ext. fesse — 75 mg",
+        "note": "Max 150 mg/24 h — À éviter > 48 h",
+        "ref": "BCFI / Voltarène® 75 mg/3 ml IM",
+        "alerts": alerts,
     }, None)
 
 

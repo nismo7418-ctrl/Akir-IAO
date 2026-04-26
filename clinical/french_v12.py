@@ -3,42 +3,13 @@
 # Source : SFMU — Classification FRENCH Triage V1.1, 2018
 
 from __future__ import annotations
-from typing import Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional
 from clinical.utils import norm
 
 NO_CRITERION_LABEL = "Aucun critère discriminant sélectionné"
 
 
-class CriterionOption(TypedDict):
-    level: Optional[str]
-    text: str
-    label: str
-
-
-class CriterionEntry(TypedDict):
-    level: str
-    text: str
-
-
-class ProtocolRow(TypedDict):
-    id: str
-    category: str
-    motif: str
-    default: str
-    criteria: List[CriterionEntry]
-    aliases: List[str]
-
-
-class RedFlagDefinition(TypedDict, total=False):
-    key: str
-    label: str
-    level: str
-    rationale: str
-    detail_key: str
-    help: str
-
-
-def _row(category: str, motif: str, default: str, criteria=(), aliases=()) -> ProtocolRow:
+def _row(category: str, motif: str, default: str, criteria=(), aliases=()):
     return {
         "id": norm(motif).replace(" ", "_").replace("/", "_"),
         "category": category,
@@ -49,29 +20,7 @@ def _row(category: str, motif: str, default: str, criteria=(), aliases=()) -> Pr
     }
 
 
-def _flag(
-    *,
-    key: str,
-    label: str,
-    level: str,
-    rationale: str,
-    detail_key: Optional[str] = None,
-    help_text: str = "",
-) -> RedFlagDefinition:
-    flag: RedFlagDefinition = {
-        "key": key,
-        "label": label,
-        "level": level,
-        "rationale": rationale,
-    }
-    if detail_key:
-        flag["detail_key"] = detail_key
-    if help_text:
-        flag["help"] = help_text
-    return flag
-
-
-FRENCH_PROTOCOL: List[ProtocolRow] = [
+FRENCH_PROTOCOL: List[dict] = [
     # ── CARDIAQUE / VASCULAIRE ────────────────────────────────────────────
     _row("Cardiovasculaire", "Arrêt cardiorespiratoire", "M"),
     _row("Cardiovasculaire", "Douleur thoracique / SCA", "3A", [
@@ -328,7 +277,7 @@ FRENCH_PROTOCOL: List[ProtocolRow] = [
 # ─────────────────────────────────────────────────────────────────────────────
 # Index de recherche O(1)
 # ─────────────────────────────────────────────────────────────────────────────
-FRENCH_INDEX: Dict[str, ProtocolRow] = {}
+FRENCH_INDEX: Dict[str, dict] = {}
 for item in FRENCH_PROTOCOL:
     FRENCH_INDEX[norm(item["motif"])] = item
     for alias in item.get("aliases", []):
@@ -369,293 +318,12 @@ FRENCH_MOTIFS_RAPIDES: List[str] = [
 ]
 
 
-FRENCH_RED_FLAGS: Dict[str, List[RedFlagDefinition]] = {
-    norm("Céphalée"): [
-        _flag(
-            key="cephalee_debut_brutal",
-            label="Début brutal ?",
-            level="3A",
-            rationale="Céphalée d'installation brutale",
-            detail_key="brutal",
-        ),
-        _flag(
-            key="cephalee_coup_tonnerre",
-            label="Céphalée en coup de tonnerre ?",
-            level="1",
-            rationale="HSA ou urgence neurovasculaire à exclure",
-            detail_key="explosif",
-        ),
-        _flag(
-            key="cephalee_signes_neuro",
-            label="Signes neurologiques ?",
-            level="2",
-            rationale="Céphalée avec déficit neurologique associé",
-            detail_key="neurologique",
-        ),
-        _flag(
-            key="cephalee_fievre",
-            label="Fièvre ?",
-            level="3A",
-            rationale="Cause infectieuse ou inflammatoire à documenter",
-            detail_key="fievre_associee",
-        ),
-        _flag(
-            key="cephalee_raideur_nuque",
-            label="Raideur de nuque ?",
-            level="1",
-            rationale="Méningisme associé",
-            detail_key="raideur_nuque",
-        ),
-    ],
-    norm("Douleur abdominale"): [
-        _flag(
-            key="abdomen_defense",
-            label="Défense abdominale ?",
-            level="2",
-            rationale="Abdomen chirurgical suspecté",
-            detail_key="defense",
-        ),
-        _flag(
-            key="abdomen_contracture",
-            label="Contracture ?",
-            level="2",
-            rationale="Irritation péritonéale",
-            detail_key="contracture",
-        ),
-        _flag(
-            key="abdomen_douleur_dorsale",
-            label="Irradiation dorsale ?",
-            level="2",
-            rationale="Dissection ou atteinte rétro-péritonéale à exclure",
-            detail_key="irradiation_dorsale",
-        ),
-        _flag(
-            key="abdomen_syncope",
-            label="Malaise ou syncope ?",
-            level="2",
-            rationale="Instabilité potentielle",
-            detail_key="syncopal",
-        ),
-        _flag(
-            key="abdomen_metrorragies",
-            label="Métrorragies associées ?",
-            level="2",
-            rationale="Urgence gynécologique possible",
-            detail_key="metrorragies",
-        ),
-    ],
-    norm("Traumatisme crânien"): [
-        _flag(
-            key="tc_pdc",
-            label="Perte de connaissance ?",
-            level="2",
-            rationale="Traumatisme crânien avec PDC",
-            detail_key="perte_connaissance",
-        ),
-        _flag(
-            key="tc_pdc_prolongee",
-            label="Perte de connaissance prolongée ?",
-            level="1",
-            rationale="Traumatisme crânien grave",
-            detail_key="perte_connaissance_prolongee",
-        ),
-        _flag(
-            key="tc_vomissements",
-            label="Vomissements ?",
-            level="2",
-            rationale="Risque intracrânien accru",
-            detail_key="vomissements",
-        ),
-        _flag(
-            key="tc_anticoagulants",
-            label="Sous anticoagulants ?",
-            level="2",
-            rationale="Risque neuro-hémorragique majoré",
-            detail_key="anticoagulants",
-        ),
-        _flag(
-            key="tc_cephalee",
-            label="Céphalée post-traumatique ?",
-            level="3A",
-            rationale="Surveillance neurologique nécessaire",
-            detail_key="cephalee_post_tc",
-        ),
-    ],
-    norm("Dyspnée / insuffisance respiratoire"): [
-        _flag(
-            key="dyspnee_cyanose",
-            label="Cyanose ?",
-            level="2",
-            rationale="Défaillance respiratoire",
-            detail_key="cyanose",
-        ),
-        _flag(
-            key="dyspnee_tirage",
-            label="Tirage ou lutte respiratoire ?",
-            level="2",
-            rationale="Travail respiratoire majeur",
-            detail_key="tirage",
-        ),
-        _flag(
-            key="dyspnee_parole_limitee",
-            label="Impossible de parler en phrases complètes ?",
-            level="2",
-            rationale="Tolérance respiratoire altérée",
-            detail_key="parole_limitee",
-        ),
-        _flag(
-            key="dyspnee_orthopnee",
-            label="Orthopnée ?",
-            level="3A",
-            rationale="Congestion ou décompensation cardiaque possible",
-            detail_key="orthopnee",
-        ),
-    ],
-    norm("AVC / Déficit neurologique"): [
-        _flag(
-            key="avc_fast",
-            label="BE-FAST positif ?",
-            level="2",
-            rationale="Code stroke à déclencher",
-            detail_key="fast_positif",
-        ),
-        _flag(
-            key="avc_deficit_brutal",
-            label="Déficit focal brutal ?",
-            level="2",
-            rationale="Déficit neurologique d'installation brutale",
-            detail_key="avc_suspect",
-        ),
-        _flag(
-            key="avc_hemiplegie",
-            label="Hémiplégie franche ?",
-            level="1",
-            rationale="Déficit neurologique sévère",
-            detail_key="hemiplegique",
-        ),
-        _flag(
-            key="avc_aphasie",
-            label="Aphasie ou trouble du langage ?",
-            level="2",
-            rationale="Atteinte neurologique focale",
-            detail_key="aphasie",
-        ),
-    ],
-    norm("Fièvre"): [
-        _flag(
-            key="fievre_purpura",
-            label="Purpura non effaçable ?",
-            level="1",
-            rationale="Purpura fulminans suspecté",
-            detail_key="purpura",
-        ),
-        _flag(
-            key="fievre_raideur_nuque",
-            label="Raideur de nuque ?",
-            level="1",
-            rationale="Méningite à exclure",
-            detail_key="raideur_nuque",
-        ),
-        _flag(
-            key="fievre_confusion",
-            label="Confusion ou désorientation ?",
-            level="2",
-            rationale="Signe de gravité infectieux",
-            detail_key="confusion",
-        ),
-        _flag(
-            key="fievre_mauvaise_tolerance",
-            label="Mauvaise tolérance hémodynamique ?",
-            level="2",
-            rationale="Risque de sepsis sévère",
-            detail_key="mauvaise_tolerance",
-        ),
-    ],
-    norm("Allergie / anaphylaxie"): [
-        _flag(
-            key="ana_dyspnee",
-            label="Dyspnée ou stridor ?",
-            level="1",
-            rationale="Anaphylaxie sévère",
-            detail_key="dyspnee",
-        ),
-        _flag(
-            key="ana_hypotension",
-            label="Hypotension, malaise ou collapsus ?",
-            level="1",
-            rationale="Choc anaphylactique possible",
-            detail_key="mauvaise_tolerance",
-        ),
-        _flag(
-            key="ana_urticaire",
-            label="Urticaire généralisée ?",
-            level="2",
-            rationale="Réaction allergique systémique",
-            detail_key="urticaire_generalisee",
-        ),
-        _flag(
-            key="ana_oedeme",
-            label="Oedème facial ou lingual ?",
-            level="2",
-            rationale="Atteinte des voies aériennes supérieures",
-            detail_key="angioedeme",
-        ),
-    ],
-    norm("Hémorragie active"): [
-        _flag(
-            key="hemorragie_active",
-            label="Saignement actif non contrôlé ?",
-            level="2",
-            rationale="Hémorragie active",
-            detail_key="active",
-        ),
-        _flag(
-            key="hemorragie_abondante",
-            label="Saignement abondant ?",
-            level="2",
-            rationale="Perte sanguine importante",
-            detail_key="abondante",
-        ),
-        _flag(
-            key="hemorragie_anticoagulants",
-            label="Sous anticoagulants ?",
-            level="2",
-            rationale="Risque de saignement majoré",
-            detail_key="anticoagulants",
-        ),
-    ],
-    norm("Traumatisme thorax/abdomen/rachis cervical"): [
-        _flag(
-            key="trauma_axial_haute_energie",
-            label="Mécanisme à haute énergie ?",
-            level="2",
-            rationale="Traumatisme axial à haut risque",
-            detail_key="haute_energie",
-        ),
-        _flag(
-            key="trauma_axial_sangle",
-            label="Signe de ceinture ou impact axial ?",
-            level="2",
-            rationale="Lésions internes possibles",
-            detail_key="sangle",
-        ),
-        _flag(
-            key="trauma_axial_dyspnee",
-            label="Dyspnée ou douleur thoracique post-trauma ?",
-            level="2",
-            rationale="Atteinte thoracique associée",
-            detail_key="dyspnee_post_trauma",
-        ),
-    ],
-}
-
-
-def get_protocol(motif: str) -> Optional[ProtocolRow]:
+def get_protocol(motif: str) -> Optional[dict]:
     """Retourne le protocole FRENCH pour un motif donné."""
     return FRENCH_INDEX.get(norm(motif))
 
 
-def get_criterion_options(motif: str) -> List[CriterionOption]:
+def get_criterion_options(motif: str) -> List[dict]:
     """Retourne la liste des critères discriminants pour un motif."""
     protocol = get_protocol(motif)
     if not protocol:
@@ -666,33 +334,6 @@ def get_criterion_options(motif: str) -> List[CriterionOption]:
         text = criterion["text"]
         options.append({"level": level, "text": text, "label": f"Tri {level} — {text}"})
     return options
-
-
-def get_red_flag_definitions(motif: str) -> List[RedFlagDefinition]:
-    """Retourne la checklist de red flags pour un motif, avec fallback générique FRENCH."""
-    protocol = get_protocol(motif)
-    if not protocol:
-        return []
-
-    custom_flags = FRENCH_RED_FLAGS.get(norm(protocol["motif"]))
-    if custom_flags:
-        return custom_flags
-
-    generated_flags: List[RedFlagDefinition] = []
-    for index, criterion in enumerate(protocol.get("criteria", []), start=1):
-        level = str(criterion.get("level") or protocol.get("default") or "3B")
-        text = str(criterion.get("text") or "").strip()
-        if not text:
-            continue
-        generated_flags.append(
-            _flag(
-                key=f"{protocol['id']}_rf_{index}",
-                label=text,
-                level=level,
-                rationale=f"Discriminant FRENCH V1.2 Tri {level}",
-            )
-        )
-    return generated_flags
 
 
 def render_discriminants(
