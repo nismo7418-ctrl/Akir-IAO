@@ -598,7 +598,7 @@ def clevidipine(pas: float, poids: float, contexte: str = "HTA sévère", atcd: 
         "admin":       (f"IV continue : démarrer à {CLEV_DEBIT_INIT_MG_H} mg/h — "
                         f"doubler toutes les {CLEV_PALIER_S} s jusqu'à effet — "
                         f"max {CLEV_DEBIT_MAX_MG_H} mg/h"),
-        "note":        "Flacon 50 ml (0,5 mg/ml) — Agiter avant usage — Ne pas mélanger",
+        "note":        "Flacon 50 mg / 2 ml (25 mg/ml) — Diluer avant administration — Agiter avant usage",
         "ref":         "BCFI / ESC 2023 — Clévidipine (Vesierra®) IV",
         "alerts":      alerts,
     }, None)
