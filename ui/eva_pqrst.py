@@ -10,6 +10,20 @@ from clinical.utils import norm
 from ui.components import EVA_BAR
 
 
+def _slug(value: str) -> str:
+    text = norm(str(value)).replace("/", "_")
+    return text or "widget"
+
+
+def _widget_key(base: str, *, scope: Optional[str] = None, prefix: Optional[str] = None) -> str:
+    session_prefix = prefix or st.session_state.get("uid") or st.session_state.get("sid") or "session"
+    parts = [_slug(session_prefix)]
+    if scope:
+        parts.append(_slug(scope))
+    parts.append(_slug(base))
+    return "__".join(parts)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # EVA — Évaluation de la douleur
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21,12 +35,13 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     Source : Circulaire belge réévaluation douleur 2014.
     """
     SS = st.session_state
-    _eva_key = f"{key_prefix}_eva"
+    widget_scope = _slug(key_prefix or "eva")
+    _eva_key = _widget_key("eva", scope=widget_scope)
 
     # Initialise la clé widget depuis SS.eva uniquement si elle n'existe pas encore,
     # pour ne pas écraser une valeur déjà saisie par l'utilisateur.
     if _eva_key not in SS:
-        SS[_eva_key] = str(getattr(SS, "eva", 0))
+        SS[_eva_key] = str(int(getattr(SS, "eva", 0) or 0))
 
     st.markdown("### Évaluation de la douleur")
 
@@ -56,19 +71,19 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     with st.expander("📋 Questionnaire PQRST", expanded=False):
         p1, p2 = st.columns(2)
         p = p1.text_input("P — Facteurs déclenchants / soulageants",
-                          key=f"{key_prefix}_p",
+                          key=_widget_key("p", scope=widget_scope),
                           placeholder="effort, repos, position...")
         q = p2.text_input("Q — Qualité / type",
-                          key=f"{key_prefix}_q",
+                          key=_widget_key("q", scope=widget_scope),
                           placeholder="brûlure, colique, oppression...")
         r = p1.text_input("R — Région / irradiation",
-                          key=f"{key_prefix}_r",
+                          key=_widget_key("r", scope=widget_scope),
                           placeholder="thorax, bras gauche, jambe...")
         s = p2.text_input("S — Sévérité complémentaire",
-                          key=f"{key_prefix}_s",
+                          key=_widget_key("s", scope=widget_scope),
                           placeholder="continue, intermittente, pulsatile...")
         t = st.text_input("T — Début / évolution temporelle",
-                          key=f"{key_prefix}_t",
+                          key=_widget_key("t", scope=widget_scope),
                           placeholder="brutal, progressif, depuis 2h...")
 
     return {
@@ -127,73 +142,75 @@ def QUESTIONS_AVANCEES(
     """
     details = dict(details or {})
     m = norm(motif)
+    question_scope = f"qa_{_slug(motif)[:40] or 'motif'}"
+    qk = lambda base: _widget_key(base, scope=question_scope)
     st.markdown("### Questions discriminantes")
 
     # ── Douleur thoracique / SCA ──────────────────────────────────────────
     if "douleur thoracique" in m or "sca" in m:
         c1, c2 = st.columns(2)
         details["douleur_type"] = c1.selectbox(
-            "Type de douleur", ["Atypique", "Coronaire probable", "Typique"], key="qa_dt")
-        details["ecg_anormal"]  = c2.checkbox("ECG anormal", key="qa_ecg")
-        details["troponine_pos"] = c1.checkbox("Troponine positive", key="qa_trop")
-        details["frcv"]         = c2.number_input("Nombre de FRCV", 0, 6, 0, key="qa_frcv")
+            "Type de douleur", ["Atypique", "Coronaire probable", "Typique"], key=qk("qa_dt"))
+        details["ecg_anormal"]  = c2.checkbox("ECG anormal", key=qk("qa_ecg"))
+        details["troponine_pos"] = c1.checkbox("Troponine positive", key=qk("qa_trop"))
+        details["frcv"]         = c2.number_input("Nombre de FRCV", 0, 6, 0, key=qk("qa_frcv"))
         details["typique"]      = details["douleur_type"] == "Typique"
 
     # ── Douleur abdominale ────────────────────────────────────────────────
     if "douleur abdominale" in m:
         c1, c2 = st.columns(2)
-        details["defense"]        = c1.checkbox("Défense abdominale", key="qa_def")
-        details["grossesse"]      = c2.checkbox("Grossesse suspectée / connue", key="qa_gross")
-        details["douleur_severe"] = c1.checkbox("Douleur sévère ou mal tolérée", key="qa_abd_sev")
-        details["vomissements"]   = c2.checkbox("Vomissements associés", key="qa_abd_vom")
+        details["defense"]        = c1.checkbox("Défense abdominale", key=qk("qa_def"))
+        details["grossesse"]      = c2.checkbox("Grossesse suspectée / connue", key=qk("qa_gross"))
+        details["douleur_severe"] = c1.checkbox("Douleur sévère ou mal tolérée", key=qk("qa_abd_sev"))
+        details["vomissements"]   = c2.checkbox("Vomissements associés", key=qk("qa_abd_vom"))
         if details.get("grossesse"):
             st.error("🔴 Grossesse + douleur abdominale — GEU à exclure — Beta-hCG URGENT")
 
     # ── Colique néphrétique ───────────────────────────────────────────────
     if "colique" in m or "lombaire" in m:
         c1, c2 = st.columns(2)
-        details["fievre"]          = c1.checkbox("Fièvre associée", key="qa_col_f")
-        details["douleur_lombaire"] = c2.checkbox("Douleur lombaire franche", key="qa_col_l")
-        details["hematurie"]        = c1.checkbox("Hématurie", key="qa_col_h")
-        details["vomissements"]     = c2.checkbox("Vomissements", key="qa_col_v")
+        details["fievre"]          = c1.checkbox("Fièvre associée", key=qk("qa_col_f"))
+        details["douleur_lombaire"] = c2.checkbox("Douleur lombaire franche", key=qk("qa_col_l"))
+        details["hematurie"]        = c1.checkbox("Hématurie", key=qk("qa_col_h"))
+        details["vomissements"]     = c2.checkbox("Vomissements", key=qk("qa_col_v"))
         if details.get("fievre"):
             st.error("🔴 Colique fébrile — Pyélonéphrite obstructive à exclure — Tri 2")
 
     # ── Dyspnée ───────────────────────────────────────────────────────────
     if "dyspnee" in m or "insuffisance respiratoire" in m:
         c1, c2 = st.columns(2)
-        details["tirage"]    = c1.checkbox("Tirage / effort respiratoire", key="qa_dy_t")
-        details["cyanose"]   = c2.checkbox("Cyanose", key="qa_dy_c")
-        details["parole_ok"] = c1.checkbox("Parle en phrases complètes", value=True, key="qa_dy_p")
-        details["orthopnee"] = c2.checkbox("Orthopnée (dort assis)", key="qa_dy_o")
+        details["tirage"]    = c1.checkbox("Tirage / effort respiratoire", key=qk("qa_dy_t"))
+        details["cyanose"]   = c2.checkbox("Cyanose", key=qk("qa_dy_c"))
+        details["parole_ok"] = c1.checkbox("Parle en phrases complètes", value=True, key=qk("qa_dy_p"))
+        details["orthopnee"] = c2.checkbox("Orthopnée (dort assis)", key=qk("qa_dy_o"))
         if details.get("cyanose"):
             st.error("🔴 Cyanose — SpO2 critique — O2 haut débit IMMÉDIAT")
 
     # ── AVC ───────────────────────────────────────────────────────────────
     if "avc" in m or "deficit neurologique" in m or "deficit moteur" in m:
         c1, c2 = st.columns(2)
-        details["fast_positif"]     = c1.checkbox("BE-FAST positif (face/bras/parole)", key="qa_avc_fast")
-        details["heure_debut"]      = c2.text_input("Heure dernière fois vu bien", key="qa_avc_h", placeholder="ex: 14:30")
-        details["hemiplegique"]     = c1.checkbox("Hémiplégie franche", key="qa_avc_hemi")
-        details["aphasie"]          = c2.checkbox("Aphasie / trouble du langage", key="qa_avc_aph")
+        details["fast_positif"]     = c1.checkbox("BE-FAST positif (face/bras/parole)", key=qk("qa_avc_fast"))
+        details["heure_debut"]      = c2.text_input("Heure dernière fois vu bien", key=qk("qa_avc_h"), placeholder="ex: 14:30")
+        details["hemiplegique"]     = c1.checkbox("Hémiplégie franche", key=qk("qa_avc_hemi"))
+        details["aphasie"]          = c2.checkbox("Aphasie / trouble du langage", key=qk("qa_avc_aph"))
         if details.get("fast_positif"):
             st.error("🔴 BE-FAST positif — CODE STROKE IMMÉDIAT — Filière thrombolyse")
 
     # ── Traumatisme crânien ───────────────────────────────────────────────
     if "traumatisme cranien" in m or "tc" in m:
         c1, c2 = st.columns(2)
-        details["perte_connaissance"]          = c1.checkbox("Perte de connaissance", key="qa_tc_pdc")
-        details["vomissements"]                = c2.checkbox("Vomissements", key="qa_tc_vom")
-        details["perte_connaissance_prolongee"] = c1.checkbox("PDC prolongée (> 5 min)", key="qa_tc_pdcp")
-        details["anticoagulants"]              = c2.checkbox("Sous anticoagulants / AOD", key="qa_tc_aod")
-        details["cephalee_post_tc"]            = c1.checkbox("Céphalée post-TC", key="qa_tc_cep")
+        details["perte_connaissance"]          = c1.checkbox("Perte de connaissance", key=qk("qa_tc_pdc"))
+        details["vomissements"]                = c2.checkbox("Vomissements", key=qk("qa_tc_vom"))
+        details["perte_connaissance_prolongee"] = c1.checkbox("PDC prolongée (> 5 min)", key=qk("qa_tc_pdcp"))
+        details["anticoagulants"]              = c2.checkbox("Sous anticoagulants / AOD", key=qk("qa_tc_aod"))
+        details["cephalee_post_tc"]            = c1.checkbox("Céphalée post-TC", key=qk("qa_tc_cep"))
 
     # ── Fièvre ────────────────────────────────────────────────────────────
     if "fievre" in m and "crise epileptique" not in m:
         c1, c2 = st.columns(2)
-        details["signes_meninges"] = c1.checkbox("Signes méningés / raideur nuque", key="qa_f_men")
-        details["purpura"]         = c2.checkbox("Purpura / pétéchies non effaçables", key="qa_f_purp")
-        details["confusion"]       = c1.checkbox("Confusion / désorientation", key="qa_f_conf")
+        details["signes_meninges"] = c1.checkbox("Signes méningés / raideur nuque", key=qk("qa_f_men"))
+        details["purpura"]         = c2.checkbox("Purpura / pétéchies non effaçables", key=qk("qa_f_purp"))
+        details["confusion"]       = c1.checkbox("Confusion / désorientation", key=qk("qa_f_conf"))
         if details.get("purpura"):
             st.error("🔴 PURPURA FULMINANS SUSPECTÉ — Ceftriaxone IMMÉDIAT")
         if details.get("signes_meninges"):
@@ -204,60 +221,60 @@ def QUESTIONS_AVANCEES(
         c1, c2, c3 = st.columns(3)
         details["duree_min"] = c1.number_input(
             "Durée de crise (min)", 0.0, 120.0,
-            float(details.get("duree_min", 0.0) or 0.0), 0.5, key="qa_em_duree")
-        details["en_cours"]   = c2.checkbox("Crise en cours", value=bool(details.get("en_cours", False)), key="qa_em_encours")
-        details["recuperee"]  = c3.checkbox("Crise récupérée", value=bool(details.get("recuperee", False)), key="qa_em_recup")
+            float(details.get("duree_min", 0.0) or 0.0), 0.5, key=qk("qa_em_duree"))
+        details["en_cours"]   = c2.checkbox("Crise en cours", value=bool(details.get("en_cours", False)), key=qk("qa_em_encours"))
+        details["recuperee"]  = c3.checkbox("Crise récupérée", value=bool(details.get("recuperee", False)), key=qk("qa_em_recup"))
         c4, c5, c6 = st.columns(3)
-        details["premiere_crise"] = c4.checkbox("Première crise", key="qa_em_first")
-        details["focale"]         = c5.checkbox("Composante focale", key="qa_em_foc")
-        details["febrile"]        = c6.checkbox("Contexte fébrile", key="qa_em_febr")
+        details["premiere_crise"] = c4.checkbox("Première crise", key=qk("qa_em_first"))
+        details["focale"]         = c5.checkbox("Composante focale", key=qk("qa_em_foc"))
+        details["febrile"]        = c6.checkbox("Contexte fébrile", key=qk("qa_em_febr"))
         c7, c8 = st.columns(2)
-        details["signes_meninges"] = c7.checkbox("Signes méningés", key="qa_em_men")
+        details["signes_meninges"] = c7.checkbox("Signes méningés", key=qk("qa_em_men"))
         details["eme_etabli"]      = c8.checkbox("EME établi",
-            value=bool((details.get("duree_min", 0) or 0) >= 30), key="qa_em_etab")
+            value=bool((details.get("duree_min", 0) or 0) >= 30), key=qk("qa_em_etab"))
         if details.get("en_cours"):
             st.error("🔴 CRISE EN COURS — Anticonvulsivant IMMÉDIAT — Voir onglet Pharmacie")
         if gl_global is None:
-            gl_local = st.number_input("Glycémie capillaire (mg/dl)", 0, 1500, 0, 5, key="qa_em_gl")
+            gl_local = st.number_input("Glycémie capillaire (mg/dl)", 0, 1500, 0, 5, key=qk("qa_em_gl"))
             if gl_local > 0:
                 details["glycemie_mgdl"] = float(gl_local)
 
     # ── Allergie / Anaphylaxie ────────────────────────────────────────────
     if "allergie" in m or "anaphylaxie" in m:
         c1, c2 = st.columns(2)
-        details["dyspnee"]            = c1.checkbox("Dyspnée / stridor", key="qa_ana_dy")
-        details["mauvaise_tolerance"] = c2.checkbox("Hypotension / malaise", key="qa_ana_ht")
-        details["urticaire_generalisee"] = c1.checkbox("Urticaire généralisée", key="qa_ana_urt")
+        details["dyspnee"]            = c1.checkbox("Dyspnée / stridor", key=qk("qa_ana_dy"))
+        details["mauvaise_tolerance"] = c2.checkbox("Hypotension / malaise", key=qk("qa_ana_ht"))
+        details["urticaire_generalisee"] = c1.checkbox("Urticaire généralisée", key=qk("qa_ana_urt"))
         if details.get("dyspnee") or details.get("mauvaise_tolerance"):
             st.error("🔴 Anaphylaxie sévère — Adrénaline IM IMMÉDIAT 0.5 mg cuisse")
 
     # ── Hémorragie / Purpura ──────────────────────────────────────────────
     if "hemorragie" in m or "rectorragie" in m or "hematemese" in m:
         c1, c2 = st.columns(2)
-        details["abondante"] = c1.checkbox("Saignement abondant actif", key="qa_hem_ab")
-        details["active"]    = c2.checkbox("Saignement en cours", key="qa_hem_act")
+        details["abondante"] = c1.checkbox("Saignement abondant actif", key=qk("qa_hem_ab"))
+        details["active"]    = c2.checkbox("Saignement en cours", key=qk("qa_hem_act"))
 
     if "purpura" in m or "petechie" in m:
-        details["non_effacable"] = st.checkbox("Purpura / pétéchies NON effaçables (test du verre)", key="qa_pur_ne")
+        details["non_effacable"] = st.checkbox("Purpura / pétéchies NON effaçables (test du verre)", key=qk("qa_pur_ne"))
         details["neff"]          = details.get("non_effacable", False)
 
     # ── Brûlure ───────────────────────────────────────────────────────────
     if "brulure" in m:
         c1, c2 = st.columns(2)
-        details["voies_aeriennes"] = c1.checkbox("Brûlure voies aériennes suspecte", key="qa_br_va")
-        details["troisieme_degre"] = c2.checkbox("3e degré", key="qa_br_3d")
-        details["visage"]          = c1.checkbox("Visage / mains", key="qa_br_vis")
+        details["voies_aeriennes"] = c1.checkbox("Brûlure voies aériennes suspecte", key=qk("qa_br_va"))
+        details["troisieme_degre"] = c2.checkbox("3e degré", key=qk("qa_br_3d"))
+        details["visage"]          = c1.checkbox("Visage / mains", key=qk("qa_br_vis"))
 
     # ── Épistaxis ────────────────────────────────────────────────────────
     if "epistaxis" in m:
         c1, c2 = st.columns(2)
-        details["abondant_actif"]     = c1.checkbox("Abondant actif", key="qa_ep_act")
-        details["abondant_resolutif"] = c2.checkbox("Abondant résolutif", key="qa_ep_res")
+        details["abondant_actif"]     = c1.checkbox("Abondant actif", key=qk("qa_ep_act"))
+        details["abondant_resolutif"] = c2.checkbox("Abondant résolutif", key=qk("qa_ep_res"))
 
     # ── Hypoglycémie ──────────────────────────────────────────────────────
     if "hypoglycemie" in m:
         if gl_global is None:
-            gl_l = st.number_input("Glycémie capillaire (mg/dl)", 0, 500, 0, 5, key="qa_hg_gl")
+            gl_l = st.number_input("Glycémie capillaire (mg/dl)", 0, 500, 0, 5, key=qk("qa_hg_gl"))
             if gl_l > 0:
                 details["glycemie_mgdl"] = float(gl_l)
 
@@ -303,10 +320,11 @@ def PRESCRIPTIONS_ANTICIPEES(
         suggestions.append("Adrénaline IM 0.5 mg prête — Vérifier tolérance hémodynamique")
 
     if suggestions:
+        scope = f"pa_{_slug(motif)[:40]}_{_slug(niv)[:8]}"
         with st.expander("💊 Prescriptions anticipées IAO", expanded=False):
             st.caption("Cocher les prescriptions anticipées initiées")
             for item in suggestions:
-                st.checkbox(item, value=False, key=f"pa_{norm(item)[:30]}")
+                st.checkbox(item, value=False, key=_widget_key(norm(item)[:30], scope=scope))
 
     return {"niveau": niv, "items": suggestions} if suggestions else None
 
@@ -346,18 +364,19 @@ def CHECKLIST_5B(medicament: str, dose: str, voie: str, poids: float, uid: str) 
     Checklist 5B — Obligatoire avant toute injection médicamenteuse.
     Source : AR 78 sur l'exercice infirmier — AFMPS 2019.
     """
+    check_scope = f"5b_{uid or st.session_state.get('uid') or 'session'}_{medicament}"
     st.caption(f"Session : {uid} — Poids de référence : {poids} kg")
     checks = [
-        st.checkbox("✅ Bon patient (identité confirmée)", key="5b_patient"),
-        st.checkbox("✅ Bon médicament", key="5b_med"),
-        st.checkbox("✅ Bonne dose", key="5b_dose"),
-        st.checkbox("✅ Bonne voie", key="5b_voie"),
-        st.checkbox("✅ Bon moment / bonne indication", key="5b_moment"),
+        st.checkbox("✅ Bon patient (identité confirmée)", key=_widget_key("5b_patient", scope=check_scope)),
+        st.checkbox("✅ Bon médicament", key=_widget_key("5b_med", scope=check_scope)),
+        st.checkbox("✅ Bonne dose", key=_widget_key("5b_dose", scope=check_scope)),
+        st.checkbox("✅ Bonne voie", key=_widget_key("5b_voie", scope=check_scope)),
+        st.checkbox("✅ Bon moment / bonne indication", key=_widget_key("5b_moment", scope=check_scope)),
     ]
     st.text_input(
         "Traçabilité résumée (à valider)",
         value=f"{medicament} | {dose} | {voie}",
-        key="5b_trace",
+        key=_widget_key("5b_trace", scope=check_scope),
     )
     if all(checks):
         st.success("✅ Checklist 5B complétée — Injection autorisée — Heure : " +
