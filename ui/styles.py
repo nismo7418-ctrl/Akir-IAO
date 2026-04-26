@@ -157,24 +157,15 @@ html, body, [class*="st-"] {
   color: var(--TM);
   margin-bottom: 10px;
   font-family: 'IBM Plex Mono', monospace;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.card-title::before {
-  content: '';
-  display: inline-block;
-  width: 3px;
-  height: 12px;
-  background: var(--P);
-  border-radius: 2px;
+  border-left: 3px solid var(--P);
+  padding-left: 8px;
 }
 
 /* ══════════════════════════════════════════════════════════════════
    ALERTES WCAG AA — Contraste renforcé
 ══════════════════════════════════════════════════════════════════ */
 .al {
-  border-radius: 0 var(--r3) var(--r5) 0;
+  border-radius: 0 var(--r3) var(--r3) 0;
   padding: 7px 12px;
   margin: 4px 0;
   font-size: .76rem;
