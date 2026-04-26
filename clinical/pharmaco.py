@@ -76,6 +76,20 @@ def _nsaid_error(atcd: list) -> Optional[str]:
     return "AINS à éviter : " + ", ".join(blockers)
 
 
+def _use_mg_kg(age: float) -> bool:
+    """Détermine si on utilise les doses en mg/kg (enfants) ou adultes standards."""
+    return age < 15
+
+
+def _format_dose(dose_mg: float, poids: float, age: float, unit: str = "mg") -> str:
+    """Formate l'affichage de la dose selon l'âge."""
+    if _use_mg_kg(age):
+        dose_per_kg = dose_mg / poids
+        return f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} {unit})"
+    else:
+        return f"{_fmt(dose_mg)} {unit}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ANTALGIQUES
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,13 +99,19 @@ def paracetamol(poids: float, age: float, atcd: list) -> Result:
     alerts: List[Alert] = []
     if _has(atcd, "Insuffisance hépatique"):
         _add(alerts, "Insuffisance hépatique : valider la dose cumulative des 24 h", "warning")
-    dose_mg = PARA_DOSE_KG * poids if poids < PARA_POIDS_PIVOT_KG else PARA_DOSE_FIXE_G * 1000.0
-    dose_g = dose_mg / 1000.0
+
+    if _use_mg_kg(age):
+        dose_mg = PARA_DOSE_KG * poids
+        dose_display = f"{_fmt(PARA_DOSE_KG)} mg/kg ({_fmt(dose_mg)} mg)"
+    else:
+        dose_mg = PARA_DOSE_FIXE_G * 1000.0
+        dose_display = f"{_fmt(dose_mg)} mg"
+
     return ({
         "dose_mg": _r(dose_mg, 0),
-        "dose_g": _r(dose_g, 2),
+        "dose_display": dose_display,
         "admin": "IV en 15 min",
-        "note": f"15 mg/kg si < {PARA_POIDS_PIVOT_KG} kg, sinon 1 g fixe",
+        "note": f"15 mg/kg si âge < 15 ans, sinon 1 g fixe",
         "ref": "BCFI — Paracétamol IV",
         "alerts": alerts,
     }, None)
@@ -164,6 +184,81 @@ def diclofenac(poids: float, age: float, atcd: list = None) -> Result:
     return ({
         "dose_mg": 75.0,
         "admin": "IM profonde quadrant supéro-ext. fesse — 75 mg",
+        "note": "Max 150 mg/24 h — À éviter > 48 h",
+        "ref": "BCFI / Voltarène® 75 mg/3 ml IM",
+        "alerts": alerts,
+    }, None)
+
+
+def taradyl_im(poids: float, age: float, atcd: list = None) -> Result:
+    """Taradyl® IM (Kétorolac) — AINS — BCFI."""
+    atcd = atcd or []
+    err = _nsaid_error(atcd)
+    if err:
+        return None, err
+
+    alerts: List[Alert] = []
+    if _has(atcd, "Insuffisance rénale chronique"):
+        _add(alerts, "Insuffisance rénale : contre-indiqué", "danger")
+        return None, "CONTRE-INDIQUÉ : Insuffisance rénale chronique"
+
+    # Dose adulte : 30 mg IM — réduit à 15 mg si âge ≥ 65 ou poids < 50 kg
+    dose_mg = 15.0 if (age >= 65 or poids < 50) else 30.0
+
+    if _use_mg_kg(age):
+        dose_per_kg = dose_mg / poids
+        dose_display = f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} mg)"
+    else:
+        dose_display = f"{_fmt(dose_mg)} mg"
+
+    alerts.extend([
+        ("Éviter > 5 j et en cas de déshydratation", "warning"),
+        ("Dose unique recommandée aux urgences avant réévaluation", "info"),
+    ])
+
+    return ({
+        "dose_mg": dose_mg,
+        "dose_display": dose_display,
+        "admin": "IM profonde — 1 injection",
+        "note": f"30 mg adulte (15 mg si ≥ 65 ans / < 50 kg) — max 5 jours — max 90 mg/j",
+        "ref": "BCFI / Taradyl® — Kétorolac IM",
+        "alerts": alerts,
+    }, None)
+
+
+def diclofenac_im(poids: float, age: float, atcd: list = None) -> Result:
+    """Voltarène® IM (Diclofénac) — AINS — BCFI."""
+    atcd = atcd or []
+    if age < 15:
+        return None, "CONTRE-INDIQUÉ : Voie IM non autorisée avant 15 ans"
+
+    err = _nsaid_error(atcd)
+    if err:
+        return None, err
+
+    if _has(atcd, "Insuffisance rénale chronique"):
+        return None, "CONTRE-INDIQUÉ : Insuffisance rénale (diclofénac néphrotoxique)"
+    if _has(atcd, "Anticoagulants/AOD"):
+        return None, "CONTRE-INDIQUÉ : Anticoagulants (risque hémorragique)"
+
+    alerts: List[Alert] = [
+        ("Injection IM dans le quadrant supéro-externe de la fesse", "info"),
+        ("Ne pas répéter sans réévaluation — max 150 mg/j", "warning"),
+    ]
+    if _has(atcd, "HTA"):
+        _add(alerts, "HTA : surveillance tensionnelle sous AINS", "warning")
+
+    dose_mg = 75.0
+    if _use_mg_kg(age):
+        dose_per_kg = dose_mg / poids
+        dose_display = f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} mg)"
+    else:
+        dose_display = f"{_fmt(dose_mg)} mg"
+
+    return ({
+        "dose_mg": dose_mg,
+        "dose_display": dose_display,
+        "admin": "IM profonde quadrant supéro-ext. fesse",
         "note": "Max 150 mg/24 h — À éviter > 48 h",
         "ref": "BCFI / Voltarène® 75 mg/3 ml IM",
         "alerts": alerts,
