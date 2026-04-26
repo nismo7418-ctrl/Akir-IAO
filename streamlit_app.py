@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="AKIR-IAO v19.0",
     page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ── Imports modules métier ────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ from ui.components import (
     H, SEC, AL, CARD, CARD_END, PURPURA, N2_BANNER,
     GAUGE, VITAUX, TRI_CARD_INLINE, TRI_BANNER_FIXED,
     RX, RX_LOCK, GLYC_WIDGET, BPCO_WIDGET, SI_WIDGET,
-    SBAR_RENDER, DISC, build_sbar,
+    SBAR_RENDER, DISC, build_sbar, EVA_BAR,
 )
 
 MOTS_CAT       = FRENCH_MOTS_CAT
@@ -94,12 +94,15 @@ for k, v in _DEF.items():
 SS = st.session_state
 
 
-def _sync(widget_key: str, state_key: str) -> None:
-    SS[state_key] = SS[widget_key]
-
-
 def _mirror(widget_key: str, state_key: str) -> None:
     SS[widget_key] = SS[state_key]
+
+
+def _show_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco) -> None:
+    """Recalcule le NEWS2 et affiche les alertes. Met à jour SS.v_news2."""
+    SS.v_news2, nw = calculer_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco)
+    for w in nw:
+        AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -261,17 +264,12 @@ with T[0]:
     c1, c2, c3 = st.columns(3)
     _mirror("r_t",   "v_temp"); _mirror("r_fc",  "v_fc");  _mirror("r_pas", "v_pas")
     _mirror("r_sp",  "v_spo2"); _mirror("r_fr",  "v_fr")
-    SS.v_temp = c1.number_input("Température (°C)", 30.0, 45.0, step=0.1, key="r_t",
-                                 on_change=_sync, args=("r_t", "v_temp"))
-    SS.v_fc   = c2.number_input("FC (bpm)",   20, 220, key="r_fc",
-                                 on_change=_sync, args=("r_fc", "v_fc"))
-    SS.v_pas  = c3.number_input("PAS (mmHg)", 40, 260, key="r_pas",
-                                 on_change=_sync, args=("r_pas", "v_pas"))
+    SS.v_temp = c1.number_input("Température (°C)", 30.0, 45.0, step=0.1, key="r_t")
+    SS.v_fc   = c2.number_input("FC (bpm)",   20, 220, key="r_fc")
+    SS.v_pas  = c3.number_input("PAS (mmHg)", 40, 260, key="r_pas")
     c4, c5, c6 = st.columns(3)
-    SS.v_spo2 = c4.number_input("SpO2 (%)",  50, 100, key="r_sp",
-                                 on_change=_sync, args=("r_sp", "v_spo2"))
-    SS.v_fr   = c5.number_input("FR (/min)",  5,  60, key="r_fr",
-                                 on_change=_sync, args=("r_fr", "v_fr"))
+    SS.v_spo2 = c4.number_input("SpO2 (%)",  50, 100, key="r_sp")
+    SS.v_fr   = c5.number_input("FR (/min)",  5,  60, key="r_fr")
     SS.v_gcs  = c6.number_input("GCS (3-15)", 3,  15, int(SS.v_gcs), key="r_gcs")
     CARD_END()
 
@@ -281,15 +279,12 @@ with T[0]:
     if SS.v_bpco:
         BPCO_WIDGET(True)
 
-    SS.v_news2, nw = calculer_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp,
-                                     SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
-    for w in nw:
-        AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
+    _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
     GAUGE(SS.v_news2, SS.v_bpco)
 
     SS.motif = st.selectbox("Motif de recours", MOTIFS_RAPIDES, key="r_mot")
-    SS.cat   = "Tri rapide"
     SS.eva   = int(st.select_slider("EVA", [str(i) for i in range(11)], "0", key="r_eva"))
+    EVA_BAR(SS.eva)
     det = {"eva": SS.eva, "atcd": atcd}
 
     det["purpura"] = st.checkbox("Purpura non effaçable (test du verre)", key="r_pur")
@@ -355,10 +350,7 @@ with T[1]:
     AL(gcs_res["recommendation"], "info")
     CARD_END()
 
-    SS.v_news2, nw = calculer_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp,
-                                     SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
-    for w in nw:
-        AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
+    _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
     N2_BANNER(SS.v_news2)
     GAUGE(SS.v_news2, SS.v_bpco)
     VITAUX(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr, SS.v_temp, SS.v_gcs, SS.v_bpco)
@@ -420,12 +412,10 @@ with T[2]:
 # ═══════════════════════════════════════════════════════════════════════════════
 with T[3]:
     if not SS.motif:
-        SS.motif = "Fièvre"; SS.cat = "Infectieux"
+        SS.motif = "Fièvre"
+        SS.cat = "Infectieux"
 
-    SS.v_news2, nw = calculer_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp,
-                                     SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
-    for w in nw:
-        AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
+    _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
 
     det = SS.det or {}
     if not det.get("glycemie_mgdl") and not SS.gl:
@@ -729,7 +719,7 @@ with T[4]:
 # ONGLET 5 — PHARMACIE
 # ═══════════════════════════════════════════════════════════════════════════════
 with T[5]:
-    gl_ph = (SS.det.get("glycemie_mgdl") if SS.det else None) or SS.gl
+    gl_ph = SS.det.get("glycemie_mgdl") or SS.gl
 
     H(f"""<div style="background:linear-gradient(135deg,#004A99,#0066CC);
         color:#fff;border-radius:10px;padding:12px 18px;margin-bottom:12px;
@@ -1017,7 +1007,7 @@ with T[6]:
         "Glucose 30 % IV":        str(gluc_5b["vol"]) if gluc_5b else "Selon glycémie mesurée",
         "Salbutamol nébulisation": "2,5–5 mg nébulisation",
         "Furosémide IV":          "40–80 mg IV lent",
-        "Midazolam buccal":       str(eme_5b["midazolam_buccal"]["dose"]),
+        "Midazolam buccal":       str((eme_5b or {}).get("midazolam_buccal", {}).get("dose", "Selon poids")),
         "Vesiera® — Kétamine perfusion": str(ves_5b["dose"]) if ves_5b else "Selon protocole algologue",
         "Acide tranexamique IV (1 g)": "1 g IV en 10 min",
         "Autre":                  "À compléter",
