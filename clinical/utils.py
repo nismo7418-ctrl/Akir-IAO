@@ -1,4 +1,5 @@
-# clinical/utils.py – fonctions utilitaires partagées
+# clinical/utils.py — Fonctions utilitaires partagées
+# Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 import unicodedata
 
 def norm(value) -> str:

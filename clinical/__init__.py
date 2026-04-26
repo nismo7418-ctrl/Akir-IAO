@@ -1,2 +1,1 @@
-"""Clinical package for AKIR-IAO."""
-
+"""Clinical package — AKIR-IAO v19.0."""
