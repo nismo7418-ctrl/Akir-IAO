@@ -38,7 +38,7 @@ from clinical.pharmaco import (
 )
 from clinical.french_v12 import (
     FRENCH_MOTS_CAT, FRENCH_MOTIFS_RAPIDES,
-    get_protocol, render_discriminants,
+    get_protocol, render_discriminants, apply_discriminant_selection,
 )
 from ui.eva_pqrst import (
     EVA_WIDGET_COMPLET, SCHEMA_BRULURES, QUESTIONS_AVANCEES,
@@ -61,10 +61,13 @@ MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
 SS = st.session_state
 _defaults = {
     "op": "", "sid": str(uuid.uuid4())[:8].upper(),
+    "uid": None,
     "t_arr": None, "t_cont": None, "t_reev": None,
     "v_temp": 37.0, "v_fc": 80, "v_pas": 120,
     "v_spo2": 98, "v_fr": 16, "v_gcs": 15,
     "v_news2": 0, "v_bpco": False,
+    "age": 45, "age_mois": 3, "poids": 70, "taille": 170,
+    "alg": "", "o2": False, "atcd_other": [],
     "motif": "", "cat": "", "eva": 0, "gl": None,
     "niv": None, "just": "", "crit": "",
     "det": {}, "uid_cur": None,
@@ -74,6 +77,9 @@ for _k, _v in _defaults.items():
     if _k not in SS:
         SS[_k] = _v
 
+if not SS.get("uid"):
+    SS.uid = SS.sid
+
 load_css()
 
 
@@ -81,6 +87,30 @@ def _show_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco) -> None:
     SS.v_news2, nw = calculer_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco)
     for w in nw:
         AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
+
+
+def WK(base: str, scope: str | None = None) -> str:
+    parts = [str(SS.get("uid") or SS.get("sid") or "session")]
+    if scope:
+        parts.append(str(scope))
+    parts.append(str(base))
+    return "__".join(p.replace(" ", "_") for p in parts if p)
+
+
+def _ensure_sidebar_state() -> None:
+    widget_defaults = {
+        "p_age": int(SS.get("age") or 45),
+        "p_am": int(SS.get("age_mois") or 3),
+        "p_kg": int(SS.get("poids") or 70),
+        "p_taille": int(SS.get("taille") or 170),
+        "p_alg": SS.get("alg") or "",
+        "p_atcd_other": list(SS.get("atcd_other") or []),
+        WK("p_o2"): bool(SS.get("o2", False)),
+        WK("r_eva"): str(int(SS.get("eva") or 0)),
+    }
+    for key, value in widget_defaults.items():
+        if key not in SS:
+            SS[key] = value
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -100,6 +130,8 @@ try:
     </div>
     """)
 
+    _ensure_sidebar_state()
+
     # ═══════════════════════════════════════════════════════════════════════════
     # SIDEBAR — Profil patient + Opérateur
     # ═══════════════════════════════════════════════════════════════════════════
@@ -113,11 +145,11 @@ try:
 
         SEC("Chronomètre")
         ca, cb = st.columns(2)
-        if ca.button("⏱ Arrivée", use_container_width=True):
+        if ca.button("⏱ Arrivée", key=WK("timer_arrivee"), use_container_width=True):
             SS.t_arr = datetime.now()
             SS.histo = []
             SS.reevs = []
-        if cb.button("👨‍⚕️ 1er contact", use_container_width=True):
+        if cb.button("👨‍⚕️ 1er contact", key=WK("timer_contact"), use_container_width=True):
             SS.t_cont = datetime.now()
         if SS.t_arr:
             el = (datetime.now() - SS.t_arr).total_seconds()
@@ -127,13 +159,20 @@ try:
               f'font-weight:700;color:{col};">{m_:02d}:{s_:02d}</div>')
 
         SEC("Patient")
-        age = st.number_input("Âge (ans)", 0, 120, 45, key="p_age")
+        age = st.number_input("Âge (ans)", 0, 120, int(SS.age or 45), key="p_age")
         if age == 0:
-            am  = st.number_input("Âge en mois", 0, 11, 3, key="p_am")
+            am  = st.number_input("Âge en mois", 0, 11, int(SS.age_mois or 3), key="p_am")
+            SS.age_mois = am
             age = round(am / 12.0, 4)
             AL(f"Nourrisson {am} mois — Seuils pédiatriques actifs", "info")
-        poids  = st.number_input("Poids (kg)", 1, 250, 70, key="p_kg")
-        taille = st.number_input("Taille (cm)", 50, 220, 170, key="p_taille")
+        else:
+            SS.age_mois = 0
+        SS.age = age
+
+        poids  = st.number_input("Poids (kg)", 1, 250, int(SS.poids or 70), key="p_kg")
+        taille = st.number_input("Taille (cm)", 50, 220, int(SS.taille or 170), key="p_taille")
+        SS.poids = poids
+        SS.taille = taille
 
         if taille > 0 and age >= 18:
             imc = round(poids / (taille / 100) ** 2, 1)
@@ -147,31 +186,31 @@ try:
         with st.expander("📋 Antécédents (ATCD)", expanded=False):
             sb_a1, sb_a2 = st.columns(2)
             atcd_checks = {
-                "HTA":                            sb_a1.checkbox("HTA",            key="sb_hta"),
-                "Insuffisance cardiaque":         sb_a2.checkbox("Insuff. card.",   key="sb_ic"),
-                "Coronaropathie / SCA antérieur": sb_a1.checkbox("Coronaropathie", key="sb_coro"),
-                "AVC / AIT antérieur":            sb_a2.checkbox("AVC / AIT",      key="sb_avc"),
-                "BPCO":                           sb_a1.checkbox("BPCO",           key="sb_bpco"),
-                "Asthme":                         sb_a2.checkbox("Asthme",         key="sb_asthme"),
-                "Diabète type 2":                 sb_a1.checkbox("Diabète T2",     key="sb_diab2"),
-                "Diabète type 1":                 sb_a2.checkbox("Diabète T1",     key="sb_diab1"),
-                "Insuffisance rénale chronique":  sb_a1.checkbox("Insuff. rénale", key="sb_ir"),
-                "Insuffisance hépatique":         sb_a2.checkbox("Insuff. hépa.",  key="sb_ih"),
-                "Épilepsie":                      sb_a1.checkbox("Épilepsie",      key="sb_epi"),
-                "Fibrillation atriale":           sb_a2.checkbox("FA",             key="sb_fa"),
-                "Drépanocytose":                  sb_a1.checkbox("Drépanocytose",  key="sb_drep"),
-                "Immunodépression":               sb_a2.checkbox("Immunodépression", key="sb_immuno"),
+                "HTA":                            sb_a1.checkbox("HTA",            key=WK("sb_hta")),
+                "Insuffisance cardiaque":         sb_a2.checkbox("Insuff. card.",   key=WK("sb_ic")),
+                "Coronaropathie / SCA antérieur": sb_a1.checkbox("Coronaropathie", key=WK("sb_coro")),
+                "AVC / AIT antérieur":            sb_a2.checkbox("AVC / AIT",      key=WK("sb_avc")),
+                "BPCO":                           sb_a1.checkbox("BPCO",           key=WK("sb_bpco")),
+                "Asthme":                         sb_a2.checkbox("Asthme",         key=WK("sb_asthme")),
+                "Diabète type 2":                 sb_a1.checkbox("Diabète T2",     key=WK("sb_diab2")),
+                "Diabète type 1":                 sb_a2.checkbox("Diabète T1",     key=WK("sb_diab1")),
+                "Insuffisance rénale chronique":  sb_a1.checkbox("Insuff. rénale", key=WK("sb_ir")),
+                "Insuffisance hépatique":         sb_a2.checkbox("Insuff. hépa.",  key=WK("sb_ih")),
+                "Épilepsie":                      sb_a1.checkbox("Épilepsie",      key=WK("sb_epi")),
+                "Fibrillation atriale":           sb_a2.checkbox("FA",             key=WK("sb_fa")),
+                "Drépanocytose":                  sb_a1.checkbox("Drépanocytose",  key=WK("sb_drep")),
+                "Immunodépression":               sb_a2.checkbox("Immunodépression", key=WK("sb_immuno")),
             }
 
         # ── Facteurs favorisants ──────────────────────────────────────────────
         with st.expander("⚠️ Facteurs favorisants", expanded=False):
             sb_f1, sb_f2 = st.columns(2)
             risk_checks = {
-                "Grossesse":                    sb_f1.checkbox("Grossesse",       key="sb_gros"),
-                "Allaitement":                  sb_f2.checkbox("Allaitement",     key="sb_allait"),
-                "Obésité morbide (IMC ≥ 40)":  sb_f1.checkbox("Obésité IMC≥40", key="sb_ob"),
-                "Chirurgie récente (<4 sem.)":  sb_f2.checkbox("Chir. récente",   key="sb_chir"),
-                "Tabagisme":                    sb_f1.checkbox("Tabagisme",       key="sb_tabac"),
+                "Grossesse":                    sb_f1.checkbox("Grossesse",       key=WK("sb_gros")),
+                "Allaitement":                  sb_f2.checkbox("Allaitement",     key=WK("sb_allait")),
+                "Obésité morbide (IMC ≥ 40)":  sb_f1.checkbox("Obésité IMC≥40", key=WK("sb_ob")),
+                "Chirurgie récente (<4 sem.)":  sb_f2.checkbox("Chir. récente",   key=WK("sb_chir")),
+                "Tabagisme":                    sb_f1.checkbox("Tabagisme",       key=WK("sb_tabac")),
             }
             if risk_checks.get("Grossesse"):
                 trimestre = st.selectbox("Trimestre",
@@ -182,12 +221,12 @@ try:
         with st.expander("💊 Traitements en cours", expanded=False):
             sb_t1, sb_t2 = st.columns(2)
             trt_checks = {
-                "Anticoagulants/AOD":           sb_t1.checkbox("Anticoagulants", key="sb_acg"),
-                "Antiagrégants plaquettaires":  sb_t2.checkbox("Antiagrégants",  key="sb_aap"),
-                "Bêta-bloquants":               sb_t1.checkbox("Bêtabloquants",  key="sb_beta"),
-                "Corticoïdes au long cours":    sb_t2.checkbox("Corticoïdes",    key="sb_cort"),
-                "IMAO (inhibiteurs MAO)":       sb_t1.checkbox("IMAO",           key="sb_imao"),
-                "Chimiothérapie en cours":      sb_t2.checkbox("Chimio",         key="sb_chimo"),
+                "Anticoagulants/AOD":           sb_t1.checkbox("Anticoagulants", key=WK("sb_acg")),
+                "Antiagrégants plaquettaires":  sb_t2.checkbox("Antiagrégants",  key=WK("sb_aap")),
+                "Bêta-bloquants":               sb_t1.checkbox("Bêtabloquants",  key=WK("sb_beta")),
+                "Corticoïdes au long cours":    sb_t2.checkbox("Corticoïdes",    key=WK("sb_cort")),
+                "IMAO (inhibiteurs MAO)":       sb_t1.checkbox("IMAO",           key=WK("sb_imao")),
+                "Chimiothérapie en cours":      sb_t2.checkbox("Chimio",         key=WK("sb_chimo")),
             }
 
         # Liste ATCD consolidée
@@ -196,10 +235,13 @@ try:
         other_atcd  = st.multiselect(
             "Autres antécédents", [a for a in ATCD if a not in _base_atcd], key="p_atcd_other"
         )
+        SS.atcd_other = other_atcd
         atcd = _base_atcd + other_atcd
 
         alg = st.text_input("Allergies connues", key="p_alg", placeholder="ex: Pénicilline")
-        o2  = st.checkbox("O₂ supplémentaire", key="p_o2")
+        SS.alg = alg
+        o2  = st.checkbox("O₂ supplémentaire", key=WK("p_o2"))
+        SS.o2 = o2
 
         # ── Pharmacovigilance ────────────────────────────────────────────────
         with st.expander("🚨 Alertes Pharmacovigilance", expanded=True):
@@ -245,7 +287,7 @@ try:
             CARD_END()
 
             CARD("Motif & Sécurité", "")
-            SS.v_bpco = st.checkbox("Patient BPCO connu ?", key="r_bp",
+            SS.v_bpco = st.checkbox("Patient BPCO connu ?", key=WK("r_bp"),
                                      value=bool("BPCO" in atcd))
             if SS.v_bpco:
                 BPCO_WIDGET(True)
@@ -256,17 +298,18 @@ try:
             GAUGE(SS.v_news2, SS.v_bpco)
 
             SS.motif = st.selectbox("Motif de recours", MOTIFS_RAPIDES, key="r_mot")
-            if "r_eva" not in SS:
-                SS["r_eva"] = str(SS.eva)
+            rapid_eva_key = WK("r_eva")
+            if rapid_eva_key not in SS:
+                SS[rapid_eva_key] = str(SS.eva)
             SS.eva = int(st.select_slider("EVA", [str(i) for i in range(11)],
-                                           key="r_eva"))
+                                           key=rapid_eva_key))
             EVA_BAR(SS.eva)
             det = {"eva": SS.eva, "atcd": atcd}
 
             # ── Drapeaux rouges dans un formulaire (pas de rechargement à chaque clic)
             with st.form("form_red_flags"):
                 det["purpura"] = st.checkbox("Purpura non effaçable (test du verre)",
-                                              key="r_pur")
+                                              key=WK("r_pur"))
                 gl_r = GLYC_WIDGET("r_gl", "Glycémie capillaire (mg/dl)")
                 st.form_submit_button("Valider les drapeaux rouges",
                                        use_container_width=True)
@@ -281,6 +324,7 @@ try:
             CARD_END()
 
             if st.button("⚡ Calculer le triage", type="primary",
+                          key=WK("triage_rapide_calc"),
                           use_container_width=True):
                 SS.niv, SS.just, SS.crit = french_triage(
                     SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
@@ -310,18 +354,18 @@ try:
             SS.v_spo2 = v4.number_input("SpO2 (%)",   50, 100, int(SS.v_spo2), key="v_sp2")
             SS.v_fr   = v5.number_input("FR (/min)",   5,  60, int(SS.v_fr),   key="v_fr2")
             SS.v_gcs  = v6.number_input("GCS (3-15)",  3,  15, int(SS.v_gcs),  key="v_gcs2")
-            SS.v_bpco = st.checkbox("Patient BPCO", key="v_bp2",
+            SS.v_bpco = st.checkbox("Patient BPCO", key=WK("v_bp2"),
                                      value=bool(SS.v_bpco or ("BPCO" in atcd)))
             CARD_END()
 
             CARD("GCS Détaillé", "")
-            gcs_y = st.select_slider("Ouverture des yeux", [1, 2, 3, 4], 4, key="gcs_y",
+            gcs_y = st.select_slider("Ouverture des yeux", [1, 2, 3, 4], 4, key=WK("gcs_y"),
                 format_func=lambda x: {1:"1–Absente",2:"2–Douleur",
                                         3:"3–Bruit",4:"4–Spontanée"}[x])
-            gcs_v = st.select_slider("Réponse verbale", [1, 2, 3, 4, 5], 5, key="gcs_v",
+            gcs_v = st.select_slider("Réponse verbale", [1, 2, 3, 4, 5], 5, key=WK("gcs_v"),
                 format_func=lambda x: {1:"1–Aucune",2:"2–Sons",3:"3–Mots",
                                         4:"4–Confus",5:"5–Orientée"}[x])
-            gcs_m = st.select_slider("Réponse motrice", [1, 2, 3, 4, 5, 6], 6, key="gcs_m",
+            gcs_m = st.select_slider("Réponse motrice", [1, 2, 3, 4, 5, 6], 6, key=WK("gcs_m"),
                 format_func=lambda x: {1:"1–Aucune",2:"2–Extension",3:"3–Flex. anorm.",
                                         4:"4–Retrait",5:"5–Localise",6:"6–Obéit"}[x])
             gcs_res  = calculer_gcs(gcs_y, gcs_v, gcs_m, age)
@@ -417,6 +461,14 @@ try:
                 SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
                 SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, gl_t,
             )
+            proto = get_protocol(SS.motif)
+            if proto and proto.get("criteria"):
+                CARD("Critères discriminants FRENCH", "")
+                selected_crit = render_discriminants(SS.motif, key=WK("t_disc"))
+                CARD_END()
+                SS.niv, SS.just, SS.crit = apply_discriminant_selection(
+                    SS.niv, SS.just, SS.crit, selected_crit
+                )
             N2_BANNER(SS.v_news2)
             PURPURA(det)
             GAUGE(SS.v_news2, SS.v_bpco)
@@ -430,13 +482,8 @@ try:
             for d in D: AL(d, "danger")
             for a in A: AL(a, "warning")
 
-            proto = get_protocol(SS.motif)
-            if proto and proto.get("criteria"):
-                CARD("Critères discriminants FRENCH", "")
-                render_discriminants(SS.motif, key="t_disc")
-                CARD_END()
-
             if st.button("💾 Enregistrer ce patient", type="primary",
+                          key=WK("save_patient"),
                           use_container_width=True):
                 uid = enregistrer_patient({
                     "motif": SS.motif, "cat": SS.cat, "niv": SS.niv,
@@ -527,15 +574,15 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("Score HEART — Douleur thoracique", "")
                 st.caption("Six AJ et al., NHJ 2008")
                 h1, h2 = st.columns(2)
-                h_hist = h1.select_slider("Histoire", [0,1,2], key="ht_h",
+                h_hist = h1.select_slider("Histoire", [0,1,2], key=WK("ht_h"),
                     format_func=lambda x: {0:"0–Peu évocateur",1:"1–Modéré",2:"2–Très suspect"}[x])
-                h_ecg  = h2.select_slider("ECG",     [0,1,2], key="ht_e",
+                h_ecg  = h2.select_slider("ECG",     [0,1,2], key=WK("ht_e"),
                     format_func=lambda x: {0:"0–Normal",1:"1–Non spéc.",2:"2–Bloc/STEMI"}[x])
-                h_age  = h1.select_slider("Âge",     [0,1,2], key="ht_a",
+                h_age  = h1.select_slider("Âge",     [0,1,2], key=WK("ht_a"),
                     format_func=lambda x: {0:"0–<45 ans",1:"1–45-65",2:"2–>65 ans"}[x])
-                h_rfcv = h2.select_slider("FRCV",    [0,1,2], key="ht_r",
+                h_rfcv = h2.select_slider("FRCV",    [0,1,2], key=WK("ht_r"),
                     format_func=lambda x: {0:"0–Aucun",1:"1–1-2",2:"2–≥3 ou ATCD"}[x])
-                h_trop = h1.select_slider("Troponine",[0,1,2], key="ht_t",
+                h_trop = h1.select_slider("Troponine",[0,1,2], key=WK("ht_t"),
                     format_func=lambda x: {0:"0–Normale",1:"1–1-3x N",2:"2–>3x N"}[x])
                 ht = calculer_heart(h_hist, h_ecg, h_age, h_rfcv, h_trop)
                 AL(ht.get("interpretation",""),
@@ -553,13 +600,13 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                     st.caption("Antman EM et al., JAMA 2000")
                     st.info("ℹ️ TIMI activé automatiquement — motif : douleur thoracique")
                     ti1, ti2 = st.columns(2)
-                    ti_age  = ti1.checkbox("Âge ≥ 65 ans",              key="ti_age",  value=age >= 65)
-                    ti_frcv = ti2.checkbox("≥ 3 facteurs de risque CV",  key="ti_frcv")
-                    ti_sten = ti1.checkbox("Sténose coronaire ≥ 50 %",   key="ti_sten")
-                    ti_ecg  = ti2.checkbox("Déviation ST à l'ECG",        key="ti_ecg")
-                    ti_ang  = ti1.checkbox("≥ 2 épisodes angineux/24 h", key="ti_ang")
-                    ti_asp  = ti2.checkbox("Aspirine dans les 7 jours",   key="ti_asp")
-                    ti_trop = ti1.checkbox("Marqueurs cardiaques +",      key="ti_trop")
+                    ti_age  = ti1.checkbox("Âge ≥ 65 ans",              key=WK("ti_age"),  value=age >= 65)
+                    ti_frcv = ti2.checkbox("≥ 3 facteurs de risque CV",  key=WK("ti_frcv"))
+                    ti_sten = ti1.checkbox("Sténose coronaire ≥ 50 %",   key=WK("ti_sten"))
+                    ti_ecg  = ti2.checkbox("Déviation ST à l'ECG",        key=WK("ti_ecg"))
+                    ti_ang  = ti1.checkbox("≥ 2 épisodes angineux/24 h", key=WK("ti_ang"))
+                    ti_asp  = ti2.checkbox("Aspirine dans les 7 jours",   key=WK("ti_asp"))
+                    ti_trop = ti1.checkbox("Marqueurs cardiaques +",      key=WK("ti_trop"))
                     ti_res   = calculer_timi(ti_age, ti_frcv, ti_sten, ti_ecg,
                                              ti_ang, ti_asp, ti_trop)
                     ti_score = ti_res.get("score_val") or 0
@@ -584,11 +631,11 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("BE-FAST — Dépistage AVC", "")
                 st.caption("Kothari RU, Ann Emerg Med 1999")
                 f1, f2 = st.columns(2)
-                bf_ba  = f1.checkbox("Balance (équilibre)", key="bf_b")
-                bf_ey  = f2.checkbox("Eyes (vision)",       key="bf_e")
-                bf_fa  = f1.checkbox("Face (asymétrie)",    key="bf_f")
-                bf_ar  = f2.checkbox("Arm (déficit moteur)",key="bf_a")
-                bf_sp  = f1.checkbox("Speech (langage)",    key="bf_sp")
+                bf_ba  = f1.checkbox("Balance (équilibre)", key=WK("bf_b"))
+                bf_ey  = f2.checkbox("Eyes (vision)",       key=WK("bf_e"))
+                bf_fa  = f1.checkbox("Face (asymétrie)",    key=WK("bf_f"))
+                bf_ar  = f2.checkbox("Arm (déficit moteur)",key=WK("bf_a"))
+                bf_sp  = f1.checkbox("Speech (langage)",    key=WK("bf_sp"))
                 bf_ti  = f2.text_input("Heure dernière fois vu bien", key="bf_t",
                                         placeholder="14:30")
                 bf_res = evaluer_fast(bf_fa, bf_ar, bf_sp, bf_ti, bf_ba, bf_ey)
@@ -600,11 +647,11 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("Algoplus — Douleur non communicant", "")
                 st.caption("Rat P et al., Eur J Pain 2011")
                 a1, a2 = st.columns(2)
-                alg_v = a1.checkbox("Visage douloureux",     key="alg_v")
-                alg_r = a2.checkbox("Regard distant",        key="alg_r")
-                alg_p = a1.checkbox("Plaintes verbales",     key="alg_p")
-                alg_a = a2.checkbox("Attitudes défensives",  key="alg_a")
-                alg_c = a1.checkbox("Comportements inhabituels", key="alg_c")
+                alg_v = a1.checkbox("Visage douloureux",     key=WK("alg_v"))
+                alg_r = a2.checkbox("Regard distant",        key=WK("alg_r"))
+                alg_p = a1.checkbox("Plaintes verbales",     key=WK("alg_p"))
+                alg_a = a2.checkbox("Attitudes défensives",  key=WK("alg_a"))
+                alg_c = a1.checkbox("Comportements inhabituels", key=WK("alg_c"))
                 alg_res = calculer_algoplus(alg_v, alg_r, alg_p, alg_a, alg_c)
                 AL(alg_res.get("interpretation",""),
                    "danger" if (alg_res.get("score_val") or 0) >= 2 else "success")
@@ -617,13 +664,13 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
             with s2_l:
                 CARD("CURB-65 — Pneumonie communautaire", "")
                 st.caption("Lim WS et al., Thorax 2003")
-                cb_c = st.checkbox("Confusion",              key="cb_c")
-                cb_u = st.checkbox("Urée > 7 mmol/l",       key="cb_u")
-                cb_r = st.checkbox("FR ≥ 30/min",           key="cb_r",
+                cb_c = st.checkbox("Confusion",              key=WK("cb_c"))
+                cb_u = st.checkbox("Urée > 7 mmol/l",       key=WK("cb_u"))
+                cb_r = st.checkbox("FR ≥ 30/min",           key=WK("cb_r"),
                                     value=(SS.v_fr or 16) >= 30)
-                cb_b = st.checkbox("PAS < 90 ou PAD < 60",  key="cb_b",
+                cb_b = st.checkbox("PAS < 90 ou PAD < 60",  key=WK("cb_b"),
                                     value=(SS.v_pas or 120) < 90)
-                cb_a = st.checkbox("Âge ≥ 65 ans",          key="cb_a",
+                cb_a = st.checkbox("Âge ≥ 65 ans",          key=WK("cb_a"),
                                     value=age >= 65)
                 cb_res = calculer_curb65(cb_c, cb_u, cb_r, cb_b, cb_a)
                 AL(cb_res.get("interpretation",""),
@@ -635,16 +682,16 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("Wells TVP", "")
                 st.caption("Wells PS et al., Lancet 1997")
                 wt1, wt2 = st.columns(2)
-                wt_ca = wt1.checkbox("Cancer actif",          key="wt_ca")
-                wt_im = wt2.checkbox("Immobilisation > 3 j",  key="wt_im")
-                wt_ch = wt1.checkbox("Chirurgie récente",     key="wt_ch")
-                wt_se = wt2.checkbox("Sensibilité veine",     key="wt_se")
-                wt_oe = wt1.checkbox("Œdème à godet",        key="wt_oe")
-                wt_am = wt2.checkbox("Asymétrie mollet",      key="wt_am")
-                wt_av = wt1.checkbox("Asymétrie membre",      key="wt_av")
-                wt_vc = wt2.checkbox("Veines collatérales",   key="wt_vc")
-                wt_an = wt1.checkbox("ATCD TVP",              key="wt_an")
-                wt_da = wt2.checkbox("Diag. alternatif prob.",key="wt_da")
+                wt_ca = wt1.checkbox("Cancer actif",          key=WK("wt_ca"))
+                wt_im = wt2.checkbox("Immobilisation > 3 j",  key=WK("wt_im"))
+                wt_ch = wt1.checkbox("Chirurgie récente",     key=WK("wt_ch"))
+                wt_se = wt2.checkbox("Sensibilité veine",     key=WK("wt_se"))
+                wt_oe = wt1.checkbox("Œdème à godet",        key=WK("wt_oe"))
+                wt_am = wt2.checkbox("Asymétrie mollet",      key=WK("wt_am"))
+                wt_av = wt1.checkbox("Asymétrie membre",      key=WK("wt_av"))
+                wt_vc = wt2.checkbox("Veines collatérales",   key=WK("wt_vc"))
+                wt_an = wt1.checkbox("ATCD TVP",              key=WK("wt_an"))
+                wt_da = wt2.checkbox("Diag. alternatif prob.",key=WK("wt_da"))
                 wt_res = calculer_wells_tvp(wt_ca, wt_im, wt_ch, wt_se, wt_oe,
                                              wt_am, wt_av, wt_vc, wt_an, wt_da)
                 AL(wt_res.get("interpretation",""),
@@ -657,14 +704,14 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("Wells EP", "")
                 st.caption("Wells PS et al., Thromb Haemost 2000")
                 we1, we2 = st.columns(2)
-                we_tvp = we1.checkbox("Symptômes TVP",         key="we_tvp")
-                we_ep  = we2.checkbox("EP plus probable",      key="we_ep")
-                we_fc  = we1.checkbox("FC > 100/min",          key="we_fc",
+                we_tvp = we1.checkbox("Symptômes TVP",         key=WK("we_tvp"))
+                we_ep  = we2.checkbox("EP plus probable",      key=WK("we_ep"))
+                we_fc  = we1.checkbox("FC > 100/min",          key=WK("we_fc"),
                                        value=(SS.v_fc or 80) > 100)
-                we_im  = we2.checkbox("Immobilisation/chir.",  key="we_im")
-                we_an  = we1.checkbox("ATCD TVP/EP",           key="we_an")
-                we_he  = we2.checkbox("Hémoptysie",            key="we_he")
-                we_ca  = we1.checkbox("Cancer",                key="we_ca")
+                we_im  = we2.checkbox("Immobilisation/chir.",  key=WK("we_im"))
+                we_an  = we1.checkbox("ATCD TVP/EP",           key=WK("we_an"))
+                we_he  = we2.checkbox("Hémoptysie",            key=WK("we_he"))
+                we_ca  = we1.checkbox("Cancer",                key=WK("we_ca"))
                 we_res = calculer_wells_ep(we_tvp, we_ep, we_fc, we_im,
                                             we_an, we_he, we_ca)
                 AL(we_res.get("interpretation",""),
@@ -676,7 +723,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 CARD("CFS — Clinical Frailty Scale", "")
                 st.caption("Rockwood K et al., CMAJ 2005")
                 cfs_n = st.select_slider("Niveau fragilité", list(range(1, 10)), 1,
-                    key="cfs_n",
+                    key=WK("cfs_n"),
                     format_func=lambda x: {
                         1:"1–Très robuste",2:"2–Bien portant",3:"3–Maladies traitées",
                         4:"4–Vulnérable",5:"5–Légèrement fragile",6:"6–Modérément fragile",
@@ -694,12 +741,12 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
             with s3_l:
                 CARD("Règles d'Ottawa — Cheville / Pied", "")
                 st.caption("Stiell IG et al., JAMA 1993")
-                ot_ap = st.checkbox("Incapacité d'appui (4 pas)", key="ot_ap")
+                ot_ap = st.checkbox("Incapacité d'appui (4 pas)", key=WK("ot_ap"))
                 ot1, ot2 = st.columns(2)
-                ot_mm = ot1.checkbox("Douleur malléole médiale",   key="ot_mm")
-                ot_tl = ot2.checkbox("Douleur malléole latérale",  key="ot_tl")
-                ot_5m = ot1.checkbox("Douleur base 5e métatarse",  key="ot_5m")
-                ot_nv = ot2.checkbox("Douleur naviculaire",        key="ot_nv")
+                ot_mm = ot1.checkbox("Douleur malléole médiale",   key=WK("ot_mm"))
+                ot_tl = ot2.checkbox("Douleur malléole latérale",  key=WK("ot_tl"))
+                ot_5m = ot1.checkbox("Douleur base 5e métatarse",  key=WK("ot_5m"))
+                ot_nv = ot2.checkbox("Douleur naviculaire",        key=WK("ot_nv"))
                 ot_res = regle_ottawa_cheville(ot_mm, ot_tl, ot_5m, ot_nv, ot_ap)
                 AL(ot_res.get("interpretation",""),
                    "warning" if (ot_res.get("score_val") or 0) else "success")
@@ -712,14 +759,14 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 AL("Non applicable si : GCS < 13 | coagulopathie | convulsion | < 16 ans",
                    "warning")
                 cc1, cc2 = st.columns(2)
-                cc_g  = cc1.checkbox("GCS < 15 à 2 h",          key="cc_g")
-                cc_s  = cc2.checkbox("Suspicion fracture ouverte",key="cc_s")
-                cc_f  = cc1.checkbox("Signe fracture base crâne",key="cc_f")
-                cc_v  = cc2.checkbox("Vomissements ≥ 2",        key="cc_v")
-                cc_a  = cc1.checkbox("Âge ≥ 65 ans",            key="cc_a",
+                cc_g  = cc1.checkbox("GCS < 15 à 2 h",          key=WK("cc_g"))
+                cc_s  = cc2.checkbox("Suspicion fracture ouverte",key=WK("cc_s"))
+                cc_f  = cc1.checkbox("Signe fracture base crâne",key=WK("cc_f"))
+                cc_v  = cc2.checkbox("Vomissements ≥ 2",        key=WK("cc_v"))
+                cc_a  = cc1.checkbox("Âge ≥ 65 ans",            key=WK("cc_a"),
                                       value=age >= 65)
-                cc_am = cc2.checkbox("Amnésie ≥ 30 min",        key="cc_am")
-                cc_m  = cc1.checkbox("Mécanisme dangereux",      key="cc_m")
+                cc_am = cc2.checkbox("Amnésie ≥ 30 min",        key=WK("cc_am"))
+                cc_m  = cc1.checkbox("Mécanisme dangereux",      key=WK("cc_m"))
                 cc_res = regle_canadian_ct(cc_g, cc_s, cc_f, cc_v, cc_a, cc_am, cc_m)
                 AL(cc_res.get("interpretation",""),
                    "danger"  if (cc_res.get("score_val") or 0) == 2 else
@@ -896,7 +943,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
 
         with ph2_c2:
             CARD("Naloxone IV — Antidote opioïdes", "")
-            dep_ph = st.checkbox("Patient dépendant aux opioïdes", key="ph_dep")
+            dep_ph = st.checkbox("Patient dépendant aux opioïdes", key=WK("ph_dep"))
             nr, _ = naloxone(poids, age, dep_ph, atcd)
             if nr:
                 for m_, c_ in (nr or {}).get("alerts", []): AL(m_, c_)
@@ -952,7 +999,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
 
         CARD("Salbutamol nébulisation — Bronchospasme", "")
         grav = st.select_slider("Gravité", ["legere","moderee","severe"], "moderee",
-            key="ph_grav",
+            key=WK("ph_grav"),
             format_func=lambda x: {"legere":"Légère","moderee":"Modérée","severe":"Sévère"}[x])
         sr, se = salbutamol(poids, age, grav, atcd)
         if se:
@@ -1130,7 +1177,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                     if mins > delai_cible:
                         AL(f"⏱ Délai cible Tri {SS.niv} dépassé ({delai_cible} min) — Relancer le médecin", "danger")
 
-                if st.button("✅ Enregistrer la réévaluation", use_container_width=True):
+                if st.button("✅ Enregistrer la réévaluation", key=WK("save_reeval"), use_container_width=True):
                     SS.reevs.append({
                         "h": datetime.now().strftime("%H:%M"),
                         "fc": re_fc, "pas": re_pas, "spo2": re_spo2,
@@ -1200,7 +1247,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                 key="re_5b_voie")
             CHECKLIST_5B(
                 medicament=med_sel, dose=dose_pre, voie=voie_pre,
-                poids=poids, uid=SS.uid_cur or SS.sid,
+                poids=poids, uid=SS.uid_cur or SS.uid,
             )
             CARD_END()
             DISC()
@@ -1244,7 +1291,7 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                     file_name=f"akir_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv", use_container_width=True)
 
-            if st.button("🔐 Vérifier intégrité audit", use_container_width=True):
+            if st.button("🔐 Vérifier intégrité audit", key=WK("audit_integrity"), use_container_width=True):
                 audit = audit_verifier_integrite()
                 AL(audit.get("message",""), "success" if audit.get("ok") else "danger")
             CARD_END()
