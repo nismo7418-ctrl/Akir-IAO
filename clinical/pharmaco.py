@@ -6,6 +6,9 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 from clinical.utils import norm
 from config import (
+    CLEV_DEBIT_INIT_MG_H, CLEV_DEBIT_MAX_MG_H, CLEV_PALIER_S,
+    MEOPA_DEBIT_L_MIN, MEOPA_DUREE_MAX_MIN,
+    MIDAZ_IV_KG, MIDAZ_IV_MAX_MG, MIDAZ_IV_CONVULS_KG, MIDAZ_IV_CONVULS_MAX,
     ADRE_DOSE_ADULTE_MG, ADRE_DOSE_KG, ADRE_POIDS_ADULTE_KG,
     CEFRTRX_ADULTE_G, CEFRTRX_PED_KG,
     CLONAZEPAM_IV_KG, CLONAZEPAM_IV_MAX_MG,
@@ -558,6 +561,124 @@ def vesiera(poids: float, age: float, atcd: list = None) -> Result:
         "note": "Traitement monitorisé — Hors autonomie IAO sans prescription médicale",
         "ref": "Protocole Hainaut — Perfusion kétamine Vesiera",
         "alerts": [("Surveillance monitorage, TA, FC et saturation pendant la perfusion", "warning")],
+    }, None)
+
+
+def clevidipine(pas: float, poids: float, contexte: str = "HTA sévère", atcd: list = None) -> Result:
+    """Clévidipine IV (Vesierra®) — HTA sévère — BCFI/ESC 2023.
+    Inhibiteur calcique dihydropyridine d'action ultrarapide — T½ ~1 min.
+    """
+    atcd = atcd or []
+    if _has(atcd, "Sténose aortique sévère"):
+        return None, "CONTRE-INDIQUÉ : Sténose aortique sévère"
+    if _has(atcd, "Allergie soja", "Allergie œuf"):
+        return None, "CONTRE-INDIQUÉ : Allergie soja/œuf (émulsion lipidique)"
+    if _has(atcd, "Insuffisance cardiaque décompensée"):
+        return None, "CONTRE-INDIQUÉ : Insuffisance cardiaque décompensée (shunt AV)"
+
+    alerts: List[Alert] = []
+    if _has(atcd, "Insuffisance hépatique"):
+        _add(alerts, "Insuff. hépatique : prudence — surveillance rapprochée", "warning")
+    if _has(atcd, "Insuffisance rénale chronique"):
+        _add(alerts, "Insuff. rénale : pas d'ajustement (métabolisme plasmatique)", "info")
+    if _has(atcd, "Diabète type 1", "Diabète type 2"):
+        _add(alerts, "Diabète : l'émulsion lipidique apporte ~0,2 g lipides/ml", "info")
+
+    cibles = {
+        "HTA sévère":          "PAS cible < 180 mmHg — réduction progressive 20-25 % en 1 h",
+        "OAP hypertensif":     "PAS cible < 140 mmHg — vasodilatation pulmonaire bénéfique",
+        "Dissection aortique": "PAS < 120 mmHg ET FC < 60/min — associer bêtabloquant IV",
+        "Péri-opératoire":     "Cible définie par anesthésiste/chirurgien",
+    }
+    return ({
+        "debit_init":  CLEV_DEBIT_INIT_MG_H,
+        "debit_max":   CLEV_DEBIT_MAX_MG_H,
+        "palier_s":    CLEV_PALIER_S,
+        "cible":       cibles.get(contexte, "Cible selon étiologie — Avis médical"),
+        "admin":       (f"IV continue : démarrer à {CLEV_DEBIT_INIT_MG_H} mg/h — "
+                        f"doubler toutes les {CLEV_PALIER_S} s jusqu'à effet — "
+                        f"max {CLEV_DEBIT_MAX_MG_H} mg/h"),
+        "note":        "Flacon 50 ml (0,5 mg/ml) — Agiter avant usage — Ne pas mélanger",
+        "ref":         "BCFI / ESC 2023 — Clévidipine (Vesierra®) IV",
+        "alerts":      alerts,
+    }, None)
+
+
+def meopa(age: float, atcd: list = None) -> Result:
+    """MEOPA (Kalinox® 50/50 O₂/N₂O) — Analgésie/Anxiolyse procédurale — BCFI."""
+    atcd = atcd or []
+    ci = []
+    if _has(atcd, "Pneumothorax"):
+        ci.append("pneumothorax (expansion gazeuse N₂O)")
+    if _has(atcd, "Occlusion intestinale", "Distension abdominale"):
+        ci.append("distension gazeuse/occlusion")
+    if _has(atcd, "Déficit vitamine B12", "Déficit folates"):
+        ci.append("déficit B12/folates (inactivation méthionine-synthase)")
+    if _has(atcd, "Hypertension intracrânienne"):
+        ci.append("HTIC (vasodilatation cérébrale)")
+    if age > 0 and age < 1:
+        ci.append("nourrisson < 1 an")
+    if ci:
+        return None, "CONTRE-INDIQUÉ : " + " | ".join(ci)
+
+    alerts: List[Alert] = [
+        ("Consentement éclairé du patient/tuteur obligatoire", "warning"),
+        ("Opérateur administrateur ≠ opérateur procédure (2 professionnels requis)", "info"),
+        ("Ventilation de la pièce obligatoire — Récupération 5 min avant mobilisation", "info"),
+    ]
+    if _has(atcd, "BPCO"):
+        _add(alerts, "BPCO : FiO₂ 50 % — Surveiller SpO₂ en continu", "warning")
+    if age < 5:
+        _add(alerts, "Enfant < 5 ans : coopération requise — évaluer la faisabilité", "warning")
+    if _has(atcd, "Grossesse"):
+        _add(alerts, "Grossesse T1 : éviter — T2/T3 : discussion spécialisée requise", "danger")
+
+    return ({
+        "melange":    "50 % O₂ / 50 % N₂O (Kalinox®)",
+        "debit":      f"≥ {MEOPA_DEBIT_L_MIN} L/min",
+        "duree_max":  f"≤ {MEOPA_DUREE_MAX_MIN} min par session",
+        "admin":      (f"Pré-inhalation 3 min avant geste — Masque étanche — "
+                       f"Débit ≥ {MEOPA_DEBIT_L_MIN} L/min — Max {MEOPA_DUREE_MAX_MIN} min"),
+        "note":       "Surveillance SpO₂ + conscience — Arrêt si nausées/vomissements",
+        "ref":        "BCFI / SFMU — MEOPA Kalinox® 50/50 — Analgésie procédurale",
+        "alerts":     alerts,
+    }, None)
+
+
+def midazolam_iv(poids: float, age: float, indication: str = "sedation", atcd: list = None) -> Result:
+    """Midazolam IV (Hypnovel®) — Sédation/Convulsion urgence — BCFI."""
+    atcd = atcd or []
+    alerts: List[Alert] = []
+    if _has(atcd, "BPCO"):
+        _add(alerts, "BPCO : réduire dose de 30 % — Risque dépression respiratoire", "warning")
+    if _has(atcd, "Insuffisance hépatique"):
+        _add(alerts, "Insuff. hépatique : demi-vie prolongée — titration très prudente", "warning")
+    if _has(atcd, "Anticoagulants/AOD"):
+        _add(alerts, "Anticoagulants : privilégier voie IV", "info")
+
+    if indication == "convulsion":
+        dose_mg = _r(min(MIDAZ_IV_CONVULS_KG * poids, MIDAZ_IV_CONVULS_MAX), 1)
+        admin   = "IV lent 2 min — Surveillance SpO₂ continue — Répéter si nécessaire (max 2×)"
+        note    = f"Crise convulsive : {_fmt(dose_mg)} mg IV — Antidote : Flumazénil 0,2 mg IV"
+    else:
+        dose_mg = _r(min(MIDAZ_IV_KG * poids, MIDAZ_IV_MAX_MG), 1)
+        admin   = "IV lent 2 min — Titrer par bolus 1 mg/2 min — Matériel réa disponible"
+        note    = f"Sédation : {_fmt(dose_mg)} mg IV — Antidote : Flumazénil (Anexate®) 0,2 mg IV"
+
+    if _use_mg_kg(age):
+        kg = MIDAZ_IV_CONVULS_KG if indication == "convulsion" else MIDAZ_IV_KG
+        dose_display = f"{_fmt(kg)} mg/kg ({_fmt(dose_mg)} mg)"
+    else:
+        dose_display = f"{_fmt(dose_mg)} mg"
+
+    return ({
+        "dose_mg":      dose_mg,
+        "dose_display": dose_display,
+        "admin":        admin,
+        "note":         note,
+        "antidote":     "Flumazénil (Anexate®) 0,2 mg IV — répéter toutes les 60 s si besoin",
+        "ref":          "BCFI — Midazolam IV (Hypnovel®)",
+        "alerts":       alerts,
     }, None)
 
 
