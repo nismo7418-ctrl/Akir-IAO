@@ -34,7 +34,25 @@ def load_css() -> str:
 
 html, body, [class*="st-"] {
   font-family:'Inter',-apple-system,sans-serif;
-  color:var(--T); background:var(--BG);
+  color:var(--T); background:linear-gradient(180deg, #F8FBFF 0%, #F0F4F8 55%, #ECF2F7 100%);
+  min-height:100vh;
+  -webkit-text-size-adjust: 100%; /* Prevent text scaling on mobile */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Mobile-first responsive design */
+@media (max-width: 768px) {
+  .block-container { padding: .5rem .75rem 3rem!important; max-width:100%; margin:0; }
+  .app-hdr { padding:14px 16px; margin-bottom:12px; }
+  .app-hdr-title { font-size:1.1rem; }
+  .card { padding:14px 16px; margin-bottom:12px; }
+  .tri-card { padding:16px; }
+  .tri-label { font-size:1.4rem; }
+  /* Larger touch targets for mobile */
+  button { min-height:44px; }
+  input, select, textarea { font-size:16px; } /* Prevent zoom on iOS */
+  .stButton > button { padding:12px 16px; font-size:16px; }
+  .stNumberInput input, .stSelectbox select { padding:12px; }
 }
 
 /* ── EN-TÊTE ─────────────────────────────────────────────────────────── */
@@ -57,12 +75,17 @@ html, body, [class*="st-"] {
 
 /* ── CARTES ──────────────────────────────────────────────────────────── */
 .card {
-  background:var(--CARD); border-radius:var(--r); padding:16px 18px;
-  box-shadow:var(--s1); border:1px solid var(--B); margin-bottom:12px;
+  background:var(--CARD); border-radius:var(--r); padding:18px 20px;
+  box-shadow:var(--s1); border:1px solid var(--B); margin-bottom:16px;
+  transition:transform .2s ease, box-shadow .2s ease;
+}
+.card:hover {
+  transform:translateY(-1px);
+  box-shadow:0 12px 26px rgba(0,74,153,.14);
 }
 .card-title {
-  font-size:.7rem; font-weight:600; text-transform:uppercase;
-  letter-spacing:.1em; color:var(--TM); margin-bottom:12px;
+  font-size:.76rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.12em; color:var(--TM); margin-bottom:14px;
   font-family:'IBM Plex Mono',monospace;
 }
 
@@ -157,7 +180,25 @@ html, body, [class*="st-"] {
 .stNumberInput input, .stTextInput input, .stSelectbox select {
   border-radius:8px!important; font-size:.9rem!important;
 }
-.stTabs [data-baseweb="tab"] { font-size:.78rem!important; padding:6px 12px!important; }
+.stTabs [data-baseweb="tab"] {
+  font-size:.78rem!important; padding:8px 14px!important;
+  border-radius:12px!important;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+  background:rgba(0,74,153,.12)!important; color:var(--PD)!important;
+  font-weight:700!important;
+}
+.stButton>button {
+  border-radius:14px!important; min-height:48px!important;
+  padding:12px 18px!important; background:linear-gradient(135deg, #004A99, #1E40AF)!important;
+  color:#fff!important; border:none!important; box-shadow:0 8px 20px rgba(0,74,153,.16)!important;
+}
+.stButton>button:hover {
+  background:linear-gradient(135deg, #1A69B8, #2563EB)!important;
+}
+.stButton>button:active {
+  transform:translateY(1px)!important;
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    CHECKBOXES — Visibilité et contraste renforcés

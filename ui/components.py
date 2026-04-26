@@ -51,7 +51,8 @@ def DISC() -> None:
       et les protocoles <strong style="color:#94A3B8;">BCFI Belgique</strong>.
       Localisation : Urgences — Province de Hainaut, Wallonie, Belgique.<br>
       <strong style="color:#64748B;">Aucune donnée nominative n'est stockée (RGPD).</strong><br>
-      <span style="color:#475569;">Développeur exclusif : Ismail Ibn-Daifa — v19.0 — 2025</span>
+      <span style="color:#475569;">Développeur exclusif : Ismail Ibn-Daifa — v19.0 — 2025</span><br>
+      <em style="font-size:0.8em;">Pour assistance : ismail.ibn-daifa@outlook.com</em>
     </div>""")
 
 
