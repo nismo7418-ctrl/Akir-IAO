@@ -6,7 +6,7 @@ import streamlit as st
 
 
 def load_css() -> None:
-    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(f"<style>{_CSS}</style>", unsafe_allow_html=True)
 
 
 _CSS = """
