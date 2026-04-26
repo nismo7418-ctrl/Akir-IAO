@@ -1,10 +1,9 @@
-# config.py — Constantes cliniques AKIR-IAO v18.0
-# Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
-#
+# config.py — Constantes cliniques AKIR-IAO v19.0
+# Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
 # Toutes les "magic numbers" cliniques sont nommées ici.
 # Modifier une dose = modifier uniquement ce fichier.
 
-# ── Labels de triage ─────────────────────────────────────────────────────────
+# ── Labels de triage FRENCH ──────────────────────────────────────────────────
 LABELS = {
     "M":  "TRI M — IMMÉDIAT",
     "1":  "TRI 1 — URGENCE EXTRÊME",
@@ -32,10 +31,10 @@ ORD     = {"M": 0, "1": 1, "2": 2, "3A": 3, "3B": 4, "4": 5, "5": 6}
 
 # ── Seuils glycémiques — unité mg/dl (standard belge BCFI) ───────────────────
 GLYC = {
-    "hs":  54,   # Hypoglycémie sévère    < 3,0 mmol/l
-    "hm":  70,   # Hypoglycémie modérée  < 3,9 mmol/l
-    "Hs": 180,   # Hyperglycémie          > 10,0 mmol/l
-    "Hs2":360,   # Hyperglycémie sévère   > 20,0 mmol/l
+    "hs":  54,    # Hypoglycémie sévère   < 3,0 mmol/l
+    "hm":  70,    # Hypoglycémie modérée < 3,9 mmol/l
+    "Hs": 180,    # Hyperglycémie        > 10,0 mmol/l
+    "Hs2":360,    # Hyperglycémie sévère > 20,0 mmol/l
 }
 
 # ── NEWS2 — RCP London 2017 ───────────────────────────────────────────────────
@@ -72,155 +71,79 @@ PIRI_BOLUS_MAX    = 0.05   # mg/kg — bolus maximal
 PIRI_PLAFOND_LT70 = 3.0    # mg — plafond bolus < 70 kg
 PIRI_PLAFOND_GE70 = 6.0    # mg — plafond bolus ≥ 70 kg
 
-# ── Naloxone IV — BCFI ───────────────────────────────────────────────────────
-NALOO_ADULTE_MG = 0.4    # mg — adulte sans dépendance
-NALOO_PED_KG    = 0.01   # mg/kg — pédiatrique
-NALOO_DEP_MG    = 0.04   # mg — dépendance (titration douce)
+# ── Naloxone — BCFI ───────────────────────────────────────────────────────────
+NALOO_ADULTE_MG = 0.4    # mg — bolus IV adulte
+NALOO_PED_KG    = 0.01   # mg/kg — enfant
+NALOO_DEP_MG    = 2.0    # mg — dépression respiratoire sévère
 
-# ── Morphine IV — BCFI ───────────────────────────────────────────────────────
-MORPH_MIN_KG       = 0.05   # mg/kg — bolus minimal
-MORPH_MAX_KG       = 0.10   # mg/kg — bolus maximal
-MORPH_PLAFOND_STD  = 5.0    # mg — plafond bolus < 100 kg
-MORPH_PLAFOND_GE100= 7.5    # mg — plafond bolus ≥ 100 kg
-MORPH_PALIER_MG    = 2.0    # mg — palier de titration
+# ── Morphine IV — BCFI / SFAR ────────────────────────────────────────────────
+MORPH_MIN_KG     = 0.05   # mg/kg — dose initiale
+MORPH_MAX_KG     = 0.1    # mg/kg — plafond par bolus
+MORPH_PALIER_MG  = 2.0    # mg — palier titrée adulte
+MORPH_PLAFOND_STD = 10.0  # mg — plafond standard
+MORPH_PLAFOND_GE100 = 15.0 # mg — plafond patient > 100 kg
 
-# ── Ceftriaxone IV — BCFI / SPILF 2017 ──────────────────────────────────────
-CEFRTRX_ADULTE_G  = 2.0    # g — dose adulte fixe
-CEFRTRX_PED_KG    = 0.1    # g/kg — dose pédiatrique
+# ── Ceftriaxone IV — BCFI ────────────────────────────────────────────────────
+CEFRTRX_ADULTE_G = 2.0    # g — dose adulte
+CEFRTRX_PED_KG   = 0.05   # g/kg — enfant (50 mg/kg)
 
-# ── Litican IM — BCFI / Protocole local Hainaut ──────────────────────────────
-LITICAN_DOSE_ADULTE_MG  = 40.0    # mg — adulte
-LITICAN_DOSE_KG_ENF     = 1.0     # mg/kg — enfant
-LITICAN_DOSE_MAX_ENF_MG = 40.0    # mg — plafond enfant
-LITICAN_DOSE_MAX_JOUR   = 120.0   # mg/24 h — max journalier
-LITICAN_POIDS_PIVOT_KG  = 15.0    # kg — pivot adulte/enfant
+# ── Litican (kétoprofène lysine) — BCFI ──────────────────────────────────────
+LITICAN_DOSE_ADULTE_MG  = 80.0   # mg — adulte ≥ 50 kg
+LITICAN_DOSE_KG_ENF     = 1.0    # mg/kg — enfant < 50 kg
+LITICAN_DOSE_MAX_ENF_MG = 80.0   # mg — plafond enfant
+LITICAN_POIDS_PIVOT_KG  = 50.0   # kg
+LITICAN_DOSE_MAX_JOUR   = 240.0  # mg/jour
 
-# ── Protocole épilepsie pédiatrique — SFNP / ISPE 2022 ───────────────────────
-MIDAZOLAM_BUCC_KG       = 0.3     # mg/kg — Midazolam buccal
-MIDAZOLAM_BUCC_MAX_MG   = 10.0    # mg
-MIDAZOLAM_IM_IN_KG      = 0.2     # mg/kg — Midazolam IM / intranasale
-MIDAZOLAM_IM_IN_MAX_MG  = 10.0    # mg
-DIAZEPAM_RECT_KG        = 0.5     # mg/kg — Diazépam rectal
-DIAZEPAM_RECT_MAX_MG    = 10.0    # mg
-DIAZEPAM_IV_KG          = 0.3     # mg/kg — Diazépam IV
-DIAZEPAM_IV_MAX_MG      = 10.0    # mg
-LORAZEPAM_IV_KG         = 0.1     # mg/kg — Lorazépam IV (Temesta)
-LORAZEPAM_IV_MAX_MG     = 4.0     # mg
-CLONAZEPAM_IV_KG        = 0.02    # mg/kg — Clonazépam IV (Rivotril)
-CLONAZEPAM_IV_MAX_MG    = 1.0     # mg
-PHENOBARB_IV_KG         = 20.0    # mg/kg — Phénobarbital IV (charge)
-PHENOBARB_IV_MAX_MG     = 1000.0  # mg
-PHENOBARB_DEBIT_MG_KG_MIN = 1.0   # mg/kg/min — débit max
-LEVETI_IV_KG            = 60.0    # mg/kg — Lévétiracétam IV (Keppra)
-LEVETI_IV_MAX_MG        = 4500.0  # mg
-VALPROATE_IV_KG         = 40.0    # mg/kg — Valproate IV (Dépakine)
-VALPROATE_IV_MAX_MG     = 3000.0  # mg
-VALPROATE_IV_DEBIT_MIN  = 6.0     # min — durée perfusion minimale
-FLUMAZENIL_DOSE_MG      = 0.01    # mg/kg — Flumazénil (Anexate)
-FLUMAZENIL_MAX_MG       = 0.2     # mg — dose initiale max
-FLUMAZENIL_MAX_TOTAL    = 1.0     # mg — dose totale max
+# ── Anticonvulsivants — BCFI / Lignes directrices belges ─────────────────────
+# Diazépam rectal
+DIAZEPAM_RECT_KG     = 0.5    # mg/kg
+DIAZEPAM_RECT_MAX_MG = 10.0   # mg
+# Diazépam IV
+DIAZEPAM_IV_KG       = 0.2    # mg/kg
+DIAZEPAM_IV_MAX_MG   = 10.0   # mg
+# Midazolam buccal
+MIDAZOLAM_BUCC_MAX_MG = 10.0  # mg
+# Midazolam IM/IN
+MIDAZOLAM_IM_IN_KG    = 0.2   # mg/kg
+MIDAZOLAM_IM_IN_MAX_MG = 10.0 # mg
+# Lorazépam IV
+LORAZEPAM_IV_KG       = 0.1   # mg/kg
+LORAZEPAM_IV_MAX_MG   = 4.0   # mg
+# Clonazépam IV
+CLONAZEPAM_IV_KG      = 0.02  # mg/kg
+CLONAZEPAM_IV_MAX_MG  = 1.0   # mg
+# Phénobarbital IV
+PHENOBARB_IV_KG        = 20.0  # mg/kg
+PHENOBARB_IV_MAX_MG    = 1000.0
+PHENOBARB_DEBIT_MG_KG_MIN = 1.0 # mg/kg/min
+# Lévétiracétam IV
+LEVETI_IV_KG           = 60.0  # mg/kg
+LEVETI_IV_MAX_MG       = 4500.0
+# Valproate IV
+VALPROATE_IV_KG        = 40.0  # mg/kg
+VALPROATE_IV_MAX_MG    = 3000.0
+VALPROATE_IV_DEBIT_MIN = 6.0   # mg/kg/min
 
-# ── Seuils temporels EME — ILAE 2015 ─────────────────────────────────────────
-EME_SEUIL_MIN        = 5    # min — traitement actif si > 5 min
-EME_OPERATIONNEL_MIN = 15   # min — risque lésionnel
-EME_ETABLI_MIN       = 30   # min — réanimation pédiatrique
+# ── Seuils EME ────────────────────────────────────────────────────────────────
+EME_SEUIL_MIN       = 5    # minutes — définition EME
+EME_OPERATIONNEL_MIN = 30  # minutes — EME opérationnel
+EME_ETABLI_MIN      = 5    # minutes — critère triage
 
-# ── Pédiatrie — Fièvre et déshydratation ─────────────────────────────────────
-FIEVRE_TRES_HAUTE_ENFANT = 40.0   # °C — critère de gravité
-FIEVRE_NOURR_SEUIL       = 38.0   # °C — seuil nourrisson < 3 mois
-FIEVRE_HAUT_RISQUE_AGE   = 0.25   # ans — < 3 mois = haut risque
+# ── Registre patients — anonymisé RGPD ───────────────────────────────────────
+REGISTRE_CAP = 200  # nombre max d'entrées en mémoire
 
-FC_TACHY_NOURR  = 160  # bpm — nourrisson 0-1 mois
-FC_TACHY_BEBE   = 150  # bpm — bébé 1-12 mois
-FC_TACHY_ENFANT = 140  # bpm — enfant 1-5 ans
-FC_TACHY_GRAND  = 120  # bpm — enfant 5-12 ans
-
-VOMISS_FREQ_SEVERE = 6  # > 6/h — vomissements très fréquents
-
-# ── Persistance RGPD ─────────────────────────────────────────────────────────
-REGISTRE_CAP = 500  # nb max d'entrées conservées (rotation FIFO)
-
-# ── Antécédents disponibles en multiselect ───────────────────────────────────
+# ── Antécédents connus ────────────────────────────────────────────────────────
 ATCD = [
-    "HTA", "Diabète type 1", "Diabète type 2", "Tabagisme actif", "Dyslipidémie",
-    "ATCD familial coronarien", "Insuffisance cardiaque", "BPCO",
-    "Anticoagulants/AOD", "Grossesse en cours", "Immunodépression",
-    "Néoplasie évolutive", "Épilepsie", "Insuffisance rénale chronique",
-    "Ulcère gastro-duodénal", "Insuffisance hépatique",
-    "Déficit vitamine B12", "Drépanocytose", "Chimiothérapie en cours",
-    "IMAO (inhibiteurs MAO)", "Antidépresseurs ISRS/IRSNA",
-    "Glaucome", "Adénome prostatique", "Rétention urinaire",
-]
-
-# ── CFS — Clinical Frailty Scale ─────────────────────────────────────────────
-CFS_LBL = {
-    1: "Très en forme", 2: "En forme", 3: "Bien portant", 4: "Vulnérable",
-    5: "Fragilité légère", 6: "Fragilité modérée", 7: "Fragilité sévère",
-    8: "Fragilité très sévère", 9: "Maladie terminale",
-}
-
-# ── Motifs de triage — FRENCH V1.1 ───────────────────────────────────────────
-MOTS_CAT = {
-    "Cardio": [
-        "Arret cardio-respiratoire", "Hypotension arterielle",
-        "Douleur thoracique / SCA", "Tachycardie / tachyarythmie",
-        "Bradycardie / bradyarythmie", "Palpitations",
-        "Hypertension arterielle", "Allergie / anaphylaxie",
-    ],
-    "Respiratoire": [
-        "Dyspnee / insuffisance respiratoire",
-        "Dyspnee / insuffisance cardiaque",
-    ],
-    "Digestif": [
-        "Douleur abdominale", "Vomissements / Diarrhee",
-        "Hematemese / Rectorragie",
-        "Colique nephretique / Douleur lombaire",
-    ],
-    "Neuro": [
-        "AVC / Deficit neurologique", "Traumatisme cranien",
-        "Alteration de conscience / Coma", "Cephalee",
-        "Convulsions / EME", "Syndrome confusionnel", "Malaise",
-    ],
-    "Trauma": [
-        "Traumatisme thorax/abdomen/rachis cervical",
-        "Traumatisme bassin/hanche/femur",
-        "Traumatisme membre / epaule",
-        "Hemorragie active",
-    ],
-    "Infectio": ["Fievre"],
-    "Pediatrie": [
-        "Pediatrie - Fievre <= 3 mois",
-        "Pediatrie - Fievre enfant (3 mois - 15 ans)",
-        "Pediatrie - Vomissements / Gastro-enterite",
-        "Pediatrie - Crise epileptique",
-        "Pediatrie - Asthme / Bronchospasme",
-    ],
-    "Peau":       ["Petechie / Purpura", "Erytheme etendu"],
-    "Gyneco":     ["Accouchement imminent", "Complication grossesse T1/T2",
-                   "Menorragie / Metrorragie"],
-    "Metabolique":["Hypoglycemie", "Hyperglycemie / Cetoacidose"],
-    "Divers":     ["Renouvellement ordonnance", "Examen administratif"],
-}
-
-MOTIFS_RAPIDES = [
-    "Douleur thoracique / SCA",
-    "Dyspnee / insuffisance respiratoire",
-    "AVC / Deficit neurologique",
-    "Alteration de conscience / Coma",
-    "Traumatisme cranien",
-    "Hypotension arterielle",
-    "Hemorragie active",
-    "Tachycardie / tachyarythmie",
-    "Fievre",
-    "Douleur abdominale",
-    "Colique nephretique / Douleur lombaire",
-    "Allergie / anaphylaxie",
-    "Hypoglycemie",
-    "Convulsions / EME",
-    "Pediatrie - Fievre <= 3 mois",
-    "Pediatrie - Fievre enfant (3 mois - 15 ans)",
-    "Pediatrie - Vomissements / Gastro-enterite",
-    "Pediatrie - Crise epileptique",
-    "Pediatrie - Asthme / Bronchospasme",
-    "Autre motif",
+    "HTA", "Diabète type 1", "Diabète type 2",
+    "Coronaropathie / SCA antérieur", "Insuffisance cardiaque",
+    "BPCO", "Asthme", "Insuffisance rénale chronique",
+    "Insuffisance hépatique", "Épilepsie",
+    "AVC / AIT antérieur", "Fibrillation atriale",
+    "Anticoagulants/AOD", "Antiagrégants plaquettaires",
+    "Bêta-bloquants", "Corticoïdes au long cours",
+    "IMAO (inhibiteurs MAO)", "Immunodépression",
+    "Chimiothérapie en cours", "Grossesse",
+    "Ulcère gastro-duodénal", "Drépanocytose",
+    "Troubles psychiatriques", "Démence",
+    "Obésité morbide (IMC ≥ 40)",
 ]
