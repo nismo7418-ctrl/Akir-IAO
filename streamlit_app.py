@@ -5,13 +5,13 @@
 import streamlit as st
 import uuid, io, csv as csv_mod
 from datetime import datetime
+from typing import Any, Dict, List
 
 # ── Configuration page (DOIT être le premier appel Streamlit) ─────────────────
 st.set_page_config(
     page_title="AKIR-IAO v19.0",
-    page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ── Imports modules métier ────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ from clinical.pharmaco import (
 )
 from clinical.french_v12 import (
     FRENCH_MOTS_CAT, FRENCH_MOTIFS_RAPIDES,
-    get_protocol, render_discriminants,
+    get_protocol, get_red_flag_definitions, render_discriminants,
 )
 from ui.eva_pqrst import (
     EVA_WIDGET_COMPLET, SCHEMA_BRULURES, QUESTIONS_AVANCEES,
@@ -86,6 +86,8 @@ _DEF = {
     "t_reev": None,
     "histo":  [],
     "uid_cur": None,
+    "patient_context": {},
+    "triage_summary": "",
 }
 for k, v in _DEF.items():
     if k not in st.session_state:
@@ -105,11 +107,250 @@ def _mirror(widget_key: str, state_key: str) -> None:
 def _safe_med_get(data, key: str, default=None):
     """Accès défensif aux structures métier pour éviter les crashs UI."""
     try:
-        if isinstance(data, dict):
-            return data.get(key, default)
+        payload = _safe_med_payload(data)
+        if payload:
+            return payload.get(key, default)
     except Exception:
         pass
     return default
+
+
+def _safe_med_payload(data: Any) -> Dict[str, Any]:
+    """Normalise les retours metier Result=(payload, error) en dictionnaire exploitable."""
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, tuple) and data:
+        payload = data[0]
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+MAJOR_COMORBIDITY_MAP: Dict[str, str] = {
+    "heart_failure": "Insuffisance cardiaque",
+    "diabetes": "Diabete type 2",
+    "copd": "BPCO",
+    "immunosuppression": "Immunodepression",
+}
+
+CRITICAL_TREATMENT_MAP: Dict[str, str] = {
+    "anticoagulants": "Anticoagulants/AOD",
+    "beta_blockers": "Beta-bloquants",
+    "corticosteroids": "Corticoides au long cours",
+}
+
+SPECIFIC_RISK_MAP: Dict[str, str] = {
+    "pregnancy": "Grossesse",
+    "breastfeeding": "Allaitement",
+}
+
+_PROFILE_RESERVED_ATCD = {
+    *MAJOR_COMORBIDITY_MAP.values(),
+    *CRITICAL_TREATMENT_MAP.values(),
+    *SPECIFIC_RISK_MAP.values(),
+}
+OTHER_ATCD_OPTIONS = [item for item in ATCD if item not in _PROFILE_RESERVED_ATCD]
+
+
+def AL(msg: str, level: str = "info") -> None:
+    H(f'<div class="al {level}">{msg}</div>')
+
+
+def N2_BANNER(n2: int) -> None:
+    if n2 >= NEWS2_TRI_M:
+        H(f'<div class="n2-alert n2-m">NEWS2 {n2} >= {NEWS2_TRI_M} - appel medical immediat - dechocage</div>')
+    elif n2 >= NEWS2_RISQUE_ELEVE:
+        H(f'<div class="n2-alert n2-crit">NEWS2 {n2} >= {NEWS2_RISQUE_ELEVE} - appel medical immediat</div>')
+
+
+def PURPURA(det: Dict[str, Any]) -> None:
+    if det.get("purpura") or det.get("neff") or det.get("non_effacable"):
+        with st.container(border=True):
+            st.error("Purpura fulminans suspecte")
+            st.caption("Ceftriaxone IV immediate et evaluation medicale sans delai.")
+
+
+def FRENCH_TRIAGE_PANEL(
+    niv: str,
+    justif: str,
+    n2: int,
+    *,
+    crit: str = "",
+    discriminant: Any = None,
+    lock_priority: bool = False,
+) -> None:
+    label = LABELS.get(niv, f"TRI {niv}")
+    secteur = SECTEURS.get(niv, "Evaluation")
+    delai = DELAIS.get(niv, 60)
+    disc = discriminant if isinstance(discriminant, dict) else {}
+
+    with st.container(border=True):
+        st.markdown(f"#### {label}")
+        st.write(justif)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Priorite", label)
+        c2.metric("Secteur", secteur)
+        c3.metric("Delai cible", f"<= {delai} min")
+        st.caption(f"NEWS2 : {n2}")
+        if disc.get("level") and disc.get("text"):
+            st.caption(f"Discriminant retenu : Tri {disc.get('level')} - {disc.get('text')}")
+        if crit:
+            st.caption(f"Reference clinique : {crit}")
+        if lock_priority:
+            st.warning("Priorite verrouillee par le moteur de triage.")
+
+
+def DISC() -> None:
+    H(
+        """<div class="disclaimer">
+        <div class="disclaimer-title">Avertissement legal</div>
+        Outil d'aide au triage infirmier. Ne remplace ni le jugement clinique ni les protocoles institutionnels.
+        Donnees anonymisees et usage reserve aux professionnels de sante.
+        </div>"""
+    )
+
+
+def _build_patient_context(
+    age: float,
+    sex: str,
+    poids: float,
+    comorbidities: Dict[str, bool],
+    specific_risks: Dict[str, bool],
+    critical_treatments: Dict[str, bool],
+    allergies: str,
+    oxygen_support: bool,
+    other_atcd: List[str],
+) -> Dict[str, Any]:
+    return {
+        "age": age,
+        "sex": sex,
+        "weight_kg": poids,
+        "comorbidities": comorbidities,
+        "specific_risks": specific_risks,
+        "critical_treatments": critical_treatments,
+        "allergies": allergies,
+        "oxygen_support": oxygen_support,
+        "other_atcd": list(other_atcd),
+    }
+
+
+def _build_atcd_from_context(
+    comorbidities: Dict[str, bool],
+    specific_risks: Dict[str, bool],
+    critical_treatments: Dict[str, bool],
+    other_atcd: List[str],
+) -> List[str]:
+    atcd_items = list(other_atcd)
+    atcd_items.extend(
+        label for key, label in MAJOR_COMORBIDITY_MAP.items() if comorbidities.get(key, False)
+    )
+    atcd_items.extend(
+        label for key, label in SPECIFIC_RISK_MAP.items() if specific_risks.get(key, False)
+    )
+    atcd_items.extend(
+        label for key, label in CRITICAL_TREATMENT_MAP.items() if critical_treatments.get(key, False)
+    )
+    dedup: List[str] = []
+    for item in atcd_items:
+        if item and item not in dedup:
+            dedup.append(item)
+    return dedup
+
+
+def _priority_5(niv: str) -> str:
+    return {
+        "M": "1",
+        "1": "1",
+        "2": "2",
+        "3A": "3",
+        "3B": "3",
+        "4": "4",
+        "5": "5",
+    }.get(niv, "3")
+
+
+def _apply_red_flag_selection(
+    details: Dict[str, Any],
+    flag_definitions: List[Dict[str, Any]],
+    selected_items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    updated = dict(details or {})
+    for definition in flag_definitions:
+        detail_key = definition.get("detail_key")
+        if detail_key:
+            updated[detail_key] = False
+    for item in selected_items:
+        detail_key = item.get("detail_key")
+        if detail_key:
+            updated[detail_key] = True
+    updated["red_flags_selected"] = selected_items
+    updated["red_flag_labels"] = [str(item.get("label")) for item in selected_items if item.get("label")]
+    return updated
+
+
+def _render_red_flag_form(motif: str, details: Dict[str, Any]) -> Dict[str, Any]:
+    flag_definitions = get_red_flag_definitions(motif)
+    if not flag_definitions:
+        return details
+
+    protocol = get_protocol(motif) or {}
+    protocol_id = str(protocol.get("id") or "motif")
+    existing_items = {
+        str(item.get("key")): item
+        for item in details.get("red_flags_selected", [])
+        if isinstance(item, dict) and item.get("key")
+    }
+    selected_items = list(existing_items.values())
+    if not selected_items:
+        for definition in flag_definitions:
+            detail_key = str(definition.get("detail_key") or "")
+            if detail_key and details.get(detail_key):
+                item = dict(definition)
+                item["selected"] = True
+                selected_items.append(item)
+
+    with st.form(f"red_flags_{protocol_id}", clear_on_submit=False):
+        st.caption("Cocher uniquement les red flags presents. Ils majorent le niveau final sans ambiguite.")
+        cols = st.columns(2)
+        new_selection: List[Dict[str, Any]] = []
+        for index, definition in enumerate(flag_definitions):
+            key = str(definition.get("key") or f"rf_{index}")
+            detail_key = str(definition.get("detail_key") or "")
+            default_value = bool(existing_items.get(key, {}).get("selected", True)) if key in existing_items else bool(details.get(detail_key))
+            checked = cols[index % 2].checkbox(
+                str(definition.get("label") or key),
+                value=default_value,
+                key=f"rf_{protocol_id}_{key}",
+                help=str(definition.get("help") or definition.get("rationale") or ""),
+            )
+            if checked:
+                item = dict(definition)
+                item["selected"] = True
+                new_selection.append(item)
+        submitted = st.form_submit_button("Valider les red flags", use_container_width=True)
+
+    if submitted:
+        return _apply_red_flag_selection(details, flag_definitions, new_selection)
+    return _apply_red_flag_selection(details, flag_definitions, selected_items)
+
+
+def _build_iao_summary(
+    age: float,
+    sex: str,
+    motif: str,
+    niv: str,
+    n2: int,
+    details: Dict[str, Any],
+    atcd: List[str],
+    justif: str,
+) -> str:
+    terrain = ", ".join(atcd[:4]) if atcd else "aucun terrain majeur signale"
+    red_flags = ", ".join(details.get("red_flag_labels", [])[:3]) or "aucun red flag coche"
+    return (
+        f"{sex} de {int(age)} ans, motif {motif.lower()}, NEWS2 {n2}, {red_flags}; "
+        f"terrain {terrain}; priorite IAO {_priority_5(niv)} "
+        f"(French {niv}, delai cible <= {DELAIS.get(niv, 60)} min). {justif}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -139,11 +380,11 @@ with st.sidebar:
 
     SEC("Chronomètre")
     ca, cb = st.columns(2)
-    if ca.button("⏱ Arrivée", use_container_width=True):
+    if ca.button("Arrivée", use_container_width=True):
         SS.t_arr = datetime.now()
         SS.histo = []
         SS.reevs = []
-    if cb.button("👨‍⚕️ Contact", use_container_width=True):
+    if cb.button("Contact", use_container_width=True):
         SS.t_cont = datetime.now()
     if SS.t_arr:
         el = (datetime.now() - SS.t_arr).total_seconds()
@@ -152,12 +393,13 @@ with st.sidebar:
         H(f'<div style="text-align:center;font-family:monospace;font-size:2rem;'
           f'font-weight:700;color:{col};">{m_:02d}:{s_:02d}</div>')
 
-    SEC("Patient")
+    SEC("Donnees demographiques")
     age = st.number_input("Âge (ans)", 0, 120, 45, key="p_age")
     if age == 0:
         am  = st.number_input("Âge en mois", 0, 11, 3, key="p_am")
         age = round(am / 12.0, 4)
         AL(f"Nourrisson {am} mois — Seuils pédiatriques actifs", "info")
+    sex = st.selectbox("Sexe", ["Femme", "Homme", "Autre / non precise"], key="p_sex")
     poids  = st.number_input("Poids (kg)", 1, 250, 70, key="p_kg")
     taille = st.number_input("Taille (cm)", 50, 220, 170, key="p_taille")
 
@@ -169,9 +411,45 @@ with st.sidebar:
         elif imc < 40.0: AL(f"IMC {imc} — Obésité", "warning")
         else:             AL(f"IMC {imc} — Obésité morbide ≥ 40 — Adapter doses opioïdes", "danger")
 
-    atcd = st.multiselect("Antécédents pertinents", ATCD, key="p_atcd")
+    SEC("Antécédents et terrain")
+    at1, at2 = st.columns(2)
+    comorbidities = {
+        "heart_failure": at1.checkbox("Insuffisance cardiaque", key="sb_hf"),
+        "diabetes": at2.checkbox("Diabète", key="sb_diab"),
+        "copd": at1.checkbox("BPCO", key="sb_copd"),
+        "immunosuppression": at2.checkbox("Immunodépression", key="sb_immuno"),
+    }
+
+    SEC("Risques spécifiques")
+    rs1, rs2 = st.columns(2)
+    specific_risks = {
+        "pregnancy": rs1.checkbox("Grossesse", key="sb_preg"),
+        "breastfeeding": rs2.checkbox("Allaitement", key="sb_bf"),
+    }
+
+    SEC("Pharmaco-vigilance")
+    ph1, ph2 = st.columns(2)
+    critical_treatments = {
+        "anticoagulants": ph1.checkbox("Anticoagulants", key="sb_anticoag"),
+        "beta_blockers": ph2.checkbox("Bêta-bloquants", key="sb_beta"),
+        "corticosteroids": ph1.checkbox("Corticoïdes", key="sb_cortico"),
+    }
+
+    other_atcd = st.multiselect("Autres antécédents utiles", OTHER_ATCD_OPTIONS, key="p_atcd")
     alg  = st.text_input("Allergies", key="p_alg", placeholder="ex: Pénicilline")
-    o2   = st.checkbox("O₂ supplémentaire", key="p_o2")
+    o2   = st.checkbox("Oxygène supplémentaire", key="p_o2")
+    atcd = _build_atcd_from_context(comorbidities, specific_risks, critical_treatments, other_atcd)
+    SS.patient_context = _build_patient_context(
+        age=age,
+        sex=sex,
+        poids=poids,
+        comorbidities=comorbidities,
+        specific_risks=specific_risks,
+        critical_treatments=critical_treatments,
+        allergies=alg,
+        oxygen_support=o2,
+        other_atcd=other_atcd,
+    )
 
     if "IMAO (inhibiteurs MAO)" in atcd:
         AL("IMAO — Tramadol INTERDIT", "danger")
@@ -180,9 +458,14 @@ with st.sidebar:
     if "Drépanocytose" in atcd:
         AL("Drépanocytose — Morphine titrée précoce si EVA ≥ 6", "warning")
 
+    if critical_treatments.get("anticoagulants"):
+        AL("Traumatisme + anticoagulants = majoration automatique minimale au niveau 2", "warning")
+    if specific_risks.get("pregnancy"):
+        AL("Grossesse : toute instabilite tensionnelle ou metrorragie majore le triage", "warning")
+
     SEC("Session RGPD")
     st.caption(f"Session : {SS.sid}")
-    if st.button("🔄 Nouvelle session", use_container_width=True):
+    if st.button("Nouvelle session", use_container_width=True):
         for k, v in _DEF.items():
             SS[k] = v() if callable(v) else v
         st.rerun()
@@ -191,15 +474,15 @@ with st.sidebar:
 # ONGLETS PRINCIPAUX
 # ═══════════════════════════════════════════════════════════════════════════════
 T = st.tabs([
-    "⚡ Tri Rapide",
-    "📊 Vitaux & GCS",
-    "🔍 Anamnèse",
-    "⚖️ Triage",
-    "🧮 Scores Cliniques",
-    "💊 Pharmacie",
-    "🔄 Réévaluation",
-    "📋 Historique",
-    "📡 SBAR",
+    "Tri Rapide",
+    "Vitaux & GCS",
+    "Anamnèse",
+    "Triage",
+    "Scores Cliniques",
+    "Pharmacie",
+    "Réévaluation",
+    "Historique",
+    "SBAR",
 ])
 
 
@@ -240,7 +523,7 @@ with T[0]:
     SS.motif = st.selectbox("Motif de recours", MOTIFS_RAPIDES, key="r_mot")
     SS.cat   = "Tri rapide"
     SS.eva   = int(st.select_slider("EVA", [str(i) for i in range(11)], "0", key="r_eva"))
-    det = {"eva": SS.eva, "atcd": atcd}
+    det = {"eva": SS.eva, "atcd": atcd, "patient_context": SS.patient_context}
     proto_r = get_protocol(SS.motif)
     if proto_r and proto_r.get("criteria"):
         # Les discriminants proviennent de clinical/french_v12.py
@@ -263,7 +546,7 @@ with T[0]:
     N2_BANNER(SS.v_news2)
     CARD_END()
 
-    if st.button("⚡ Calculer le triage", type="primary", use_container_width=True):
+    if st.button("Calculer le triage", type="primary", use_container_width=True):
         SS.niv, SS.just, SS.crit = french_triage(
             SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
             SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, SS.gl,
@@ -344,7 +627,7 @@ with T[2]:
     non_comm = ("Démence" in atcd or (age >= 75 and SS.v_gcs < 15))
     eva_result = EVA_WIDGET_COMPLET(key_prefix="ana", age=age, non_communicant=non_comm)
     SS.eva = eva_result.get("eva", 0)
-    SS.det.update({"eva": SS.eva, "pqrst": eva_result.get("pqrst", {}), "atcd": atcd})
+    SS.det.update({"eva": SS.eva, "pqrst": eva_result.get("pqrst", {}), "atcd": atcd, "patient_context": SS.patient_context})
 
     CARD("Motif de recours", "")
     SS.cat   = st.selectbox("Catégorie", list(MOTS_CAT.keys()), key="a_cat")
@@ -393,6 +676,7 @@ with T[3]:
 
     det = (SS.det or {}).copy()
     det["atcd"] = atcd
+    det["patient_context"] = SS.patient_context
     if not det.get("glycemie_mgdl") and not SS.gl:
         gl_t = GLYC_WIDGET("t_gl", "Glycémie capillaire (mg/dl)")
         if gl_t:
@@ -400,6 +684,12 @@ with T[3]:
             SS.gl = gl_t
             SS.det = det
     gl_t = det.get("glycemie_mgdl") or SS.gl
+
+    with st.container(border=True):
+        st.markdown("#### Etape 1 - Red flags motif-specifiques")
+        det = _render_red_flag_form(SS.motif, det)
+        if det.get("red_flag_labels"):
+            st.caption("Red flags retenus : " + ", ".join(det.get("red_flag_labels", [])))
 
     proto = get_protocol(SS.motif)
     if proto and proto.get("criteria"):
@@ -429,6 +719,14 @@ with T[3]:
         discriminant=det.get("french_discriminant"),
         lock_priority=SS.niv in {"M", "1", "2"},
     )
+    with st.container(border=True):
+        st.markdown("#### Etape 3 - Verdict IAO")
+        v1, v2, v3 = st.columns(3)
+        v1.metric("Niveau final", _priority_5(SS.niv))
+        v2.metric("Code French", SS.niv)
+        v3.metric("Délai médical", f"<= {DELAIS.get(SS.niv, 60)} min")
+        SS.triage_summary = _build_iao_summary(age, sex, SS.motif, SS.niv, SS.v_news2, det, atcd, SS.just)
+        st.text_area("Synthèse IAO", value=SS.triage_summary, height=120, key="iao_summary")
     st.caption(f"Critère FRENCH : {SS.crit}")
 
     D, A = verifier_coherence(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
@@ -445,7 +743,7 @@ with T[3]:
         st.caption("Discriminant dÃ©jÃ  sÃ©lectionnÃ© dans le panneau supÃ©rieur.")
         CARD_END()
 
-    if st.button("💾 Enregistrer ce patient", type="primary", use_container_width=True):
+    if st.button("Enregistrer ce patient", type="primary", use_container_width=True):
         uid = enregistrer_patient({
             "motif": SS.motif, "cat": SS.cat, "niv": SS.niv, "n2": SS.v_news2,
             "fc": SS.v_fc, "pas": SS.v_pas, "spo2": SS.v_spo2,
@@ -458,7 +756,7 @@ with T[3]:
             "uid": uid, "h": datetime.now().strftime("%H:%M"),
             "motif": SS.motif, "niv": SS.niv, "n2": SS.v_news2,
         })
-        st.success(f"✅ Patient enregistré — UID : {uid}")
+        st.success(f"Patient enregistré — UID : {uid}")
     DISC()
 
 
@@ -854,14 +1152,14 @@ with T[6]:
         if SS.t_reev:
             mins = (datetime.now() - SS.t_reev).total_seconds() / 60
             if 25 <= mins <= 35:
-                AL("⏱ Réévaluation douleur à 30 min POST-ANTALGIE — Obligatoire (Circulaire 2014)", "warning")
+                AL("Réévaluation douleur à 30 min post-antalgie — obligatoire (Circulaire 2014)", "warning")
             elif 55 <= mins <= 65:
-                AL("⏱ Réévaluation douleur à 60 min POST-ANTALGIE — Obligatoire", "warning")
+                AL("Réévaluation douleur à 60 min post-antalgie — obligatoire", "warning")
             delai_cible = {"M": 5, "1": 5, "2": 15, "3A": 30, "3B": 60}.get(SS.niv, 60)
             if mins > delai_cible:
-                AL(f"⏱ Délai cible Tri {SS.niv} dépassé ({delai_cible} min) — Relancer le médecin", "danger")
+                AL(f"Délai cible Tri {SS.niv} dépassé ({delai_cible} min) — relancer le médecin", "danger")
 
-        if st.button("✅ Enregistrer la réévaluation", use_container_width=True):
+        if st.button("Enregistrer la réévaluation", use_container_width=True):
             SS.reevs.append({
                 "h": datetime.now().strftime("%H:%M"),
                 "fc": re_fc, "pas": re_pas, "spo2": re_spo2,
@@ -956,11 +1254,11 @@ with T[7]:
         w.writerow(["uid", "heure", "motif", "niv", "n2", "fc", "pas", "spo2", "fr", "temp", "gcs", "op"])
         for r in reg:
             w.writerow([r.get(k, "") for k in ["uid", "heure", "motif", "niv", "n2", "fc", "pas", "spo2", "fr", "temp", "gcs", "op"]])
-        st.download_button("📥 Télécharger CSV", data=out.getvalue(),
+        st.download_button("Télécharger CSV", data=out.getvalue(),
             file_name=f"akir_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv", use_container_width=True)
 
-    if st.button("🔐 Vérifier intégrité audit", use_container_width=True):
+    if st.button("Vérifier intégrité audit", use_container_width=True):
         audit = audit_verifier_integrite()
         AL(audit["message"], "success" if audit["ok"] else "danger")
     CARD_END()
