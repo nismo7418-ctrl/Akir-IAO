@@ -20,6 +20,14 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     Retourne {eva, pqrst}.
     Source : Circulaire belge réévaluation douleur 2014.
     """
+    SS = st.session_state
+    _eva_key = f"{key_prefix}_eva"
+
+    # Initialise la clé widget depuis SS.eva uniquement si elle n'existe pas encore,
+    # pour ne pas écraser une valeur déjà saisie par l'utilisateur.
+    if _eva_key not in SS:
+        SS[_eva_key] = str(getattr(SS, "eva", 0))
+
     st.markdown("### Évaluation de la douleur")
 
     if non_communicant:
@@ -28,13 +36,11 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     eva = int(st.select_slider(
         "EVA / NRS",
         options=[str(i) for i in range(11)],
-        value="0",
-        key=f"{key_prefix}_eva",
+        key=_eva_key,
         help="0 = pas de douleur | 10 = douleur insupportable",
     ))
     EVA_BAR(eva)
 
-    # Feedback couleur selon EVA
     if eva >= 7:
         st.error(f"🔴 Douleur sévère EVA {eva}/10 — Antalgie forte requise")
     elif eva >= 4:
@@ -44,6 +50,9 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     else:
         st.success("🟢 EVA 0/10 — Pas de douleur déclarée")
 
+    # Pré-initialisation des variables PQRST pour éviter un NameError si
+    # l'expander ne s'est pas encore affiché (première exécution).
+    p = q = r = s = t = ""
     with st.expander("📋 Questionnaire PQRST", expanded=False):
         p1, p2 = st.columns(2)
         p = p1.text_input("P — Facteurs déclenchants / soulageants",
@@ -64,9 +73,7 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
 
     return {
         "eva": eva,
-        "pqrst": {"p": p if "p" in dir() else "", "q": q if "q" in dir() else "",
-                  "r": r if "r" in dir() else "", "s": s if "s" in dir() else "",
-                  "t": t if "t" in dir() else ""},
+        "pqrst": {"p": p, "q": q, "r": r, "s": s, "t": t},
     }
 
 
