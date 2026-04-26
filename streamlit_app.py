@@ -10,7 +10,7 @@ from datetime import datetime
 st.set_page_config(
     page_title="AKIR-IAO v19.0",
     page_icon="🏥",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
 
@@ -110,13 +110,13 @@ def _show_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 H("""
 <div class="app-hdr">
-  <div class="app-hdr-title">AKIR-IAO v19.0 — Système Expert</div>
-  <div class="app-hdr-sub">Aide au Triage Infirmier — Urgences — Hainaut, Wallonie, Belgique</div>
+  <div class="app-hdr-title">AKIR-IAO v19.0 — Système expert de triage</div>
+  <div class="app-hdr-sub">Outil professionnel d'aide à la décision clinique — Urgences — Hainaut, Wallonie</div>
   <div class="app-hdr-tags">
     <span class="tag">FRENCH SFMU V1.1</span>
     <span class="tag">BCFI Belgique</span>
     <span class="tag">RGPD</span>
-    <span class="tag">Dév. : Ismail Ibn-Daifa</span>
+    <span class="tag">Développeur : Ismail Ibn-Daifa</span>
   </div>
 </div>
 """)
@@ -125,18 +125,19 @@ H("""
 # SIDEBAR — Profil patient + Opérateur
 # ═══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    SEC("Opérateur IAO")
-    op_in = st.text_input("Code opérateur", value=SS.op, max_chars=10, placeholder="IAO01")
+    SEC("Identification opérateur")
+    op_in = st.text_input("Code opérateur", value=SS.op, max_chars=10, placeholder="IAO01", help="Identifiant unique pour cette session (ex: IAO01)")
     if op_in:
         SS.op = op_in.upper()
+    st.caption("Utiliser un identifiant court et local pour cette session.")
 
     SEC("Chronomètre")
     ca, cb = st.columns(2)
-    if ca.button("⏱ Arrivée", use_container_width=True):
+    if ca.button("⏱ Enregistrement arrivée", use_container_width=True, help="Démarre le chronomètre d'arrivée du patient"):
         SS.t_arr = datetime.now()
         SS.histo = []
         SS.reevs = []
-    if cb.button("👨‍⚕️ Contact", use_container_width=True):
+    if cb.button("👨‍⚕️ Premier contact", use_container_width=True, help="Enregistre le premier contact infirmier"):
         SS.t_cont = datetime.now()
     if SS.t_arr:
         el = (datetime.now() - SS.t_arr).total_seconds()
@@ -146,13 +147,13 @@ with st.sidebar:
           f'font-weight:700;color:{col};">{m_:02d}:{s_:02d}</div>')
 
     SEC("Patient")
-    age = st.number_input("Âge (ans)", 0, 120, 45, key="p_age")
+    age = st.number_input("Âge (ans)", 0, 120, 45, key="p_age", help="Âge en années (0 pour nourrisson)")
     if age == 0:
-        am  = st.number_input("Âge en mois", 0, 11, 3, key="p_am")
+        am  = st.number_input("Âge en mois", 0, 11, 3, key="p_am", help="Pour nourrissons < 1 an")
         age = round(am / 12.0, 4)
         AL(f"Nourrisson {am} mois — Seuils pédiatriques actifs", "info")
-    poids  = st.number_input("Poids (kg)", 1, 250, 70, key="p_kg")
-    taille = st.number_input("Taille (cm)", 50, 220, 170, key="p_taille")
+    poids  = st.number_input("Poids (kg)", 1, 250, 70, key="p_kg", help="Poids en kilogrammes")
+    taille = st.number_input("Taille (cm)", 50, 220, 170, key="p_taille", help="Taille en centimètres")
 
     if taille > 0 and age >= 18:
         imc = round(poids / (taille / 100) ** 2, 1)
@@ -219,7 +220,7 @@ with st.sidebar:
 
     # Alertes pharmacovigilance immédiates (sidebar)
     if trt_checks.get("IMAO (inhibiteurs MAO)"):
-        AL("IMAO — Tramadol CONTRE-INDIQUÉ ABSOLU", "danger")
+        AL("IMAO — Tramadol contre-indiqué", "danger")
     if atcd_checks.get("Immunodépression") or trt_checks.get("Chimiothérapie en cours"):
         AL("Immunodéprimé — Seuil fébrile abaissé à 38.3°C", "warning")
     if atcd_checks.get("Drépanocytose"):
@@ -229,20 +230,21 @@ with st.sidebar:
     if atcd_checks.get("Insuffisance rénale chronique"):
         AL("Insuff. rénale — AINS contre-indiqués", "danger")
     if risk_checks.get("Grossesse"):
-        AL("Grossesse — AINS CI au T3, morphine avec prudence", "warning")
+        AL("Grossesse — AINS déconseillés au T3, morphine avec prudence", "warning")
     if trt_checks.get("Bêta-bloquants"):
         AL("Bêtabloquants — FC masquée, tachycardie relative", "warning")
 
-    SEC("Session RGPD")
+    SEC("Session anonyme")
     st.caption(f"Session : {SS.sid}")
-    if st.button("🔄 Nouvelle session", use_container_width=True):
-        for k, v in _DEF.items():
-            SS[k] = v() if callable(v) else v
-        # Purge les clés widget EVA pour qu'elles se réinitialisent depuis
-        # SS.eva (= 0) au prochain render, sans être écrasées par des valeurs résiduelles.
-        for _k in [k for k in SS if k.endswith("_eva") or k == "r_eva"]:
-            del SS[_k]
-        st.rerun()
+    if st.button("🔄 Réinitialiser la session", use_container_width=True):
+        if st.checkbox("Confirmer la réinitialisation (toutes les données seront perdues)", key="confirm_reset"):
+            for k, v in _DEF.items():
+                SS[k] = v() if callable(v) else v
+            # Purge les clés widget EVA pour qu'elles se réinitialisent depuis
+            # SS.eva (= 0) au prochain render, sans être écrasées par des valeurs résiduelles.
+            for _k in [k for k in SS if k.endswith("_eva") or k == "r_eva"]:
+                del SS[_k]
+            st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ONGLETS PRINCIPAUX
@@ -283,6 +285,7 @@ with T[0]:
     if SS.v_bpco:
         BPCO_WIDGET(True)
 
+    st.info("Après saisie des constantes et du motif, appuyer sur Calculer le triage.")
     _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
     GAUGE(SS.v_news2, SS.v_bpco)
 
@@ -482,7 +485,7 @@ with T[3]:
         _now_txt  = datetime.now().strftime("%d/%m/%Y à %H:%M")
 
         _synthese_txt = f"""SYNTHÈSE IAO — {_now_txt}
-Opérateur : {SS.op or "IAO"} | Session RGPD : {SS.uid_cur or "—"}
+Opérateur : {SS.op or "IAO"} | Session anonyme : {SS.uid_cur or "—"}
 {"═" * 55}
 NIVEAU DE TRIAGE : {SS.niv} — {LABELS.get(SS.niv, "")}
 Justification    : {SS.just}
@@ -505,7 +508,7 @@ CONSTANTES VITALES
 {"─" * 55}
 ANTÉCÉDENTS      : {_atcd_txt}
 ALLERGIES        : {_alg_txt}
-O2 supplémentaire: {"OUI" if o2 else "Non"}
+O₂ supplémentaire : {"OUI" if o2 else "Non"}
 {"═" * 55}
 Réf. FRENCH Triage SFMU V1.1 | BCFI Belgique
 Urgences — Province de Hainaut, Wallonie, Belgique
@@ -741,7 +744,7 @@ with T[5]:
     </div>""")
 
     if "IMAO (inhibiteurs MAO)" in atcd:
-        AL("IMAO — TRAMADOL CONTRE-INDIQUÉ ABSOLU", "danger")
+        AL("IMAO — Tramadol contre-indiqué", "danger")
     if "Insuffisance cardiaque" in atcd:
         AL("Insuffisance cardiaque — Remplissage réduit à 15 ml/kg", "warning")
     if gl_ph is None:
