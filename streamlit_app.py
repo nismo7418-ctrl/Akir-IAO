@@ -47,7 +47,7 @@ from persistence.audit import audit_verifier_integrite
 from ui.styles import load_css
 from ui.components import (
     H, SEC, AL, CARD, CARD_END, PURPURA, N2_BANNER,
-    GAUGE, VITAUX, TRI_CARD_INLINE, TRI_BANNER_FIXED,
+    GAUGE, VITAUX, TRI_BANNER_FIXED, FRENCH_TRIAGE_PANEL,
     RX, RX_LOCK, GLYC_WIDGET, BPCO_WIDGET, SI_WIDGET,
     SBAR_RENDER, DISC, build_sbar,
 )
@@ -102,6 +102,16 @@ def _mirror(widget_key: str, state_key: str) -> None:
     SS[widget_key] = SS[state_key]
 
 
+def _safe_med_get(data, key: str, default=None):
+    """Accès défensif aux structures métier pour éviter les crashs UI."""
+    try:
+        if isinstance(data, dict):
+            return data.get(key, default)
+    except Exception:
+        pass
+    return default
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # EN-TÊTE APPLICATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -110,7 +120,7 @@ H("""
   <div class="app-hdr-title">AKIR-IAO v19.0 — Système Expert</div>
   <div class="app-hdr-sub">Aide au Triage Infirmier — Urgences — Hainaut, Wallonie, Belgique</div>
   <div class="app-hdr-tags">
-    <span class="tag">FRENCH SFMU V1.1</span>
+    <span class="tag">FRENCH SFMU V1.2</span>
     <span class="tag">BCFI Belgique</span>
     <span class="tag">RGPD</span>
     <span class="tag">Dév. : Ismail Ibn-Daifa</span>
@@ -231,6 +241,15 @@ with T[0]:
     SS.cat   = "Tri rapide"
     SS.eva   = int(st.select_slider("EVA", [str(i) for i in range(11)], "0", key="r_eva"))
     det = {"eva": SS.eva, "atcd": atcd}
+    proto_r = get_protocol(SS.motif)
+    if proto_r and proto_r.get("criteria"):
+        # Les discriminants proviennent de clinical/french_v12.py
+        # et servent de source au moteur french_triage().
+        det["french_discriminant"] = render_discriminants(
+            SS.motif,
+            key=f"r_disc_{proto_r['id']}",
+            label="CritÃ¨re discriminant FRENCH V1.2",
+        )
 
     det["purpura"] = st.checkbox("Purpura non effaçable (test du verre)", key="r_pur")
     if det.get("purpura"):
@@ -250,7 +269,12 @@ with T[0]:
             SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, SS.gl,
         )
         SS.det = det
-        TRI_CARD_INLINE(SS.niv, SS.just, SS.v_news2)
+        FRENCH_TRIAGE_PANEL(
+            SS.niv, SS.just, SS.v_news2,
+            crit=SS.crit,
+            discriminant=det.get("french_discriminant"),
+            lock_priority=SS.niv in {"M", "1", "2"},
+        )
         D, A = verifier_coherence(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
                                    SS.v_gcs, SS.v_temp, SS.eva, SS.motif,
                                    atcd, det, SS.v_news2, SS.gl)
@@ -367,7 +391,8 @@ with T[3]:
     for w in nw:
         AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
 
-    det = SS.det or {}
+    det = (SS.det or {}).copy()
+    det["atcd"] = atcd
     if not det.get("glycemie_mgdl") and not SS.gl:
         gl_t = GLYC_WIDGET("t_gl", "Glycémie capillaire (mg/dl)")
         if gl_t:
@@ -376,14 +401,34 @@ with T[3]:
             SS.det = det
     gl_t = det.get("glycemie_mgdl") or SS.gl
 
+    proto = get_protocol(SS.motif)
+    if proto and proto.get("criteria"):
+        CARD("Criteres discriminants FRENCH V1.2", "")
+        # Ces critÃ¨res sont issus de clinical/french_v12.py
+        # et sont priorisÃ©s par le moteur central french_triage().
+        det["french_discriminant"] = render_discriminants(
+            SS.motif,
+            key=f"t_disc_{proto['id']}",
+            label="CritÃ¨re discriminant sÃ©lectionnÃ©",
+        )
+        CARD_END()
+    else:
+        det.pop("french_discriminant", None)
+
     SS.niv, SS.just, SS.crit = french_triage(
         SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
         SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, gl_t,
     )
+    SS.det = det
     N2_BANNER(SS.v_news2)
     PURPURA(det)
     GAUGE(SS.v_news2, SS.v_bpco)
-    TRI_CARD_INLINE(SS.niv, SS.just, SS.v_news2)
+    FRENCH_TRIAGE_PANEL(
+        SS.niv, SS.just, SS.v_news2,
+        crit=SS.crit,
+        discriminant=det.get("french_discriminant"),
+        lock_priority=SS.niv in {"M", "1", "2"},
+    )
     st.caption(f"Critère FRENCH : {SS.crit}")
 
     D, A = verifier_coherence(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
@@ -391,12 +436,13 @@ with T[3]:
                                atcd, det, SS.v_news2, gl_t)
     for d in D: AL(d, "danger")
     for a in A: AL(a, "warning")
+    proto = None
 
     # Discriminants FRENCH
     proto = get_protocol(SS.motif)
     if proto and proto.get("criteria"):
         CARD("Critères discriminants FRENCH", "")
-        render_discriminants(SS.motif, key="t_disc")
+        st.caption("Discriminant dÃ©jÃ  sÃ©lectionnÃ© dans le panneau supÃ©rieur.")
         CARD_END()
 
     if st.button("💾 Enregistrer ce patient", type="primary", use_container_width=True):
@@ -723,9 +769,9 @@ with T[5]:
     sb_lact = st.number_input("Lactate (mmol/l — 0 si non dosé)", 0.0, 20.0, 0.0, 0.1, key="sb_l")
     sb = sepsis_bundle_1h(SS.v_pas or 120, sb_lact if sb_lact > 0 else None,
                            SS.v_temp or 37, SS.v_fc or 80, poids, atcd)
-    if sb["choc_septique"]: AL("CHOC SEPTIQUE — Réanimation immédiate", "danger")
-    for m_, c_ in sb.get("alerts", []): AL(m_, c_)
-    for lbl, detail, css in sb["checklist"]:
+    if _safe_med_get(sb, "choc_septique", False): AL("CHOC SEPTIQUE — Réanimation immédiate", "danger")
+    for m_, c_ in _safe_med_get(sb, "alerts", []) or []: AL(m_, c_)
+    for lbl, detail, css in _safe_med_get(sb, "checklist", []) or []:
         H(f'<div class="al {css}" style="padding:7px 14px;margin:3px 0;font-size:.78rem;">'
           f'<input type="checkbox" style="margin-right:8px;">'
           f'<strong>{lbl}</strong> — {detail}</div>')
@@ -738,9 +784,12 @@ with T[5]:
         "AVC ischémique (si thrombolyse)", "AVC hémorragique",
         "Dissection aortique", "OAP hypertensif",
     ], key="ph_hta")
-    ch = crise_hypertensive(SS.v_pas or 120, motif_hta, poids, atcd)
-    AL(f"Objectif : {ch['cible']}", "warning")
-    for m_, c_ in ch.get("alerts", []): AL(m_, c_)
+    ch, ch_err = crise_hypertensive(SS.v_pas or 120, motif_hta, poids, atcd)
+    if ch_err:
+        AL(ch_err, "danger")
+    else:
+        AL(f"Objectif : {_safe_med_get(ch, 'cible', 'Cible clinique à confirmer')}", "warning")
+        for m_, c_ in _safe_med_get(ch, "alerts", []) or []: AL(m_, c_)
     CARD_END()
 
     # ── Épilepsie pédiatrique ─────────────────────────────────────────────
@@ -750,20 +799,20 @@ with T[5]:
         dur_epi = float(SS.det.get("duree_min", 0) or 0) if SS.det else 0.0
         encours  = bool(SS.det.get("en_cours", False)) if SS.det else False
         eme = protocole_epilepsie_ped(poids, age, dur_epi, encours, atcd)
-        if eme["eme_etabli"]:
+        if _safe_med_get(eme, "eme_etabli", False):
             AL(f"EME établi ({dur_epi:.0f} min) — Traitement 2e ligne requis", "danger")
         e1, e2 = st.columns(2)
         with e1:
-            mid = eme["midazolam_buccal"]
-            RX("Midazolam buccal", mid["dose"], [mid["note"]], mid["ref"], "2")
-            diz = eme["diazepam_rectal"]
-            RX("Diazépam rectal", diz["dose"], [diz["note"]], diz["ref"], "2")
+            mid = _safe_med_get(eme, "midazolam_buccal", {}) or {}
+            RX("Midazolam buccal", _safe_med_get(mid, "dose", "?"), [_safe_med_get(mid, "note", "")], _safe_med_get(mid, "ref", "BCFI"), "2")
+            diz = _safe_med_get(eme, "diazepam_rectal", {}) or {}
+            RX("Diazépam rectal", _safe_med_get(diz, "dose", "?"), [_safe_med_get(diz, "note", "")], _safe_med_get(diz, "ref", "BCFI"), "2")
         with e2:
-            lor = eme["lorazepam_iv"]
-            RX("Lorazépam IV", lor["dose"], [lor["note"]], lor["ref"], "2")
-            if eme["eme_etabli"]:
-                lev = eme["levetiracetam_iv"]
-                RX("Lévétiracétam IV", lev["dose"], [lev["note"]], lev["ref"], "3")
+            lor = _safe_med_get(eme, "lorazepam_iv", {}) or {}
+            RX("Lorazépam IV", _safe_med_get(lor, "dose", "?"), [_safe_med_get(lor, "note", "")], _safe_med_get(lor, "ref", "BCFI"), "2")
+            if _safe_med_get(eme, "eme_etabli", False):
+                lev = _safe_med_get(eme, "levetiracetam_iv", {}) or {}
+                RX("Lévétiracétam IV", _safe_med_get(lev, "dose", "?"), [_safe_med_get(lev, "note", "")], _safe_med_get(lev, "ref", "BCFI"), "3")
         CARD_END()
 
     DISC()
@@ -790,7 +839,12 @@ with T[6]:
             SS.motif, SS.det, re_fc, re_pas, re_spo2,
             re_fr, re_gcs, re_temp, age, re_n2, SS.gl)
         st.metric("NEWS2 réévaluation", re_n2, delta=re_n2 - SS.v_news2, delta_color="inverse")
-        TRI_CARD_INLINE(re_niv, re_just, re_n2)
+        FRENCH_TRIAGE_PANEL(
+            re_niv, re_just, re_n2,
+            crit="Reevaluation FRENCH V1.2",
+            discriminant=(SS.det or {}).get("french_discriminant"),
+            lock_priority=re_niv in {"M", "1", "2"},
+        )
         if re_n2 > SS.v_news2:
             AL("NEWS2 en hausse — Réévaluation médicale urgente", "danger")
         elif re_n2 < SS.v_news2:
@@ -855,7 +909,7 @@ with T[6]:
         "Glucose 30 % IV":        str(gluc_5b["vol"]) if gluc_5b else "Selon glycémie mesurée",
         "Salbutamol nébulisation": "2,5–5 mg nébulisation",
         "Furosémide IV":          "40–80 mg IV lent",
-        "Midazolam buccal":       str(eme_5b["midazolam_buccal"]["dose"]),
+        "Midazolam buccal":       str(_safe_med_get(_safe_med_get(eme_5b, "midazolam_buccal", {}) or {}, "dose", "Selon protocole")),
         "Vesiera® — Kétamine perfusion": str(ves_5b["dose"]) if ves_5b else "Selon protocole algologue",
         "Acide tranexamique IV (1 g)": "1 g IV en 10 min",
         "Autre":                  "À compléter",
