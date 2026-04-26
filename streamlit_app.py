@@ -34,6 +34,7 @@ from clinical.pharmaco import (
     sepsis_bundle_1h, ketamine_intranasale, vesiera,
     protocole_eva, protocole_epilepsie_ped,
     taradyl_im, diclofenac_im,
+    clevidipine, meopa, midazolam_iv,
 )
 from clinical.french_v12 import (
     FRENCH_MOTS_CAT, FRENCH_MOTIFS_RAPIDES,
@@ -749,10 +750,28 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
           </div>
         </div>""")
 
+        # ── Intelligence clinique : Tri → Pharma ─────────────────────────────
+        _tri_critique = SS.niv in ("M", "1", "2")
+        _eva_severe   = SS.eva >= 7
+        _is_asthme    = "Asthme" in atcd
+
+        if _tri_critique and _eva_severe:
+            H(f"""<div class="pharma-urgent">
+              ⚠️ TRI {SS.niv} — EVA {SS.eva}/10 — ANTALGIE MAJEURE PRIORITAIRE<br>
+              <span style="font-size:.76rem;font-weight:400;opacity:.9;">
+                Piritramide IV ou Morphine IV titrée à initier sans délai
+                — Réévaluation EVA obligatoire à 30 min (Circulaire 2014)
+              </span></div>""")
+
+        # Alertes ATCD → Pharma contextuelles
         if "IMAO (inhibiteurs MAO)" in atcd:
             AL("IMAO — Tramadol contre-indiqué", "danger")
         if "Insuffisance cardiaque" in atcd:
             AL("Insuffisance cardiaque — Remplissage réduit à 15 ml/kg", "warning")
+        if _is_asthme:
+            AL("ASTHME — AINS déconseillés (risque bronchospasme) — Préférer paracétamol/opioïdes", "danger")
+        if "HTA" in atcd:
+            AL("HTA — Surveiller la TA sous AINS (naproxène, diclofénac, kétorolac)", "warning")
         if gl_ph is None:
             AL("Glycémie non saisie — Glucose 30 % désactivé", "warning")
 
@@ -977,6 +996,66 @@ Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
                "warning")
             for m_, c_ in (_ch_payload or {}).get("alerts", []): AL(m_, c_)
         CARD_END()
+
+        # ── Clévidipine IV (Vesierra®) — HTA réfractaire ─────────────────────
+        CARD("Clévidipine IV (Vesierra®) — HTA sévère réfractaire", "")
+        st.caption("BCFI / ESC 2023 — Inhibiteur calcique IV ultrarapide (T½ ~1 min)")
+        clev_ctx = st.selectbox("Contexte HTA", [
+            "HTA sévère", "OAP hypertensif", "Dissection aortique", "Péri-opératoire",
+        ], key="ph_clev_ctx")
+        clev_rx, clev_err = clevidipine(SS.v_pas or 120, poids, clev_ctx, atcd)
+        if clev_err:
+            AL(f"🔒 {clev_err}", "danger")
+        else:
+            for m_, c_ in (clev_rx or {}).get("alerts", []): AL(m_, c_)
+            AL(f"Cible : {(clev_rx or {}).get('cible','—')}", "warning")
+            RX("Clévidipine IV (Vesierra® 0,5 mg/ml)",
+               f"{(clev_rx or {}).get('debit_init',1)} → max {(clev_rx or {}).get('debit_max',32)} mg/h",
+               [(clev_rx or {}).get("admin",""),
+                (clev_rx or {}).get("note","")],
+               (clev_rx or {}).get("ref","BCFI"), "U",
+               (clev_rx or {}).get("alerts",[]))
+        CARD_END()
+
+        # ── Midazolam IV — Sédation / Convulsion ────────────────────────────
+        ph3_c1, ph3_c2 = st.columns(2)
+        with ph3_c1:
+            CARD("Midazolam IV (Hypnovel®) — Sédation/Convulsion", "")
+            st.caption("BCFI — Benzodiazépine IV — Antidote : Flumazénil")
+            midaz_ind = st.radio("Indication",
+                ["sedation", "convulsion"], horizontal=True, key="ph_midaz_ind",
+                format_func=lambda x: "Sédation procédurale" if x == "sedation" else "Crise convulsive")
+            midaz_rx, midaz_err = midazolam_iv(poids, age, midaz_ind, atcd)
+            if midaz_err:
+                AL(f"🔒 {midaz_err}", "danger")
+            else:
+                for m_, c_ in (midaz_rx or {}).get("alerts", []): AL(m_, c_)
+                RX("Midazolam IV (Hypnovel®)",
+                   (midaz_rx or {}).get("dose_display", "—"),
+                   [(midaz_rx or {}).get("admin",""),
+                    (midaz_rx or {}).get("note",""),
+                    (midaz_rx or {}).get("antidote","")],
+                   (midaz_rx or {}).get("ref","BCFI"), "2",
+                   (midaz_rx or {}).get("alerts",[]))
+            CARD_END()
+
+        # ── MEOPA (Kalinox®) — Analgésie procédurale ────────────────────────
+        with ph3_c2:
+            CARD("MEOPA (Kalinox® 50/50) — Analgésie procédurale", "")
+            st.caption("BCFI / SFMU — 50 % O₂ / 50 % N₂O — Anxiolyse/Analgésie")
+            meopa_rx, meopa_err = meopa(age, atcd)
+            if meopa_err:
+                AL(f"🔒 {meopa_err}", "danger")
+            else:
+                for m_, c_ in (meopa_rx or {}).get("alerts", []): AL(m_, c_)
+                RX("MEOPA — Kalinox® 50/50",
+                   (meopa_rx or {}).get("melange","50% O₂/N₂O"),
+                   [(meopa_rx or {}).get("admin",""),
+                    (meopa_rx or {}).get("note",""),
+                    f"Débit : {(meopa_rx or {}).get('debit','')} — Durée max : {(meopa_rx or {}).get('duree_max','')}"],
+                   (meopa_rx or {}).get("ref","BCFI"), "2",
+                   (meopa_rx or {}).get("alerts",[]))
+            CARD_END()
 
         if age < 18:
             CARD("Protocole anticonvulsivant pédiatrique", "")

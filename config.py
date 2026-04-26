@@ -129,6 +129,21 @@ EME_SEUIL_MIN       = 5    # minutes — définition EME
 EME_OPERATIONNEL_MIN = 30  # minutes — EME opérationnel
 EME_ETABLI_MIN      = 5    # minutes — critère triage
 
+# ── Clévidipine (Vesierra®) — HTA sévère IV — BCFI/ESC 2023 ─────────────────
+CLEV_DEBIT_INIT_MG_H  = 1.0    # mg/h — débit initial
+CLEV_DEBIT_MAX_MG_H   = 32.0   # mg/h — maximum absolu
+CLEV_PALIER_S         = 90     # secondes entre chaque doublement de dose
+
+# ── MEOPA (Kalinox® 50/50 O₂/N₂O) — Analgésie procédurale ──────────────────
+MEOPA_DEBIT_L_MIN     = 6      # L/min — débit standard
+MEOPA_DUREE_MAX_MIN   = 60     # minutes — durée maximale par session
+
+# ── Midazolam IV (Hypnovel®) — Sédation urgence ──────────────────────────────
+MIDAZ_IV_KG           = 0.05   # mg/kg — dose initiale sédation
+MIDAZ_IV_MAX_MG       = 5.0    # mg — plafond par bolus
+MIDAZ_IV_CONVULS_KG   = 0.1    # mg/kg — crise convulsive
+MIDAZ_IV_CONVULS_MAX  = 10.0   # mg — plafond crise
+
 # ── Registre patients — anonymisé RGPD ───────────────────────────────────────
 REGISTRE_CAP = 200  # nombre max d'entrées en mémoire
 
