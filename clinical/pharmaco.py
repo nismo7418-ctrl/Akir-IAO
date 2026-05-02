@@ -756,3 +756,165 @@ def protocole_epilepsie_ped(poids: float, age: float, duree_min: float, en_cours
             "ref": "BCFI — Valproate IV",
         },
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIDAZOLAM IM / IN — Pédiatrie et sédation procédurale
+# Source : BCFI — Midazolam IM/IN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def midazolam_im(poids: float, age: float = 40, atcd: list = None) -> Result:
+    """Midazolam IM ou IN (Hypnovel® 5 mg/ml) — Sédation / Convulsion.
+    Dose 0,2 mg/kg IM ou IN, plafond 10 mg.
+    Source : BCFI — Midazolam IM/IN.
+    """
+    atcd = atcd or []
+    dose = min(_r(0.2 * poids, 1), 10.0)
+    vol  = _r(dose / 5.0, 2)   # solution 5 mg/ml
+    alerts: List[Alert] = [
+        ("Antidote : Flumazénil 0,2 mg IV (max 1 mg)", "info"),
+        ("Surveiller SpO2 + FR — matériel de VA à portée", "warning"),
+    ]
+    if age > 75 or _has(atcd, "Insuffisance hépatique"):
+        alerts.append(("Sujet âgé / IH : réduire la dose de 30-50 %", "warning"))
+    return ({
+        "medicament":    "Midazolam IM/IN (Hypnovel® 5 mg/ml)",
+        "dose_mg":       dose,
+        "volume_ml":     vol,
+        "admin":         "IM (cuisse antéro-lat.) ou IN (atomiseur MAD — répartir en 2 narines)",
+        "onset":         "IM 5-10 min / IN 3-5 min",
+        "surveillance":  "SpO2, FR, conscience toutes les 5 min",
+        "ref":           "BCFI — Midazolam IM/IN",
+        "alerts":        alerts,
+    }, None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROTOCOLES ANTICIPÉS IAO — par motif de recours
+# Source : Protocoles locaux Hainaut / SFMU
+# ─────────────────────────────────────────────────────────────────────────────
+
+PROTOCOLES_IAO: Dict[str, List[dict]] = {
+    "Douleur thoracique / SCA": [
+        {"med": "Aspirine",  "dose": "250 mg IV",           "voie": "IV",  "condition": lambda v: (v.get("pas") or 120) > 100},
+        {"med": "Trinitrine","dose": "0,5 mg sublingual",   "voie": "SL",  "condition": lambda v: (v.get("pas") or 120) > 100},
+        {"med": "O₂",        "dose": "Cible SpO2 94-98 %",  "voie": "Masque", "condition": lambda v: (v.get("spo2") or 98) < 94},
+    ],
+    "Allergie / anaphylaxie": [
+        {"med": "Adrénaline IM", "dose_fn": lambda p: f"{min(0.5, 0.01*p):.2f} mg", "voie": "IM cuisse"},
+        {"med": "NaCl 0,9 %",   "dose": "500 ml IV sur 15 min", "voie": "IV"},
+    ],
+    "Dyspnée / insuffisance respiratoire": [
+        {"med": "Salbutamol", "dose": "5 mg nébulisation", "voie": "INH"},
+        {"med": "O₂",         "dose": "Cible SpO2 94-98 %", "voie": "Masque/lunettes"},
+    ],
+    "Convulsions / EME": [
+        {"med": "Midazolam buccal", "dose_fn": lambda p: f"{min(10.0, round(0.3*p,1)):.1f} mg", "voie": "Buccale"},
+        {"med": "O₂",              "dose": "Haute concentration", "voie": "Masque"},
+    ],
+    "Hypoglycémie": [
+        {"med": "Glucose 30 %", "dose_fn": lambda p: f"{min(15, round(0.3*p,1)):.1f} g IV", "voie": "IV lent"},
+    ],
+    "Pétéchie / Purpura": [
+        {"med": "Ceftriaxone", "dose_fn": lambda p: f"{CEFRTRX_ADULTE_G} g IV", "voie": "IV 3-5 min"},
+        {"med": "O₂ + VVP",   "dose": "Large calibre — remplissage si choc", "voie": "IV"},
+    ],
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SAFETY CHECKS — Vérifications croisées ATCD × médicament
+# Source : BCFI — Interactions médicamenteuses
+# ─────────────────────────────────────────────────────────────────────────────
+
+SAFETY_CHECKS = [
+    {
+        "medicament": "Tramadol",
+        "condition": lambda patient, v: any("IMAO" in x for x in patient.get("atcd", [])),
+        "message": "IMAO — Tramadol CONTRE-INDIQUÉ ABSOLU (risque syndrome sérotoninergique)",
+        "niveau": "danger",
+    },
+    {
+        "medicament": "Tramadol",
+        "condition": lambda patient, v: any("ISRS" in x or "IRSNA" in x for x in patient.get("atcd", [])),
+        "message": "ISRS/IRSNA — Tramadol déconseillé (interaction sérotoninergique)",
+        "niveau": "warning",
+    },
+    {
+        "medicament": "AINS",
+        "condition": lambda patient, v: any(c in patient.get("atcd", []) for c in ["Insuffisance rénale chronique", "Ulcère gastro-duodénal", "Grossesse en cours"]),
+        "message": "Contre-indication AINS — IRC / ulcère / grossesse",
+        "niveau": "danger",
+    },
+    {
+        "medicament": "Midazolam",
+        "condition": lambda patient, v: (v.get("age") or 40) > 75,
+        "message": "Sujet âgé > 75 ans — risque dépression respiratoire — réduire dose de 50 %",
+        "niveau": "warning",
+    },
+    {
+        "medicament": "Morphine",
+        "condition": lambda patient, v: (v.get("age") or 40) > 75 or "BPCO" in patient.get("atcd", []),
+        "message": "Morphine — Surveillance SpO2 / FR renforcée (âge > 75 ou BPCO)",
+        "niveau": "warning",
+    },
+    {
+        "medicament": "Morphine",
+        "condition": lambda patient, v: "Insuffisance rénale chronique" in patient.get("atcd", []),
+        "message": "IRC — Morphine : accumulation des métabolites actifs — réduire fréquence",
+        "niveau": "warning",
+    },
+]
+
+
+def check_safety(medicament: str, patient: dict, vitals: dict) -> List[dict]:
+    """Vérifie les contre-indications croisées pour un médicament donné.
+    Source : BCFI — Pharmacovigilance.
+    """
+    alerts = []
+    for check in SAFETY_CHECKS:
+        if check["medicament"] in medicament:
+            try:
+                if check["condition"](patient, vitals):
+                    alerts.append({"message": check["message"], "niveau": check["niveau"]})
+            except Exception:
+                pass
+    return alerts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GÉNÉRATION D'ÉTIQUETTE PSE — Pour traçabilité seringue auto-pousseuse
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generer_etiquette(
+    medicament: str,
+    concentration: float,   # mg/ml
+    debit_mlh: float,       # ml/h
+    vol_total: float,       # ml
+    poids: float = 70.0,
+    operateur: str = "IAO",
+) -> str:
+    """Génère le texte d'étiquette standardisé pour une PSE.
+    Format compatible avec les fiches de traçabilité belges (AR 78 AFMPS).
+    """
+    gouttes   = int(debit_mlh * 20 / 60)
+    autonomie = round(vol_total / debit_mlh, 1) if debit_mlh > 0 else 0
+    dose_mg_h = round(concentration * debit_mlh, 2)
+    dose_ug_kg_min = round(dose_mg_h * 1000 / 60 / max(1, poids), 2)
+    now = __import__("datetime").datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  {medicament.upper()}\n"
+        f"  {concentration * vol_total:.0f} mg / {vol_total:.0f} ml NaCl 0,9 %\n"
+        f"  Concentration : {concentration} mg/ml\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  Débit    : {debit_mlh} ml/h = {gouttes} gttes/min\n"
+        f"  Dose     : {dose_mg_h} mg/h = {dose_ug_kg_min} µg/kg/min\n"
+        f"  Autonomie: {autonomie} h ({vol_total:.0f} ml)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  Préparé le : {now}\n"
+        f"  Opérateur  : {operateur}\n"
+        f"  Patient    : {poids:.0f} kg — Session anonyme\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )

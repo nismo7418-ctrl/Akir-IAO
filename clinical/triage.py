@@ -71,33 +71,66 @@ def _h_acr(**kw) -> TriageResult:
 
 
 def _h_thoracique(**kw) -> TriageResult:
-    """Douleur thoracique / SCA."""
+    """Douleur thoracique / SCA — Discriminants ECG + douleur + FRCV.
+    Source : SFMU FRENCH V1.1 / ESC 2023.
+    """
     det, pas, fc, spo2, gcs = kw["det"], kw["pas"], kw["fc"], kw["spo2"], kw["gcs"]
+    ecg  = det.get("ecg", "Normal")
+    doul = det.get("douleur", "Atypique")
+    frcv = int(det.get("frcv") or 0)
+    if ecg == "Anormal typique SCA":
+        return "1", "ECG typique SCA — Tri 1 immédiat", "FRENCH Tri 1"
     if det.get("syncopal") or pas < 90 or gcs < 15:
-        return "1", "Douleur thoracique avec instabilité — Tri 1", "FRENCH Tri 1"
-    if det.get("typique") or fc > 120 or spo2 < 94:
+        return "1", "Douleur thoracique avec instabilité hémodynamique", "FRENCH Tri 1"
+    if ecg == "Anormal non typique" and doul in ("Typique (constrictive, irradiante)", "Coronaire probable"):
+        return "2", "ECG anormal + douleur typique/coronaire", "FRENCH Tri 2"
+    if doul == "Typique (constrictive, irradiante)" or fc > 120 or spo2 < 94:
         return "2", "Douleur thoracique typique / instabilité relative", "FRENCH Tri 2"
-    return "3B", "Douleur thoracique atypique — Évaluation", "FRENCH Tri 3B"
+    if ecg == "Normal" and frcv >= 1:
+        return "3A", "ECG normal avec comorbidité coronaire", "FRENCH Tri 3A"
+    if doul == "Coronaire probable":
+        return "3B", "Douleur de type coronaire — ECG normal", "FRENCH Tri 3B"
+    return "4", "ECG normal et douleur atypique — Évaluation", "FRENCH Tri 4"
 
 
 def _h_dyspnee(**kw) -> TriageResult:
-    """Dyspnée / insuffisance respiratoire."""
+    """Dyspnée / insuffisance respiratoire — Discriminants FRENCH.
+    Source : SFMU FRENCH V1.1.
+    """
     spo2, fr, det = kw["spo2"], kw["fr"], kw["det"]
-    if spo2 < 90 or fr > 25 or det.get("cyanose"):
+    # Tri 1 : Détresse respiratoire majeure
+    if spo2 < 86 or fr >= 40 or det.get("cyanose") or det.get("detresse"):
+        return "1", f"Détresse respiratoire — SpO2 {spo2:.0f}% / FR {fr:.0f}/min", "FRENCH Tri 1"
+    # Tri 2 : Dyspnée sévère
+    if spo2 <= 90 or fr >= 30 or not det.get("parole", True):
         return "2", f"Dyspnée sévère — SpO2 {spo2:.0f}% / FR {fr:.0f}/min", "FRENCH Tri 2"
-    if spo2 < 94 or fr > 20:
+    if det.get("tirage") or det.get("orth") or det.get("orthopnee"):
+        return "2", "Tirage / orthopnée — Dyspnée sévère", "FRENCH Tri 2"
+    # Tri 3A/3B
+    if spo2 < 94 or fr > 22:
         return "3A", f"Dyspnée modérée — SpO2 {spo2:.0f}%", "FRENCH Tri 3A"
     return "3B", "Dyspnée légère — Évaluation", "FRENCH Tri 3B"
 
 
 def _h_avc(**kw) -> TriageResult:
-    """AVC / Déficit neurologique."""
+    """AVC / Déficit neurologique — Délai thrombolyse + sévérité.
+    Source : ESO 2023 / SFMU FRENCH V1.1.
+    """
     det, gcs, pas = kw["det"], kw["gcs"], kw["pas"]
+    delai = float(det.get("delai") or 99)
+    # Tri 1 : Sévérité ou instabilité majeure
     if gcs < 13 or pas > 220 or det.get("hemiplegique"):
-        return "1", "AVC sévère — Déficit majeur — Tri 1", "FRENCH Tri 1"
+        return "1", f"AVC sévère — GCS {gcs}/15", "FRENCH Tri 1"
+    # Tri 2 : Fenêtre thrombolyse
+    if delai <= AVC_DELAI_THROMBOLYSE_H:
+        return "2", f"AVC — délai {delai:.1f}h ≤ 4,5h — FENÊTRE THROMBOLYSE", "ESO 2023"
+    if det.get("def_prog"):
+        return "2", "Déficit neurologique progressif", "FRENCH Tri 2"
     if det.get("fast_positif") or det.get("avc_suspect"):
         return "2", "Code Stroke — BE-FAST positif — Imagerie URGENTE", "FRENCH Tri 2"
-    return "2", "Déficit neurologique focal — Bilan urgent", "FRENCH Tri 2"
+    if delai >= 24:
+        return "4", f"AVC > 24 h — avis MAO/MCO", "FRENCH Tri 4"
+    return "3A", "AVC > 4,5 h — bilan urgent", "FRENCH Tri 3A"
 
 
 def _h_conscience(**kw) -> TriageResult:
@@ -335,42 +368,157 @@ def _h_psychiatrie(**kw) -> TriageResult:
     return "3B", "Trouble psychiatrique — Évaluation", "FRENCH Tri 3B"
 
 
+
+# ── Seuils FC pédiatriques par tranche d'âge (AAP / SFNP) ────────────────────
+_FC_TACHY_NOURR  = 160   # < 1 mois
+_FC_TACHY_BEBE   = 150   # 1-12 mois
+_FC_TACHY_ENFANT = 140   # 1-5 ans
+_FC_TACHY_GRAND  = 120   # > 5 ans
+_VOMISS_FREQ_SEVERE = 6  # vomissements/heure — seuil d'alerte
+
+
+def _fc_tachy_ped(fc: float, age: float) -> bool:
+    """Retourne True si FC supérieure au seuil pédiatrique pour l'âge."""
+    if age < 1/12:  seuil = _FC_TACHY_NOURR
+    elif age < 1.0: seuil = _FC_TACHY_BEBE
+    elif age < 5.0: seuil = _FC_TACHY_ENFANT
+    else:           seuil = _FC_TACHY_GRAND
+    return fc > seuil
+
+
 def _h_ped_fievre_nourr(**kw) -> TriageResult:
-    """Fièvre nourrisson ≤ 3 mois."""
+    """Fièvre nourrisson ≤ 3 mois — Bilan sepsis systématique.
+    Source : SFP / SFMU — Fièvre du nourrisson.
+    """
     temp, age = kw["temp"], kw["age"]
     if temp >= 38.0 and age <= 3/12:
-        return "1", f"Fièvre {temp:.1f}°C nourrisson ≤ 3 mois — Bilan sepsis IMMÉDIAT", "FRENCH Tri 1"
+        return "1", f"Fièvre {temp:.1f}°C nourrisson ≤ 3 mois — Bilan sepsis IMMÉDIAT", "SFP/SFMU"
     return "2", "Nourrisson fébrile ≤ 3 mois — Évaluation urgente", "FRENCH Tri 2"
 
 
 def _h_ped_fievre(**kw) -> TriageResult:
-    """Fièvre enfant 3 mois — 15 ans."""
-    temp, fc, det, age = kw["temp"], kw["fc"], kw["det"], kw["age"]
-    if temp >= 40.0 or det.get("somnolence") or det.get("purpura"):
-        return "2", f"Fièvre élevée {temp:.1f}°C enfant — Signe de gravité", "FRENCH Tri 2"
-    if fc > 150 or det.get("mauvaise_tolerance"):
-        return "3A", f"Fièvre {temp:.1f}°C enfant — Mauvaise tolérance", "FRENCH Tri 3A"
-    return "4", f"Fièvre {temp:.1f}°C enfant — Bonne tolérance", "FRENCH Tri 4"
+    """Fièvre enfant 3 mois – 15 ans — Arbre décisionnel complet.
+    Source : SFMU / SFP 2017 — Critères de gravité pédiatrique.
+    """
+    temp, fc, det, age, spo2 = kw["temp"], kw["fc"], kw["det"], kw["age"], kw["spo2"]
+    tachy = _fc_tachy_ped(fc, age)
+
+    # ── Tri 1 : Signes vitaux critiques ─────────────────────────────────────
+    if det.get("purpura") and temp >= 38.0:
+        return "1", "Fièvre + purpura — Ceftriaxone 2 g IV IMMÉDIAT", "SPILF/SFP 2017"
+    if det.get("convulsion_prolongee") or det.get("convulsion_focale"):
+        return "1", "Convulsion fébrile prolongée ou focale", "SFNP Tri 1"
+
+    # ── Tri 2 : Signes de gravité ────────────────────────────────────────────
+    if temp >= 40.0:
+        return "2", f"Fièvre {temp:.1f}°C ≥ 40°C", "FRENCH Pédiatrie"
+    if det.get("nuque") or det.get("kernig"):
+        return "2", "Fièvre avec signes méningés", "FRENCH Pédiatrie"
+    if det.get("encephalopathie") or det.get("agitation") or det.get("somnolence"):
+        return "2", "Fièvre avec encéphalopathie", "FRENCH Pédiatrie"
+    if age <= 0.5 and temp >= 38.0:
+        return "2", f"Fièvre nourrisson {int(age*12)} mois — bilan urgent", "SFP/SFMU"
+    if tachy and det.get("mauvaise_tolerance"):
+        return "2", f"Fièvre + tachycardie FC {fc:.0f} — mauvaise tolérance", "FRENCH Pédiatrie"
+    if det.get("immunodepression") or det.get("cardiopathie"):
+        return "2", "Fièvre — terrain à risque (immunodépression/cardiopathie)", "FRENCH Pédiatrie"
+
+    # ── Tri 3A : Signes modérés ──────────────────────────────────────────────
+    if tachy or det.get("mauvaise_tolerance"):
+        return "3A", f"Fièvre {temp:.1f}°C — mauvaise tolérance", "FRENCH Tri 3A"
+
+    # ── Tri 3B / 4 : Bien toléré ─────────────────────────────────────────────
+    if temp >= 38.5:
+        return "3B", f"Fièvre {temp:.1f}°C — bonne tolérance", "FRENCH Tri 3B"
+    return "4", f"Fièvre {temp:.1f}°C — bonne tolérance", "FRENCH Tri 4"
 
 
 def _h_ped_gastro(**kw) -> TriageResult:
-    """Pédiatrie — Vomissements / Gastro-entérite."""
-    det, age = kw["det"], kw["age"]
-    if age < 3/12 or det.get("deshydratation_severe"):
-        return "2", "Nourrisson / déshydratation sévère — Hydratation urgente", "FRENCH Tri 2"
-    if age < 2 or det.get("occlusion") or det.get("sang"):
-        return "3A", "Gastro-entérite pédiatrique avec signe de gravité", "FRENCH Tri 3A"
-    return "4", "Gastro-entérite pédiatrique — Surveillance", "FRENCH Tri 4"
+    """Pédiatrie — Vomissements / Gastro-entérite — Arbre décisionnel ESPGHAN.
+    Source : ESPGHAN 2014 / FRENCH Pédiatrie.
+    """
+    det, age, fc, pas, temp = kw["det"], kw["age"], kw["fc"], kw["pas"], kw["temp"]
+    tachy = _fc_tachy_ped(fc, age)
+    sh = fc / max(1.0, pas)
+
+    # ── Tri 1 : Urgences chirurgicales / choc ────────────────────────────────
+    if det.get("bilieux"):
+        return "1", "Vomissements bilieux — occlusion à exclure", "FRENCH Pédiatrie"
+    if det.get("fontanelle_bombante"):
+        return "1", "Fontanelle bombante — HTIC", "FRENCH Pédiatrie"
+    if det.get("pleurs_inconsolables"):
+        return "1", "Pleurs inconsolables — invagination intestinale", "FRENCH Pédiatrie"
+    if det.get("convulsions"):
+        return "1", "Vomissements + convulsions", "FRENCH Pédiatrie"
+    if sh >= 1.0 or pas < 90 or det.get("deshydrat_severe"):
+        return "1", f"Choc hypovolémique — SI {sh:.2f}", "FRENCH Pédiatrie"
+
+    # ── Tri 2 : Déshydratation modérée / signes de gravité ──────────────────
+    if det.get("deshydrat_moderee"):
+        return "2", "Déshydratation modérée — réhydratation urgente", "ESPGHAN 2014"
+    if age < 0.25 and temp >= 38.0:
+        return "2", f"Nourrisson {int(age*12)} mois — vomissements + fièvre", "FRENCH Pédiatrie"
+    if tachy and temp >= 38.5:
+        return "2", f"Tachycardie FC {fc:.0f} + fièvre {temp:.1f}°C", "FRENCH Pédiatrie"
+    if det.get("vomiss_freq"):
+        return "2", f"Vomissements > {_VOMISS_FREQ_SEVERE}/h", "FRENCH Pédiatrie"
+    if det.get("refus_alimentation") and (tachy or det.get("deshydrat_legere")):
+        return "2", "Refus alimentaire + déshydratation", "FRENCH Pédiatrie"
+
+    # ── Tri 3A / 3B ───────────────────────────────────────────────────────────
+    if det.get("deshydrat_legere") or tachy:
+        return "3A", "Déshydratation légère", "ESPGHAN 2014"
+    if age < 2 or det.get("sang"):
+        return "3A", "Gastro-entérite pédiatrique avec signe de gravité", "FRENCH Pédiatrie"
+    return "3B", "Gastro-entérite bien tolérée", "FRENCH Tri 3B"
 
 
 def _h_ped_epilepsie(**kw) -> TriageResult:
-    """Pédiatrie — Crise épileptique."""
-    det, gcs = kw["det"], kw["gcs"]
-    if det.get("en_cours") or det.get("eme_etabli"):
-        return "1", "Crise pédiatrique en cours — Anticonvulsivant IMMÉDIAT", "FRENCH Tri 1"
-    if gcs < 13:
-        return "2", f"Post-critique pédiatrique — GCS {gcs}/15", "FRENCH Tri 2"
-    return "2", "Crise pédiatrique résolue — Évaluation", "FRENCH Tri 2"
+    """Pédiatrie — Crise épileptique — Algorithme SFNP 2023 / ILAE.
+    Source : SFNP 2023, ILAE 2015, ISPE 2022.
+    """
+    det, gcs, spo2, temp, age, gl = (
+        kw["det"], kw["gcs"], kw["spo2"], kw["temp"], kw["age"],
+        kw.get("gl"),
+    )
+    duree = float(det.get("duree_min") or 0)
+
+    # ── Tri 1 : EME / situations critiques ───────────────────────────────────
+    if det.get("eme_etabli") or duree > 30:
+        return "1", f"EME établi > 30 min", "ISPE 2022"
+    if duree > 15:
+        return "1", f"EME opérationnel {duree:.0f} min", "ILAE 2015"
+    if spo2 < 92:
+        return "1", f"Crise + SpO2 {spo2:.0f}%", "FRENCH Pédiatrie"
+    if age < 1/12:
+        return "1", "Convulsion néonatale", "SFNP Tri 1"
+    if det.get("tc_associe"):
+        return "1", "Crise + TC associé", "FRENCH Tri 1"
+    if det.get("signes_meninges") and temp >= 38.0:
+        return "1", "Crise fébrile + signes méningés — méningite", "FRENCH Pédiatrie"
+    if gl is not None and gl < 54 and det.get("conscience_incomplete"):
+        return "1", f"Hypoglycémie sévère {gl:.0f} mg/dl + crise", "FRENCH Tri 1"
+
+    # ── Tri 2 : Crise en cours / première crise / complexe ───────────────────
+    if det.get("en_cours"):
+        return "2", "Crise EN COURS — anticonvulsivant IMMÉDIAT", "SFNP 2023"
+    if duree > 5:
+        return "2", f"Crise prolongée {duree:.0f} min", "SFNP 2023"
+    if det.get("premiere_crise") and "Épilepsie" not in (det.get("atcd") or []):
+        return "2", "Première crise non fébrile", "FRENCH Pédiatrie"
+    if det.get("focale") or det.get("repetee_24h"):
+        return "2", "Crise fébrile complexe (focale ou répétée)", "SFNP 2023"
+    if det.get("conscience_incomplete") or det.get("avpu") in ("V", "P", "U"):
+        return "2", "Conscience altérée post-critique", "FRENCH Pédiatrie"
+
+    # ── Tri 3A / 3B : Épilepsie connue récupérée ─────────────────────────────
+    if det.get("febrile") and not det.get("focale") and det.get("recuperee"):
+        return "3A", "Crise fébrile simple récupérée", "SFNP 2023"
+    if "Épilepsie" in (det.get("atcd") or []) and det.get("recuperee") and det.get("habituelle"):
+        return "3A", "Épilepsie connue — crise habituelle récupérée", "FRENCH Tri 3A"
+    if "Épilepsie" in (det.get("atcd") or []) and det.get("recuperee") and det.get("plan_urgence"):
+        return "3B", "Épilepsie connue — plan urgences personnalisé", "FRENCH Tri 3B"
+    return "2", "Crise pédiatrique — évaluation urgente", "SFNP 2023"
 
 
 def _h_ped_asthme(**kw) -> TriageResult:
