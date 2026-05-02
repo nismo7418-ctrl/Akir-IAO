@@ -5,7 +5,7 @@ def _triage_acr(**_) -> tuple:
     Triage arrêt cardio-respiratoire — RCP en cours.
     Source : FRENCH V1.1 — Tri M immédiat.
     """
-    return "1", "ACR confirmé — RCP en cours", "FRENCH Tri 1"
+    return "M", "ACR confirmé — RCP en cours", "FRENCH Tri M"
 
 def _triage_hypotension(pas, fc, **_) -> tuple:
     """
