@@ -225,8 +225,27 @@ def perf_propofol(
     ]
 
     if phase == "induction":
-        dose_mg_kg_min = 0.5   # 0,5-1,5 mg/kg bolus IV lent
-        dose_mg_h = _r(dose_mg_kg_min * 60 * poids, 0)
+        # Bolus unique IV lent — 1,5 mg/kg en 30-40 s (titrer 1 mg/kg si sujet fragile)
+        dose_mg = _r(1.5 * poids, 0)
+        vol_ml  = _r(dose_mg / 10.0, 1)
+        alerts.append(("Bolus TITRÉ : commencer à 1 mg/kg si âge > 55 ans ou ASA ≥ 3", "warning"))
+        return {
+            "label":        "Propofol — Bolus induction IV lente",
+            "conc_mgml":    10.0,
+            "debit_mlh":    0,
+            "gttes_min":    0,
+            "step_ml":      0,
+            "duree_h":      0,
+            "vol_total_ml": vol_ml,
+            "dilution":     "Diprivan® 1% (10 mg/ml) — Prêt à l'emploi",
+            "details": [
+                f"Bolus : {dose_mg:.0f} mg = {vol_ml:.1f} ml Diprivan® 1%",
+                f"Dose : 1,5 mg/kg × {poids:.0f} kg — injecter en 30-40 s",
+                "Titrer par paliers de 20 mg chez sujet âgé/fragile",
+            ],
+            "alerts": alerts,
+            "ref": "BCFI / SFAR — Propofol bolus inducteur",
+        }
     else:
         dose_mg_kg_min = 0.05  # 3-6 mg/kg/h en entretien = 0,05-0,1 mg/kg/min
         dose_mg_h = _r(dose_mg_kg_min * 60 * poids, 0)
@@ -237,7 +256,7 @@ def perf_propofol(
         alerts.append(("Syndrome de perfusion au propofol > 4 mg/kg/h > 48h — surveiller TG, lactates", "warning"))
 
     return _build(
-        label=f"Propofol PSE — {phase}",
+        label="Propofol PSE — entretien",
         dose_mg_h=dose_mg_h,
         conc_mgml=conc,
         vol_total_ml=50,
@@ -245,7 +264,7 @@ def perf_propofol(
         ref="BCFI / SFAR — Propofol sédation procédurale",
         dilution="Diprivan® 1 % (10 mg/ml) — Prêt à l'emploi — Ne pas diluer < 2 mg/ml",
         details=[
-            f"Phase : {phase}",
+            f"Phase : entretien",
             f"Débit calculé pour {dose_mg_kg_min:.2f} mg/kg/min × {poids:.0f} kg",
             "Réduire de 30-50 % chez le patient âgé ou ASA III-IV",
         ],

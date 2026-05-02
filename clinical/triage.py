@@ -460,8 +460,8 @@ def _h_ped_gastro(**kw) -> TriageResult:
         return "2", f"Nourrisson {int(age*12)} mois — vomissements + fièvre", "FRENCH Pédiatrie"
     if tachy and temp >= 38.5:
         return "2", f"Tachycardie FC {fc:.0f} + fièvre {temp:.1f}°C", "FRENCH Pédiatrie"
-    if det.get("vomiss_freq"):
-        return "2", f"Vomissements > {_VOMISS_FREQ_SEVERE}/h", "FRENCH Pédiatrie"
+    if (det.get("vomiss_freq") or 0) >= _VOMISS_FREQ_SEVERE:
+        return "2", f"Vomissements ≥ {_VOMISS_FREQ_SEVERE}/h", "FRENCH Pédiatrie"
     if det.get("refus_alimentation") and (tachy or det.get("deshydrat_legere")):
         return "2", "Refus alimentaire + déshydratation", "FRENCH Pédiatrie"
 
@@ -714,7 +714,7 @@ def _worst_case_terrain(
     is_trauma = any(t in m for t in ("trauma", "traumatisme", "fracture", "brulure", "chute"))
     has_anticoag = any(a in atcd_norm for a in (
         "anticoagulants/aod", "anticoagulants", "aod", "avk",
-        "antiagregatnts plaquettaires", "antiagrégants",
+        "antiagrégants plaquettaires", "antiagrégants",
     ))
     if is_trauma and has_anticoag:
         return "2", "Traumatisme + anticoagulants — Risque hémorragique majeur", "Worst-Case Terrain"
@@ -826,8 +826,8 @@ def french_triage(
         return result
 
     except Exception as e:
-        # Failsafe : ne jamais laisser planter — triage conservateur Tri 2
-        return "2", f"Erreur moteur triage — Évaluation médicale urgente ({e})", "Sécurité Tri 2"
+        # Failsafe : sur-triage conservateur — mieux Tri M que sous-estimer
+        return "M", f"Erreur moteur triage — Évaluation médicale IMMÉDIATE ({e})", "Sécurité Tri M"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

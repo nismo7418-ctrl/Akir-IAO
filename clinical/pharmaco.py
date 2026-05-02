@@ -86,11 +86,10 @@ def _use_mg_kg(age: float) -> bool:
 
 def _format_dose(dose_mg: float, poids: float, age: float, unit: str = "mg") -> str:
     """Formate l'affichage de la dose selon l'âge."""
-    if _use_mg_kg(age):
+    if _use_mg_kg(age) and poids > 0:
         dose_per_kg = dose_mg / poids
         return f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} {unit})"
-    else:
-        return f"{_fmt(dose_mg)} {unit}"
+    return f"{_fmt(dose_mg)} {unit}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
