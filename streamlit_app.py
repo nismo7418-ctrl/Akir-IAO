@@ -756,6 +756,12 @@ try:
         _dose_mode = "mg/kg" if age < 15 else "adulte"
 
         # Bandeau patient + alertes critiques
+        _pv_keys = [
+            _trt_checks.get("IMAO (inhibiteurs MAO)"),
+            atcd_checks.get("Insuffisance rénale chronique"),
+            trt_checks.get("Anticoagulants/AOD"),
+        ]
+        _pv_txt = ("⚠️ " + str(len([a for a in _pv_keys if a])) + " alerte(s)") if any(_pv_keys) else "✅ Pas d'alerte PV"
         H(f'<div style="background:linear-gradient(135deg,#004A99,#0069D9);color:#fff;'
           f'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;'
           f'justify-content:space-between;align-items:center;">'
@@ -763,7 +769,7 @@ try:
           f'<div style="font-size:1.1rem;font-weight:800;">{poids:.0f} kg — {age:.0f} ans'
           f' <span style="font-size:.75rem;opacity:.7;">({_dose_mode})</span></div></div>'
           f'<div style="text-align:right;font-size:.7rem;opacity:.8;">'
-          f'{"⚠️ " + str(len([a for a in [_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")] if a])) + " alerte(s)" if any([_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")]) else "✅ Pas d'alerte PV"}'
+          f'{_pv_txt}'
           f'</div></div>')
 
         # Alertes PV critiques en haut
