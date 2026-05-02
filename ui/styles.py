@@ -635,7 +635,7 @@ input[type="checkbox"] {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   SIDEBAR — Fond acier
+   SIDEBAR — Fond acier (PC uniquement)
 ══════════════════════════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
   background: var(--BG2) !important;
@@ -643,5 +643,49 @@ input[type="checkbox"] {
 }
 [data-testid="stSidebar"] .block-container {
   padding: .5rem .75rem 2rem !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE-FIRST — La sidebar est cachée sur téléphone.
+   Le profil patient est dans l'onglet 👤 Patient.
+   Sur desktop (≥ 769px) la sidebar réapparaît normalement.
+══════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  [data-testid="stSidebar"] {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+  [data-testid="collapsedControl"] {
+    display: none !important;
+  }
+  /* Plein écran sur mobile */
+  .block-container {
+    padding: .4rem .6rem 4rem !important;
+    max-width: 100% !important;
+  }
+  /* Grands boutons "one-hand friendly" */
+  button, .stButton > button {
+    min-height: 50px !important;
+    font-size: .92rem !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+  }
+  /* Onglets lisibles sur petit écran */
+  .stTabs [data-baseweb="tab"] {
+    font-size: .68rem !important;
+    padding: 8px 5px !important;
+    min-width: 0 !important;
+  }
+  /* Grille vitaux 2 colonnes sur mobile */
+  .vitaux-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Inputs plus hauts */
+  .stNumberInput input, .stTextInput input {
+    min-height: 44px !important;
+    font-size: .95rem !important;
+  }
 }
 """
