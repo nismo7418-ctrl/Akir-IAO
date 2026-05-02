@@ -305,14 +305,17 @@ def _sticky_bar():
         _el2 = (datetime.now() - SS.t_arr).total_seconds()
         _m2, _s2 = divmod(int(_el2), 60)
         _timer_txt = f"⏱ {_m2:02d}:{_s2:02d}"
-    H(f"""<div class="sticky-bar">
-      <span class="sticky-badge badge-age">👤 {_age_txt} — {poids:.0f} kg</span>
-      {"<span class='sticky-badge badge-atcd'>⚕️ " + str(_atcd_n) + " ATCD</span>" if _atcd_n else ""}
-      {"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 " + alg + "</span>" if alg else ""}
-      <span class="sticky-badge badge-triage {_niv_css}" style="font-size:.7rem;">{_niv_txt}</span>
-      {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>" if SS.v_news2 >= 5 else ""}
-      {"<span class='badge-chrono'>" + _timer_txt + "</span>" if _timer_txt else ""}
-    </div>""")
+    _badges = [f'<span class="sticky-badge badge-age">👤 {_age_txt} — {poids:.0f} kg</span>']
+    if _atcd_n:
+        _badges.append(f"<span class='sticky-badge badge-atcd'>⚕️ {_atcd_n} ATCD</span>")
+    if alg:
+        _badges.append(f"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 {alg}</span>")
+    _badges.append(f'<span class="sticky-badge badge-triage {_niv_css}" style="font-size:.7rem;">{_niv_txt}</span>')
+    if SS.v_news2 >= 5:
+        _badges.append(f"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>")
+    if _timer_txt:
+        _badges.append(f"<span class='badge-chrono'>{_timer_txt}</span>")
+    H('<div class="sticky-bar">' + "".join(_badges) + "</div>")
 
 
 try:
