@@ -1,20 +1,18 @@
 # streamlit_app.py — AKIR-IAO v19.0 — Système Expert Grade Hospitalier
 # Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
-# Architecture : Modulaire — FRENCH SFMU V1.1 — BCFI — RGPD
+# UX refonte : "One-screen workflow" — confort IAO urgences — Mobile-first
 
 import streamlit as st
 import uuid, io, csv as csv_mod, traceback
 from datetime import datetime
 
-# ── Configuration page (DOIT être le premier appel Streamlit) ─────────────────
 st.set_page_config(
     page_title="AKIR-IAO v19.0",
     page_icon="🏥",
-    layout="centered",
-    initial_sidebar_state="expanded",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Imports modules métier ────────────────────────────────────────────────────
 from config import *
 from clinical.news2 import calculer_news2, n2_meta
 from clinical.triage import french_triage, verifier_coherence
@@ -26,6 +24,13 @@ from clinical.scores import (
     regle_ottawa_cheville, regle_canadian_ct,
 )
 from clinical.vitaux import si, sipa
+from clinical.perfusion import (
+    perf_morphine, perf_piritramide, perf_ketamine,
+    perf_midazolam, perf_adrenaline, perf_noradrenaline,
+    perf_insuline, perf_amiodarone, perf_labetalol,
+    perf_magnesium, perf_nicardipine, perf_dobutamine,
+    calculer_debit, convertir_debit,
+)
 from clinical.pharmaco import (
     paracetamol, naproxene, ketorolac, diclofenac, tramadol, piritramide, morphine,
     naloxone, adrenaline, glucose, ceftriaxone, litican,
@@ -35,10 +40,12 @@ from clinical.pharmaco import (
     protocole_eva, protocole_epilepsie_ped,
     taradyl_im, diclofenac_im,
     clevidipine, meopa, midazolam_iv,
+    midazolam_im, PROTOCOLES_IAO, check_safety, generer_etiquette,
 )
 from clinical.french_v12 import (
     FRENCH_MOTS_CAT, FRENCH_MOTIFS_RAPIDES,
     get_protocol, render_discriminants, apply_discriminant_selection,
+    DISCRIMINANTS_ENRICHIS, render_discriminants_enrichis, process_answers,
 )
 from ui.eva_pqrst import (
     EVA_WIDGET_COMPLET, SCHEMA_BRULURES, QUESTIONS_AVANCEES,
@@ -57,11 +64,10 @@ from ui.components import (
 MOTS_CAT       = FRENCH_MOTS_CAT
 MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
 
-# ── Session State — initialisation des clés nécessaires ──────────────────────
+# ── Session State ─────────────────────────────────────────────────────────────
 SS = st.session_state
 _defaults = {
-    "op": "", "sid": str(uuid.uuid4())[:8].upper(),
-    "uid": None,
+    "op": "", "sid": str(uuid.uuid4())[:8].upper(), "uid": None,
     "t_arr": None, "t_cont": None, "t_reev": None,
     "v_temp": 37.0, "v_fc": 80, "v_pas": 120,
     "v_spo2": 98, "v_fr": 16, "v_gcs": 15,
@@ -72,107 +78,304 @@ _defaults = {
     "niv": None, "just": "", "crit": "",
     "det": {}, "uid_cur": None,
     "histo": [], "reevs": [],
+    "atcd": [], "atcd_checks": {}, "risk_checks": {}, "trt_checks": {},
+    "tab_active": 0,
 }
 for _k, _v in _defaults.items():
     if _k not in SS:
         SS[_k] = _v
-
 if not SS.get("uid"):
     SS.uid = SS.sid
 
 load_css()
 
-
-def _show_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco) -> None:
-    SS.v_news2, nw = calculer_news2(fr, spo2, o2_flag, temp, pas, fc, gcs, bpco)
-    for w in nw:
-        AL(w, "danger" if "IMMÉDIAT" in w or "ENGAGEMENT" in w else "warning")
-
-
+# ── Helpers locaux ────────────────────────────────────────────────────────────
 def WK(base: str, scope: str | None = None) -> str:
-    parts = [str(SS.get("uid") or SS.get("sid") or "session")]
+    parts = [str(SS.get("uid") or SS.get("sid") or "s")]
     if scope:
         parts.append(str(scope))
     parts.append(str(base))
     return "__".join(p.replace(" ", "_") for p in parts if p)
 
+def _n2() -> int:
+    n2, _ = calculer_news2(
+        SS.v_fr, SS.v_spo2, SS.o2,
+        SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
+    SS.v_news2 = n2
+    return n2
 
-def _ensure_sidebar_state() -> None:
-    widget_defaults = {
-        "p_age": int(SS.get("age") or 45),
-        "p_am": int(SS.get("age_mois") or 3),
-        "p_kg": int(SS.get("poids") or 70),
-        "p_taille": int(SS.get("taille") or 170),
-        "p_alg": SS.get("alg") or "",
-        "p_atcd_other": list(SS.get("atcd_other") or []),
-        WK("p_o2"): bool(SS.get("o2", False)),
-        WK("r_eva"): str(int(SS.get("eva") or 0)),
-    }
-    for key, value in widget_defaults.items():
-        if key not in SS:
-            SS[key] = value
+# Variables patient depuis SS
+age         = float(SS.get("age") or 45)
+poids       = float(SS.get("poids") or 70)
+taille      = float(SS.get("taille") or 170)
+atcd        = list(SS.get("atcd") or [])
+alg         = str(SS.get("alg") or "")
+o2          = bool(SS.get("o2") or False)
+atcd_checks = dict(SS.get("atcd_checks") or {})
+risk_checks = dict(SS.get("risk_checks") or {})
+trt_checks  = dict(SS.get("trt_checks") or {})
+
+# ── CSS additionnel inline UX ─────────────────────────────────────────────────
+st.markdown("""<style>
+/* ── Barre sticky de statut patient ─────────────────────────────────── */
+.sticky-bar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--CARD);
+  border-bottom: 2px solid var(--B);
+  padding: 6px 14px;
+  display: flex; align-items: center; gap: 10px;
+  margin: -4px -1rem 10px;
+  box-shadow: var(--s1);
+}
+.sticky-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: .68rem; font-weight: 700; font-family: 'IBM Plex Mono', monospace;
+  border: 1.5px solid currentColor; white-space: nowrap;
+}
+.badge-age   { color: #2563EB; border-color: #BFDBFE; background: #EFF6FF; }
+.badge-poids { color: #7C3AED; border-color: #DDD6FE; background: #F5F3FF; }
+.badge-atcd  { color: #B45309; border-color: #FDE68A; background: #FFFBEB; }
+.badge-triage { font-size: .72rem; font-weight: 800; padding: 4px 12px; }
+.badge-chrono { color: var(--TM); font-family: 'IBM Plex Mono', monospace; font-size: .8rem; margin-left:auto; }
+
+/* ── Boutons d'action rapide des vitaux ─────────────────────────────── */
+.vbtn-grid {
+  display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin: 8px 0;
+}
+.vbtn {
+  background: var(--BG2); border: 1.5px solid var(--B);
+  border-radius: var(--r2); padding: 6px 4px;
+  text-align: center; cursor: pointer; transition: all .12s;
+  font-size: .7rem; font-weight: 600; color: var(--T);
+}
+.vbtn:hover, .vbtn.active {
+  border-color: var(--P); background: var(--PP); color: var(--P);
+}
+.vbtn .vbtn-val { font-size: 1rem; font-family: 'IBM Plex Mono', monospace; }
+.vbtn .vbtn-lbl { font-size: .6rem; color: var(--TM); }
+
+/* ── Carte de triage proéminente ────────────────────────────────────── */
+.tri-hero {
+  border-radius: 14px; padding: 20px 18px; text-align: center;
+  box-shadow: var(--s3); margin: 12px 0;
+}
+.tri-hero-level { font-size: 2rem; font-weight: 900; letter-spacing: -.03em; }
+.tri-hero-just  { font-size: .82rem; margin-top: 6px; opacity: .9; line-height: 1.5; }
+.tri-hero-meta  {
+  display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap;
+}
+.tri-meta-chip {
+  background: rgba(255,255,255,.18); padding: 3px 10px; border-radius: 12px;
+  font-size: .65rem; font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ── Score NEWS2 en ligne avec les vitaux ───────────────────────────── */
+.news2-inline {
+  display: flex; align-items: center; gap: 8px; margin: 6px 0;
+  padding: 8px 12px; background: var(--BG2); border-radius: var(--r2);
+  border: 1.5px solid var(--B);
+}
+.news2-number {
+  font-size: 2rem; font-weight: 900; font-family: 'IBM Plex Mono', monospace;
+  min-width: 2.5ch; text-align: center;
+}
+.news2-label { font-size: .72rem; color: var(--TM); line-height: 1.3; }
+.news2-risk  { font-size: .7rem; font-weight: 700; }
+
+/* ── Timer urgent ────────────────────────────────────────────────────── */
+.timer-widget {
+  background: var(--T); color: var(--TW);
+  border-radius: var(--r); padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.timer-digits {
+  font-family: 'IBM Plex Mono', monospace; font-size: 1.8rem; font-weight: 700;
+}
+.timer-label { font-size: .62rem; opacity: .6; text-transform: uppercase; letter-spacing: .1em; }
+
+/* ── EVA large et tactile ────────────────────────────────────────────── */
+.eva-hero {
+  display: grid; grid-template-columns: repeat(11,1fr); gap: 4px; margin: 8px 0;
+}
+.eva-btn {
+  padding: 10px 2px; border-radius: 8px; text-align: center;
+  font-size: .85rem; font-weight: 700; cursor: pointer; transition: transform .1s;
+  min-height: 46px; display: flex; align-items: center; justify-content: center;
+}
+.eva-btn.active { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(0,0,0,.25); }
+
+/* ── Pharmacie : carte compacte ─────────────────────────────────────── */
+.rx-compact {
+  border-left: 4px solid var(--P); border-radius: 0 var(--r2) var(--r2) 0;
+  padding: 10px 14px; background: var(--BG2); margin: 6px 0;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.rx-compact-dose {
+  font-size: 1.1rem; font-weight: 800; font-family: 'IBM Plex Mono', monospace;
+  color: var(--P); white-space: nowrap; min-width: 80px;
+}
+.rx-compact-info { flex: 1; }
+.rx-compact-name { font-size: .82rem; font-weight: 600; }
+.rx-compact-detail { font-size: .72rem; color: var(--TM); margin-top: 2px; }
+
+/* ── Pharmacie urgence = rouge ──────────────────────────────────────── */
+.rx-compact.urgent { border-color: var(--ERR); }
+.rx-compact.urgent .rx-compact-dose { color: var(--ERR); }
+
+/* ── Grille vitaux condensée  ───────────────────────────────────────── */
+.vg6 {
+  display: grid; grid-template-columns: repeat(3,1fr);
+  gap: 6px; margin: 8px 0;
+}
+@media (min-width: 480px) { .vg6 { grid-template-columns: repeat(6,1fr); } }
+.vbox {
+  background: var(--CARD); border: 1.5px solid var(--B);
+  border-radius: var(--r2); padding: 8px 6px; text-align: center;
+}
+.vbox.crit { border-color: var(--ERR); background: var(--ERR-bg); }
+.vbox.warn { border-color: var(--WRN); background: var(--WRN-bg); }
+.vbox-lbl { font-size: .58rem; color: var(--TM); text-transform: uppercase; letter-spacing: .06em; }
+.vbox-val { font-size: 1.15rem; font-weight: 800; font-family: 'IBM Plex Mono', monospace; }
+
+/* ── Alerte pharmacovigilance sticky bas ────────────────────────────── */
+.pharma-alert-bar {
+  background: #7F1D1D; color: #FEE2E2;
+  border-radius: var(--r2); padding: 8px 14px;
+  font-size: .75rem; font-weight: 700; margin: 6px 0;
+}
+
+/* ── Onglets mobiles plus grands ────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] { gap: 2px; }
+.stTabs [data-baseweb="tab"] {
+  padding: 10px 8px !important; font-size: .72rem !important;
+  min-width: 0 !important; font-weight: 600 !important;
+}
+
+/* ── Sidebar minimale ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  [data-testid="stSidebar"],
+  [data-testid="collapsedControl"] { display: none !important; }
+  .block-container { padding: .4rem .5rem 4rem !important; }
+  button, .stButton > button { min-height: 48px !important; font-weight: 700 !important; }
+}
+</style>""", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# APPLICATION PRINCIPALE — Wrapper de sécurité
+# SIDEBAR — Minimaliste (PC) : chrono + reset
 # ═══════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    SEC("AKIR-IAO v19.0")
+    st.caption("Profil patient → onglet 👤 Patient")
+    SEC("Chronomètre")
+    _sc1, _sc2 = st.columns(2)
+    if _sc1.button("⏱ Arrivée", key="sb_arr", use_container_width=True):
+        SS.t_arr  = datetime.now()
+        SS.histo  = []
+        SS.reevs  = []
+    if _sc2.button("👨‍⚕️ Contact", key="sb_cont", use_container_width=True):
+        SS.t_cont = datetime.now()
+    if SS.t_arr:
+        _el = (datetime.now() - SS.t_arr).total_seconds()
+        _m, _s = divmod(int(_el), 60)
+        _col = "#EF4444" if _el > 600 else ("#F59E0B" if _el > 300 else "#22C55E")
+        H(f'<div style="text-align:center;font-family:monospace;font-size:2rem;font-weight:700;color:{_col};">{_m:02d}:{_s:02d}</div>')
+    if SS.niv:
+        st.divider()
+        _css = TCSS.get(SS.niv, "tri-3B")
+        H(f'<div class="tri-card {_css}" style="margin:0;padding:8px;border-radius:8px;text-align:center;">'
+          f'<div style="font-size:.85rem;font-weight:800;">{LABELS.get(SS.niv,"")} — NEWS2 {SS.v_news2}</div></div>')
+    if st.button("🔄 Réinitialiser", use_container_width=True, key="sb_reset"):
+        for k, v in _defaults.items():
+            SS[k] = v() if callable(v) else v
+        st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BARRE DE STATUT PATIENT — visible sur tous les onglets
+# ─────────────────────────────────────────────────────────────────────────────
+def _sticky_bar():
+    _age_txt   = f"{int(age)} ans" if age >= 1 else f"{int(age*12)} mois"
+    _atcd_n    = len(atcd)
+    _niv_txt   = f"TRI {SS.niv}" if SS.niv else "Non trié"
+    _niv_css   = TCSS.get(SS.niv, "tri-3B") if SS.niv else ""
+    _timer_txt = ""
+    if SS.t_arr:
+        _el2 = (datetime.now() - SS.t_arr).total_seconds()
+        _m2, _s2 = divmod(int(_el2), 60)
+        _timer_txt = f"⏱ {_m2:02d}:{_s2:02d}"
+    H(f"""<div class="sticky-bar">
+      <span class="sticky-badge badge-age">👤 {_age_txt} — {poids:.0f} kg</span>
+      {"<span class='sticky-badge badge-atcd'>⚕️ " + str(_atcd_n) + " ATCD</span>" if _atcd_n else ""}
+      {"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 " + alg + "</span>" if alg else ""}
+      <span class="sticky-badge badge-triage {_niv_css}" style="font-size:.7rem;">{_niv_txt}</span>
+      {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>" if SS.v_news2 >= 5 else ""}
+      {"<span class='badge-chrono'>" + _timer_txt + "</span>" if _timer_txt else ""}
+    </div>""")
+
+
 try:
-    H("""
-    <div class="app-hdr">
-      <div class="app-hdr-title">AKIR-IAO v19.0 — Système expert de triage</div>
-      <div class="app-hdr-sub">Outil professionnel d'aide à la décision clinique — Urgences — Hainaut, Wallonie</div>
-      <div class="app-hdr-tags">
-        <span class="tag">FRENCH SFMU V1.1</span>
-        <span class="tag">BCFI Belgique</span>
-        <span class="tag">RGPD</span>
-        <span class="tag">Développeur : Ismail Ibn-Daifa</span>
+    # ══ EN-TÊTE COMPACT ══════════════════════════════════════════════════════
+    H("""<div class="app-hdr" style="padding:10px 16px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div>
+          <div class="app-hdr-title" style="font-size:.95rem;">AKIR-IAO v19.0</div>
+          <div class="app-hdr-sub">Triage IAO — Hainaut, Wallonie, Belgique</div>
+        </div>
+        <div class="app-hdr-tags" style="margin:0;">
+          <span class="tag">FRENCH V1.1</span>
+          <span class="tag">BCFI</span>
+          <span class="tag">RGPD</span>
+        </div>
       </div>
-    </div>
-    """)
+    </div>""")
 
-    _ensure_sidebar_state()
+    _sticky_bar()
+
+    # ══ ONGLETS PRINCIPAUX ════════════════════════════════════════════════════
+    T = st.tabs([
+        "👤 Patient",
+        "⚡ Triage",
+        "💊 Pharmacie",
+        "🧬 Scores",
+        "📋 Suivi",
+    ])
+
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SIDEBAR — Profil patient + Opérateur
+    # ONGLET 0 — PROFIL PATIENT
     # ═══════════════════════════════════════════════════════════════════════════
-    with st.sidebar:
-        SEC("Identification opérateur")
-        op_in = st.text_input("Code opérateur", value=SS.op, max_chars=10,
-                               placeholder="IAO01", help="Identifiant unique pour cette session")
-        if op_in:
-            SS.op = op_in.upper()
-        st.caption("Utiliser un identifiant court et local pour cette session.")
+    with T[0]:
+        H('<div style="background:linear-gradient(135deg,#004A99,#0069D9);color:#fff;border-radius:10px;padding:12px 16px;margin-bottom:12px;">'
+          '<div style="font-size:.65rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Renseigner en premier</div>'
+          '<div style="font-size:1rem;font-weight:700;">Profil patient</div></div>')
 
-        SEC("Chronomètre")
-        ca, cb = st.columns(2)
-        if ca.button("⏱ Arrivée", key=WK("timer_arrivee"), use_container_width=True):
-            SS.t_arr = datetime.now()
-            SS.histo = []
-            SS.reevs = []
-        if cb.button("👨‍⚕️ 1er contact", key=WK("timer_contact"), use_container_width=True):
-            SS.t_cont = datetime.now()
-        if SS.t_arr:
-            el = (datetime.now() - SS.t_arr).total_seconds()
-            m_, s_ = divmod(int(el), 60)
-            col = "#EF4444" if el > 600 else ("#F59E0B" if el > 300 else "#22C55E")
-            H(f'<div style="text-align:center;font-family:monospace;font-size:2rem;'
-              f'font-weight:700;color:{col};">{m_:02d}:{s_:02d}</div>')
+        # Opérateur
+        _op = st.text_input("Code opérateur IAO", value=SS.op, max_chars=10, placeholder="IAO01", key="pt_op")
+        if _op: SS.op = _op.upper()
 
-        SEC("Patient")
-        age = st.number_input("Âge (ans)", 0, 120, int(SS.age or 45), key="p_age")
-        if age == 0:
-            am  = st.number_input("Âge en mois", 0, 11, int(SS.age_mois or 3), key="p_am")
-            SS.age_mois = am
-            age = round(am / 12.0, 4)
-            AL(f"Nourrisson {am} mois — Seuils pédiatriques actifs", "info")
+        st.divider()
+
+        # ── Biométrie ─────────────────────────────────────────────────────────
+        H('<div class="card-title">👤 Biométrie</div>')
+        _c1, _c2 = st.columns(2)
+        _age_raw = _c1.number_input("Âge (ans)", 0, 120, int(SS.get("age") or 45), key="pt_age")
+        _sex = _c2.selectbox("Sexe", ["Non précisé", "Masculin", "Féminin"], key="pt_sex")
+
+        if _age_raw == 0:
+            _am = st.number_input("Âge en mois", 0, 11, int(SS.get("age_mois") or 3), key="pt_am")
+            SS["age_mois"] = _am; SS["age"] = round(_am / 12.0, 4)
+            AL(f"Nourrisson {_am} mois — Seuils pédiatriques actifs", "info")
         else:
-            SS.age_mois = 0
-        SS.age = age
+            SS["age_mois"] = 0; SS["age"] = float(_age_raw)
 
-        poids  = st.number_input("Poids (kg)", 1, 250, int(SS.poids or 70), key="p_kg")
-        taille = st.number_input("Taille (cm)", 50, 220, int(SS.taille or 170), key="p_taille")
-        SS.poids = poids
-        SS.taille = taille
+        age = float(SS["age"])
+        _c3, _c4 = st.columns(2)
+        _poids  = _c3.number_input("Poids (kg)", 1, 250, int(SS.get("poids") or 70), key="pt_kg")
+        _taille = _c4.number_input("Taille (cm)", 50, 220, int(SS.get("taille") or 170), key="pt_taille")
+        SS["poids"] = float(_poids); SS["taille"] = float(_taille)
+        poids = SS["poids"]; taille = SS["taille"]
 
         if taille > 0 and age >= 18:
             imc = round(poids / (taille / 100) ** 2, 1)
@@ -180,1139 +383,1117 @@ try:
             elif imc < 25.0: st.caption(f"IMC {imc} — Normal")
             elif imc < 30.0: AL(f"IMC {imc} — Surpoids", "info")
             elif imc < 40.0: AL(f"IMC {imc} — Obésité", "warning")
-            else:             AL(f"IMC {imc} — Obésité morbide ≥ 40 — Adapter doses opioïdes", "danger")
+            else:             AL(f"IMC {imc} — Obésité morbide ≥ 40", "danger")
 
-        # ── Antécédents ──────────────────────────────────────────────────────
-        with st.expander("📋 Antécédents (ATCD)", expanded=False):
-            sb_a1, sb_a2 = st.columns(2)
-            atcd_checks = {
-                "HTA":                            sb_a1.checkbox("HTA",            key=WK("sb_hta")),
-                "Insuffisance cardiaque":         sb_a2.checkbox("Insuff. card.",   key=WK("sb_ic")),
-                "Coronaropathie / SCA antérieur": sb_a1.checkbox("Coronaropathie", key=WK("sb_coro")),
-                "AVC / AIT antérieur":            sb_a2.checkbox("AVC / AIT",      key=WK("sb_avc")),
-                "BPCO":                           sb_a1.checkbox("BPCO",           key=WK("sb_bpco")),
-                "Asthme":                         sb_a2.checkbox("Asthme",         key=WK("sb_asthme")),
-                "Diabète type 2":                 sb_a1.checkbox("Diabète T2",     key=WK("sb_diab2")),
-                "Diabète type 1":                 sb_a2.checkbox("Diabète T1",     key=WK("sb_diab1")),
-                "Insuffisance rénale chronique":  sb_a1.checkbox("Insuff. rénale", key=WK("sb_ir")),
-                "Insuffisance hépatique":         sb_a2.checkbox("Insuff. hépa.",  key=WK("sb_ih")),
-                "Épilepsie":                      sb_a1.checkbox("Épilepsie",      key=WK("sb_epi")),
-                "Fibrillation atriale":           sb_a2.checkbox("FA",             key=WK("sb_fa")),
-                "Drépanocytose":                  sb_a1.checkbox("Drépanocytose",  key=WK("sb_drep")),
-                "Immunodépression":               sb_a2.checkbox("Immunodépression", key=WK("sb_immuno")),
-            }
+        st.divider()
 
-        # ── Facteurs favorisants ──────────────────────────────────────────────
-        with st.expander("⚠️ Facteurs favorisants", expanded=False):
-            sb_f1, sb_f2 = st.columns(2)
-            risk_checks = {
-                "Grossesse":                    sb_f1.checkbox("Grossesse",       key=WK("sb_gros")),
-                "Allaitement":                  sb_f2.checkbox("Allaitement",     key=WK("sb_allait")),
-                "Obésité morbide (IMC ≥ 40)":  sb_f1.checkbox("Obésité IMC≥40", key=WK("sb_ob")),
-                "Chirurgie récente (<4 sem.)":  sb_f2.checkbox("Chir. récente",   key=WK("sb_chir")),
-                "Tabagisme":                    sb_f1.checkbox("Tabagisme",       key=WK("sb_tabac")),
-            }
-            if risk_checks.get("Grossesse"):
-                trimestre = st.selectbox("Trimestre",
-                    ["T1 (< 14 SA)", "T2 (14-28 SA)", "T3 (> 28 SA)"], key="sb_trim")
-                AL(f"Grossesse {trimestre} — Adapter les thérapeutiques", "warning")
+        # ── ATCD — colonnes 2×N (touch-friendly) ──────────────────────────────
+        H('<div class="card-title">📋 Antécédents</div>')
+        _a1, _a2 = st.columns(2)
+        _atcd_checks = {
+            "HTA":                            _a1.checkbox("HTA",              key=WK("pt_hta")),
+            "Insuffisance cardiaque":         _a2.checkbox("Insuff. cardiaque", key=WK("pt_ic")),
+            "Coronaropathie / SCA antérieur": _a1.checkbox("Coronaropathie",   key=WK("pt_coro")),
+            "AVC / AIT antérieur":            _a2.checkbox("AVC / AIT",        key=WK("pt_avc")),
+            "BPCO":                           _a1.checkbox("BPCO",             key=WK("pt_bpco")),
+            "Asthme":                         _a2.checkbox("Asthme",           key=WK("pt_asthme")),
+            "Diabète type 2":                 _a1.checkbox("Diabète T2",       key=WK("pt_diab2")),
+            "Diabète type 1":                 _a2.checkbox("Diabète T1",       key=WK("pt_diab1")),
+            "Insuffisance rénale chronique":  _a1.checkbox("Insuff. rénale",   key=WK("pt_ir")),
+            "Insuffisance hépatique":         _a2.checkbox("Insuff. hépatique",key=WK("pt_ih")),
+            "Épilepsie":                      _a1.checkbox("Épilepsie",        key=WK("pt_epi")),
+            "Fibrillation atriale":           _a2.checkbox("FA",               key=WK("pt_fa")),
+            "Drépanocytose":                  _a1.checkbox("Drépanocytose",    key=WK("pt_drep")),
+            "Immunodépression":               _a2.checkbox("Immunodépression", key=WK("pt_immuno")),
+        }
 
-        # ── Traitements en cours ─────────────────────────────────────────────
-        with st.expander("💊 Traitements en cours", expanded=False):
-            sb_t1, sb_t2 = st.columns(2)
-            trt_checks = {
-                "Anticoagulants/AOD":           sb_t1.checkbox("Anticoagulants", key=WK("sb_acg")),
-                "Antiagrégants plaquettaires":  sb_t2.checkbox("Antiagrégants",  key=WK("sb_aap")),
-                "Bêta-bloquants":               sb_t1.checkbox("Bêtabloquants",  key=WK("sb_beta")),
-                "Corticoïdes au long cours":    sb_t2.checkbox("Corticoïdes",    key=WK("sb_cort")),
-                "IMAO (inhibiteurs MAO)":       sb_t1.checkbox("IMAO",           key=WK("sb_imao")),
-                "Chimiothérapie en cours":      sb_t2.checkbox("Chimio",         key=WK("sb_chimo")),
-            }
+        H('<div class="card-title" style="margin-top:12px;">⚠️ Facteurs de risque</div>')
+        _f1, _f2 = st.columns(2)
+        _risk_checks = {
+            "Grossesse":                   _f1.checkbox("Grossesse",       key=WK("pt_gros")),
+            "Allaitement":                 _f2.checkbox("Allaitement",     key=WK("pt_allait")),
+            "Obésité morbide (IMC ≥ 40)": _f1.checkbox("Obésité IMC≥40", key=WK("pt_ob")),
+            "Chirurgie récente (<4 sem.)": _f2.checkbox("Chir. récente",   key=WK("pt_chir")),
+            "Tabagisme":                   _f1.checkbox("Tabagisme",       key=WK("pt_tabac")),
+        }
+        if _risk_checks.get("Grossesse"):
+            _trim = st.selectbox("Trimestre", ["T1 (< 14 SA)", "T2 (14-28 SA)", "T3 (> 28 SA)"], key="pt_trim")
+            AL(f"Grossesse {_trim} — Adapter les thérapeutiques", "warning")
 
-        # Liste ATCD consolidée
-        _all_checks = {**atcd_checks, **risk_checks, **trt_checks}
-        _base_atcd  = [lbl for lbl, chk in _all_checks.items() if chk]
-        other_atcd  = st.multiselect(
-            "Autres antécédents", [a for a in ATCD if a not in _base_atcd], key="p_atcd_other"
+        H('<div class="card-title" style="margin-top:12px;">💊 Traitements</div>')
+        _t1, _t2 = st.columns(2)
+        _trt_checks = {
+            "Anticoagulants/AOD":          _t1.checkbox("Anticoagulants",  key=WK("pt_acg")),
+            "Antiagrégants plaquettaires": _t2.checkbox("Antiagrégants",   key=WK("pt_aap")),
+            "Bêta-bloquants":              _t1.checkbox("Bêtabloquants",   key=WK("pt_beta")),
+            "Corticoïdes au long cours":   _t2.checkbox("Corticoïdes",     key=WK("pt_cort")),
+            "IMAO (inhibiteurs MAO)":      _t1.checkbox("IMAO",            key=WK("pt_imao")),
+            "Chimiothérapie en cours":     _t2.checkbox("Chimio",          key=WK("pt_chimo")),
+        }
+
+        st.divider()
+        _alg = st.text_input("🚫 Allergies connues", value=SS.get("alg", ""), key="pt_alg",
+                              placeholder="ex: Pénicilline, AINS...")
+        _o2  = st.checkbox("💨 O₂ supplémentaire à l'admission", key=WK("pt_o2"))
+        _other = st.multiselect("Autres ATCD", [a for a in ATCD if a not in list(_atcd_checks.keys())],
+                                key="pt_atcd_other")
+
+        # Consolidation SS
+        _all = {**_atcd_checks, **_risk_checks, **_trt_checks}
+        SS["atcd"]        = [lbl for lbl, chk in _all.items() if chk] + _other
+        SS["atcd_checks"] = _atcd_checks
+        SS["risk_checks"] = _risk_checks
+        SS["trt_checks"]  = _trt_checks
+        SS["alg"]         = _alg
+        SS["o2"]          = _o2
+        atcd = SS["atcd"]; alg = SS["alg"]; o2 = SS["o2"]
+        atcd_checks = _atcd_checks; risk_checks = _risk_checks; trt_checks = _trt_checks
+
+        # ── Alertes pharmacovigilance immédiates ───────────────────────────────
+        st.divider()
+        H('<div class="card-title">🚨 Alertes Pharmacovigilance</div>')
+        _alerts_pv = []
+        if _trt_checks.get("IMAO (inhibiteurs MAO)"):
+            _alerts_pv.append(("IMAO — Tramadol CONTRE-INDIQUÉ ABSOLU", "danger"))
+        if _atcd_checks.get("Insuffisance rénale chronique"):
+            _alerts_pv.append(("Insuff. rénale — Tous les AINS contre-indiqués", "danger"))
+        if _trt_checks.get("Anticoagulants/AOD"):
+            _alerts_pv.append(("Anticoagulants — Tout trauma = Tri 2 minimum", "warning"))
+        if _atcd_checks.get("Immunodépression") or _trt_checks.get("Chimiothérapie en cours"):
+            _alerts_pv.append(("Immunodéprimé — Seuil fébrile 38.3 °C", "warning"))
+        if _risk_checks.get("Grossesse"):
+            _alerts_pv.append(("Grossesse — AINS déconseillés au T3", "warning"))
+        if _trt_checks.get("Bêta-bloquants"):
+            _alerts_pv.append(("Bêtabloquants — FC peut être masquée", "warning"))
+        if _atcd_checks.get("Drépanocytose"):
+            _alerts_pv.append(("Drépanocytose — Morphine précoce si EVA ≥ 6", "warning"))
+        if _atcd_checks.get("Asthme"):
+            _alerts_pv.append(("Asthme — AINS déconseillés (risque bronchospasme)", "warning"))
+        if _alg:
+            _alerts_pv.append((f"Allergies déclarées : {_alg}", "danger"))
+
+        if _alerts_pv:
+            for _msg, _lvl in _alerts_pv:
+                AL(_msg, _lvl)
+        else:
+            st.success("✅ Aucune alerte pharmacovigilance")
+
+        DISC()
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ONGLET 1 — TRIAGE (page unique, workflow linéaire de haut en bas)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with T[1]:
+
+        # ── BLOC A : Chronomètre tactile ───────────────────────────────────────
+        _ta1, _ta2 = st.columns(2)
+        if _ta1.button("⏱ Marquer arrivée", key="tr_arr", use_container_width=True):
+            SS.t_arr = datetime.now(); SS.histo = []; SS.reevs = []
+            st.rerun()
+        if _ta2.button("👨‍⚕️ 1er contact médecin", key="tr_cont", use_container_width=True):
+            SS.t_cont = datetime.now(); st.rerun()
+
+        if SS.t_arr:
+            _el = (datetime.now() - SS.t_arr).total_seconds()
+            _m, _s = divmod(int(_el), 60)
+            _col = "#EF4444" if _el > 600 else ("#F59E0B" if _el > 300 else "#22C55E")
+            _crit_txt = "<div style='font-size:.75rem;color:#fff;font-weight:700;'>⚠️ DÉLAI CRITIQUE</div>" if _el > 600 else ""
+            H(f'<div class="timer-widget" style="background:{_col}20;border:2px solid {_col};">'
+              f'<div><div class="timer-label">Temps depuis arrivée</div>'
+              f'<div class="timer-digits" style="color:{_col};">{_m:02d}:{_s:02d}</div></div>'
+              f'{_crit_txt}'
+              f'</div>')
+
+        st.divider()
+
+        # ── BLOC B : Constantes vitales — saisie dense ─────────────────────────
+        H('<div class="card-title">📊 Constantes vitales</div>')
+
+        _vc1, _vc2, _vc3 = st.columns(3)
+        SS.v_fc   = _vc1.number_input("FC (bpm)",   20, 220, int(SS.v_fc),         key="tr_fc",   label_visibility="visible")
+        SS.v_pas  = _vc2.number_input("PAS (mmHg)", 40, 260, int(SS.v_pas),        key="tr_pas")
+        SS.v_spo2 = _vc3.number_input("SpO2 (%)",   50, 100, int(SS.v_spo2),       key="tr_sp")
+        _vc4, _vc5, _vc6 = st.columns(3)
+        SS.v_fr   = _vc4.number_input("FR (/min)",   5,  60, int(SS.v_fr),         key="tr_fr")
+        SS.v_temp = _vc5.number_input("T° (°C)",    30.0, 45.0, float(SS.v_temp), 0.1, key="tr_t")
+        SS.v_gcs  = _vc6.number_input("GCS (3-15)",  3,  15, int(SS.v_gcs),        key="tr_gcs")
+
+        SS.v_bpco = st.checkbox("BPCO — utiliser SpO2 cible 88-92 %", key=WK("tr_bp"),
+                                 value=bool(SS.v_bpco or "BPCO" in atcd))
+        if SS.v_bpco:
+            AL("BPCO actif — SpO2 > 96 % sous O₂ = RISQUE hypercapnie", "warning")
+
+        # NEWS2 calculé en temps réel
+        _n2 = _n2()
+
+        # Affichage NEWS2 inline avec code couleur
+        _n2_color = "#7C3AED" if _n2 >= 9 else "#EF4444" if _n2 >= 7 else "#F59E0B" if _n2 >= 5 else "#22C55E" if _n2 >= 1 else "#3B82F6"
+        _n2_risk  = ("CRITIQUE — Déchocage" if _n2 >= 9 else
+                     "ÉLEVÉ — Appel médecin immédiat" if _n2 >= 7 else
+                     "MODÉRÉ — Surveillance rapprochée" if _n2 >= 5 else
+                     "Faible — Surveillance standard" if _n2 >= 1 else "Stable")
+        _bpco_sub = ('<div style="font-size:.65rem;color:#64748B;">Echelle SpO2-2 (BPCO)</div>' if SS.v_bpco else '')
+        H(f'<div class="news2-inline">'
+          f'<div class="news2-number" style="color:{_n2_color};">{_n2}</div>'
+          f'<div><div class="news2-label">NEWS2 / 20</div>'
+          f'{_bpco_sub}'
+          f'</div></div>')
+
+        if _n2 >= 9:
+            H('<div style="background:#4C1D95;color:#E879F9;border-radius:8px;padding:10px;text-align:center;font-weight:800;font-size:.9rem;animation:pulse 1.5s infinite;margin:6px 0;">🟣 NEWS2 ≥ 9 — APPEL DÉCHOCAGE IMMÉDIAT</div>')
+        elif _n2 >= 7:
+            H('<div style="background:#7F1D1D;color:#FEE2E2;border-radius:8px;padding:10px;text-align:center;font-weight:800;font-size:.9rem;margin:6px 0;">🔴 NEWS2 ≥ 7 — APPEL MÉDICAL IMMÉDIAT</div>')
+
+        # Vitaux en grille visuelle colorée
+        def _vcss(v, lo, hi):
+            return "crit" if (v < lo or v > hi) else ("warn" if (v < lo*1.08 or v > hi*0.93) else "")
+        H(f'<div class="vg6">'
+          f'<div class="vbox {_vcss(SS.v_fc,60,100)}"><div class="vbox-lbl">FC</div><div class="vbox-val">{SS.v_fc}</div></div>'
+          f'<div class="vbox {_vcss(SS.v_pas,90,140)}"><div class="vbox-lbl">PAS</div><div class="vbox-val">{SS.v_pas}</div></div>'
+          f'<div class="vbox {_vcss(SS.v_spo2,94,100)}"><div class="vbox-lbl">SpO₂%</div><div class="vbox-val">{SS.v_spo2}</div></div>'
+          f'<div class="vbox {_vcss(SS.v_fr,12,20)}"><div class="vbox-lbl">FR</div><div class="vbox-val">{SS.v_fr}</div></div>'
+          f'<div class="vbox {_vcss(SS.v_temp,36.0,38.0)}"><div class="vbox-lbl">T°C</div><div class="vbox-val">{SS.v_temp:.1f}</div></div>'
+          f'<div class="vbox {_vcss(SS.v_gcs,14,15)}"><div class="vbox-lbl">GCS</div><div class="vbox-val">{SS.v_gcs}</div></div>'
+          f'</div>')
+
+        _si_val = round(SS.v_fc / max(1, SS.v_pas), 2)
+        if _si_val >= 1.5:
+            AL(f"Shock Index {_si_val} ≥ 1.5 — CHOC DÉCOMPENSÉ", "danger")
+        elif _si_val >= 1.0:
+            AL(f"Shock Index {_si_val} ≥ 1.0 — Instabilité hémodynamique", "warning")
+        else:
+            st.caption(f"Shock Index : {_si_val} — Stable")
+
+        if age < 18:
+            _sv, _stxt, _salerte = sipa(SS.v_fc, age)
+            AL(_stxt, "danger" if _salerte else "success")
+
+        st.divider()
+
+        # ── BLOC C : Douleur EVA — tactile large ───────────────────────────────
+        H('<div class="card-title">😣 Douleur (EVA / NRS)</div>')
+        _eva_key = WK("tr_eva")
+        if _eva_key not in SS:
+            SS[_eva_key] = str(int(SS.eva or 0))
+
+        _eva_raw = st.select_slider(
+            "Intensité douloureuse",
+            options=[str(i) for i in range(11)],
+            value=SS[_eva_key],
+            key=_eva_key,
         )
-        SS.atcd_other = other_atcd
-        atcd = _base_atcd + other_atcd
+        SS.eva = int(_eva_raw)
+        EVA_BAR(SS.eva)
 
-        alg = st.text_input("Allergies connues", key="p_alg", placeholder="ex: Pénicilline")
-        SS.alg = alg
-        o2  = st.checkbox("O₂ supplémentaire", key=WK("p_o2"))
-        SS.o2 = o2
+        if SS.eva >= 8:
+            AL(f"EVA {SS.eva}/10 — Douleur sévère — Antalgie forte requise (piritramide / morphine)", "danger")
+        elif SS.eva >= 5:
+            AL(f"EVA {SS.eva}/10 — Antalgie palier 2-3 à initier", "warning")
+        elif SS.eva >= 2:
+            AL(f"EVA {SS.eva}/10 — Antalgie palier 1 (paracétamol)", "info")
 
-        # ── Pharmacovigilance ────────────────────────────────────────────────
-        with st.expander("🚨 Alertes Pharmacovigilance", expanded=True):
-            if trt_checks.get("IMAO (inhibiteurs MAO)"):
-                AL("IMAO — Tramadol contre-indiqué", "danger")
-            if atcd_checks.get("Immunodépression") or trt_checks.get("Chimiothérapie en cours"):
-                AL("Immunodéprimé — Seuil fébrile abaissé à 38.3 °C", "warning")
-            if atcd_checks.get("Drépanocytose"):
-                AL("Drépanocytose — Morphine titrée précoce si EVA ≥ 6", "warning")
-            if trt_checks.get("Anticoagulants/AOD"):
-                AL("Anticoagulants — Tout traumatisme = Tri 2 minimum", "warning")
-            if atcd_checks.get("Insuffisance rénale chronique"):
-                AL("Insuff. rénale — AINS contre-indiqués", "danger")
-            if risk_checks.get("Grossesse"):
-                AL("Grossesse — AINS déconseillés au T3, morphine avec prudence", "warning")
-            if trt_checks.get("Bêta-bloquants"):
-                AL("Bêtabloquants — FC masquée, tachycardie relative", "warning")
+        st.divider()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # ONGLETS PRINCIPAUX
-    # ═══════════════════════════════════════════════════════════════════════════
-    T = st.tabs(["📊 Évaluation & Triage", "🧬 Scores Cliniques",
-                 "💊 Pharmacopée Adaptative", "📋 Synthèse"])
+        # ── BLOC D : Glycémie capillaire ───────────────────────────────────────
+        H('<div class="card-title">🩸 Glycémie capillaire</div>')
+        _gl_raw = st.number_input("mg/dl (0 = non mesuré)", 0, 800, 0, 5, key="tr_gl",
+                                   label_visibility="collapsed")
+        if _gl_raw > 0:
+            SS.gl = float(_gl_raw)
+            _mm = round(_gl_raw / 18.016, 1)
+            st.caption(f"→ {_mm} mmol/l")
+            if _gl_raw < 54:
+                AL(f"HYPOGLYCÉMIE SÉVÈRE {_gl_raw} mg/dl — Glucose 30 % IV IMMÉDIAT", "danger")
+            elif _gl_raw < 70:
+                AL(f"Hypoglycémie modérée {_gl_raw} mg/dl — Correction urgente", "warning")
+            elif _gl_raw > 360:
+                AL(f"Hyperglycémie sévère {_gl_raw} mg/dl — Bilan acidocétose", "danger")
+            elif _gl_raw > 180:
+                AL(f"Hyperglycémie {_gl_raw} mg/dl", "info")
 
-    # ───────────────────────────────────────────────────────────────────────────
-    # ONGLET 0 — ÉVALUATION & TRIAGE
-    # ───────────────────────────────────────────────────────────────────────────
-    with T[0]:
-        ET = st.tabs(["Triage Rapide", "Paramètres Vitaux", "Anamnèse", "Triage Complet"])
+        st.divider()
 
-        # ── Sous-onglet 0.0 : Triage Rapide ──────────────────────────────────
-        with ET[0]:
-            CARD("Constantes vitales", "")
-            c1, c2, c3 = st.columns(3)
-            SS.v_temp = c1.number_input("Température (°C)", 30.0, 45.0,
-                                         float(SS.v_temp), 0.1, key="r_t")
-            SS.v_fc   = c2.number_input("FC (bpm)",   20, 220, int(SS.v_fc),   key="r_fc")
-            SS.v_pas  = c3.number_input("PAS (mmHg)", 40, 260, int(SS.v_pas),  key="r_pas")
-            c4, c5, c6 = st.columns(3)
-            SS.v_spo2 = c4.number_input("SpO2 (%)",   50, 100, int(SS.v_spo2), key="r_sp")
-            SS.v_fr   = c5.number_input("FR (/min)",   5,  60, int(SS.v_fr),   key="r_fr")
-            SS.v_gcs  = c6.number_input("GCS (3-15)",  3,  15, int(SS.v_gcs),  key="r_gcs")
-            CARD_END()
+        # ── BLOC E : Motif + critères FRENCH ──────────────────────────────────
+        H('<div class="card-title">🏷️ Motif de recours</div>')
+        _cat  = st.selectbox("Catégorie", list(MOTS_CAT.keys()), key="tr_cat")
+        _mot  = st.selectbox("Motif principal", MOTS_CAT[_cat], key="tr_mot")
+        SS.cat   = _cat
+        SS.motif = _mot
 
-            CARD("Motif & Sécurité", "")
-            SS.v_bpco = st.checkbox("Patient BPCO connu ?", key=WK("r_bp"),
-                                     value=bool("BPCO" in atcd))
-            if SS.v_bpco:
-                BPCO_WIDGET(True)
+        # Drapeaux rouges spécifiques au motif
+        _det = dict(SS.det) if isinstance(SS.det, dict) else {}
+        _det.update({"eva": SS.eva, "atcd": atcd, "glycemie_mgdl": SS.gl})
 
-            st.info("Saisir les constantes et le motif, puis appuyer sur Calculer le triage.")
-            _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas,
-                        SS.v_fc, SS.v_gcs, SS.v_bpco)
-            GAUGE(SS.v_news2, SS.v_bpco)
+        _purpura_chk = st.checkbox("🔴 Purpura / pétéchies NON effaçables (test du verre)", key=WK("tr_pur"))
+        _det["purpura"] = _purpura_chk
+        if _purpura_chk:
+            H('<div style="background:#7F1D1D;color:#FEE2E2;border-radius:10px;padding:14px;font-weight:700;margin:8px 0;animation:pulse 2s infinite;">'
+              '🔴 PURPURA FULMINANS SUSPECTÉ — Ceftriaxone 2 g IV IMMÉDIAT — NE PAS ATTENDRE'
+              '</div>')
 
-            SS.motif = st.selectbox("Motif de recours", MOTIFS_RAPIDES, key="r_mot")
-            rapid_eva_key = WK("r_eva")
-            if rapid_eva_key not in SS:
-                SS[rapid_eva_key] = str(SS.eva)
-            SS.eva = int(st.select_slider("EVA", [str(i) for i in range(11)],
-                                           key=rapid_eva_key))
-            EVA_BAR(SS.eva)
-            det = {"eva": SS.eva, "atcd": atcd}
+        # ── Discriminants enrichis (questions bool/select/number) ─────────────
+        _disc_answers = {}
+        if SS.motif in DISCRIMINANTS_ENRICHIS:
+            H('<div class="card-title" style="margin-top:10px;">🔍 Critères discriminants FRENCH</div>')
+            _disc_answers = render_discriminants_enrichis(SS.motif, key_prefix=WK("tr_disc"))
+            # Intégrer les réponses dans det immédiatement
+            _det_updates = process_answers(SS.motif, _disc_answers)
+            _det.update(_det_updates)
 
-            # ── Drapeaux rouges dans un formulaire (pas de rechargement à chaque clic)
-            with st.form("form_red_flags"):
-                det["purpura"] = st.checkbox("Purpura non effaçable (test du verre)",
-                                              key=WK("r_pur"))
-                gl_r = GLYC_WIDGET("r_gl", "Glycémie capillaire (mg/dl)")
-                st.form_submit_button("Valider les drapeaux rouges",
-                                       use_container_width=True)
+        # Discriminant FRENCH simplifié (sélecteur de niveau) si pas de discriminants enrichis
+        _proto = get_protocol(SS.motif)
+        if _proto and _proto.get("criteria") and SS.motif not in DISCRIMINANTS_ENRICHIS:
+            _selected_crit = render_discriminants(SS.motif, key=WK("tr_disc2"))
+        else:
+            _selected_crit = None
 
-            if det.get("purpura"):
-                PURPURA(det)
-            if gl_r:
-                det["glycemie_mgdl"] = gl_r
-                SS.gl = gl_r
+        SS.det = _det
 
-            N2_BANNER(SS.v_news2)
-            CARD_END()
+        st.divider()
 
-            if st.button("⚡ Calculer le triage", type="primary",
-                          key=WK("triage_rapide_calc"),
-                          use_container_width=True):
-                SS.niv, SS.just, SS.crit = french_triage(
-                    SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
-                    SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, SS.gl,
-                )
-                SS.det = det
-                TRI_CARD_INLINE(SS.niv, SS.just, SS.v_news2)
-                D, A = verifier_coherence(
-                    SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
-                    SS.v_gcs, SS.v_temp, SS.eva, SS.motif,
-                    atcd, det, SS.v_news2, SS.gl)
-                for d in D: AL(d, "danger")
-                for a in A: AL(a, "warning")
-
-            VITAUX(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr, SS.v_temp, SS.v_gcs, SS.v_bpco)
-            DISC()
-
-        # ── Sous-onglet 0.1 : Paramètres Vitaux ──────────────────────────────
-        with ET[1]:
-            CARD("Paramètres vitaux détaillés", "")
-            v1, v2, v3 = st.columns(3)
-            SS.v_temp = v1.number_input("Température (°C)", 30.0, 45.0,
-                                         float(SS.v_temp), 0.1, key="v_t2")
-            SS.v_fc   = v2.number_input("FC (bpm)",   20, 220, int(SS.v_fc),   key="v_fc2")
-            SS.v_pas  = v3.number_input("PAS (mmHg)", 40, 260, int(SS.v_pas),  key="v_pas2")
-            v4, v5, v6 = st.columns(3)
-            SS.v_spo2 = v4.number_input("SpO2 (%)",   50, 100, int(SS.v_spo2), key="v_sp2")
-            SS.v_fr   = v5.number_input("FR (/min)",   5,  60, int(SS.v_fr),   key="v_fr2")
-            SS.v_gcs  = v6.number_input("GCS (3-15)",  3,  15, int(SS.v_gcs),  key="v_gcs2")
-            SS.v_bpco = st.checkbox("Patient BPCO", key=WK("v_bp2"),
-                                     value=bool(SS.v_bpco or ("BPCO" in atcd)))
-            CARD_END()
-
-            CARD("GCS Détaillé", "")
-            gcs_y = st.select_slider("Ouverture des yeux", [1, 2, 3, 4], 4, key=WK("gcs_y"),
-                format_func=lambda x: {1:"1–Absente",2:"2–Douleur",
-                                        3:"3–Bruit",4:"4–Spontanée"}[x])
-            gcs_v = st.select_slider("Réponse verbale", [1, 2, 3, 4, 5], 5, key=WK("gcs_v"),
-                format_func=lambda x: {1:"1–Aucune",2:"2–Sons",3:"3–Mots",
-                                        4:"4–Confus",5:"5–Orientée"}[x])
-            gcs_m = st.select_slider("Réponse motrice", [1, 2, 3, 4, 5, 6], 6, key=WK("gcs_m"),
-                format_func=lambda x: {1:"1–Aucune",2:"2–Extension",3:"3–Flex. anorm.",
-                                        4:"4–Retrait",5:"5–Localise",6:"6–Obéit"}[x])
-            gcs_res  = calculer_gcs(gcs_y, gcs_v, gcs_m, age)
-            SS.v_gcs = gcs_res.get("score_val") or 15
-            AL(gcs_res.get("interpretation",""),
-               "danger"  if (gcs_res.get("score_val") or 15) <= 8  else
-               "warning" if (gcs_res.get("score_val") or 15) <= 12 else "success")
-            AL(gcs_res.get("recommendation",""), "info")
-            CARD_END()
-
-            _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas,
-                        SS.v_fc, SS.v_gcs, SS.v_bpco)
-            N2_BANNER(SS.v_news2)
-            GAUGE(SS.v_news2, SS.v_bpco)
-            VITAUX(SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr, SS.v_temp, SS.v_gcs, SS.v_bpco)
-
-            sh_val = si(SS.v_fc, SS.v_pas)
-            AL(f"Shock Index {sh_val}" + (" — CHOC PROBABLE" if sh_val >= 1 else " — Normal"),
-               "danger" if sh_val >= 1 else ("warning" if sh_val >= 0.8 else "success"))
-
-            if age < 18:
-                sv, stxt, salerte = sipa(SS.v_fc, age)
-                AL(stxt, "danger" if salerte else "success")
-            DISC()
-
-        # ── Sous-onglet 0.2 : Anamnèse ────────────────────────────────────────
-        with ET[2]:
-            non_comm = ("Démence" in atcd or (age >= 75 and SS.v_gcs < 15))
-            eva_result = EVA_WIDGET_COMPLET(key_prefix="ana", age=age,
-                                             non_communicant=non_comm)
-            SS.eva = eva_result.get("eva", 0)
-            SS.det.update({
-                "eva": SS.eva,
-                "pqrst": eva_result.get("pqrst", {}),
-                "atcd": atcd,
-            })
-
-            CARD("Motif de recours", "")
-            SS.cat   = st.selectbox("Catégorie", list(MOTS_CAT.keys()), key="a_cat")
-            SS.motif = st.selectbox("Motif principal", MOTS_CAT[SS.cat],  key="a_mot")
-            CARD_END()
-
-            if "Brûlure" in SS.motif or "brulure" in SS.motif.lower():
-                brul = SCHEMA_BRULURES(poids=poids, age=age)
-                SS.det.update({
-                    "surface_pct": brul.get("surface_pct"),
-                    "baux": brul.get("baux"),
-                    "profondeur": brul.get("profondeur"),
-                })
-
-            det = SS.det.copy()
-            det["atcd"] = atcd
-            det = QUESTIONS_AVANCEES(
-                motif=SS.motif, details=det, age=age,
-                atcd=atcd, poids=poids, gl_global=SS.gl,
-            )
-            if det.get("glycemie_mgdl") and not SS.gl:
-                SS.gl = det["glycemie_mgdl"]
-            if det.get("purpura") or det.get("neff"):
-                PURPURA(det)
-            SS.det = det
-
-            if SS.motif:
-                pa_result = PRESCRIPTIONS_ANTICIPEES(
-                    motif=SS.motif, niv=SS.niv or "3B",
-                    poids=poids, age=age, atcd=atcd,
-                    eva=SS.eva, spo2=SS.v_spo2, pas=SS.v_pas,
-                )
-                if pa_result:
-                    SS.det["pa_tracabilite"] = pa_result
-            DISC()
-
-        # ── Sous-onglet 0.3 : Triage Complet ─────────────────────────────────
-        with ET[3]:
-            if not SS.motif:
-                SS.motif = "Fièvre"
-                SS.cat   = "Infectieux"
-
-            _show_news2(SS.v_fr, SS.v_spo2, o2, SS.v_temp, SS.v_pas,
-                        SS.v_fc, SS.v_gcs, SS.v_bpco)
-
-            det = SS.det if isinstance(SS.det, dict) else {}
-            det["atcd"] = atcd
-            if not det.get("glycemie_mgdl") and not SS.gl:
-                gl_t = GLYC_WIDGET("t_gl", "Glycémie capillaire (mg/dl)")
-                if gl_t:
-                    det["glycemie_mgdl"] = gl_t
-                    SS.gl  = gl_t
-                    SS.det = det
-            gl_t = det.get("glycemie_mgdl") or SS.gl
-
+        # ── BLOC F : CALCUL DU TRIAGE (bouton proéminent) ─────────────────────
+        if st.button("⚡ CALCULER LE TRIAGE", type="primary", use_container_width=True, key="tr_calc"):
+            SS.v_news2 = _n2
             SS.niv, SS.just, SS.crit = french_triage(
-                SS.motif, det, SS.v_fc, SS.v_pas, SS.v_spo2,
-                SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, gl_t,
+                SS.motif, SS.det, SS.v_fc, SS.v_pas, SS.v_spo2,
+                SS.v_fr, SS.v_gcs, SS.v_temp, age, SS.v_news2, SS.gl,
             )
-            proto = get_protocol(SS.motif)
-            if proto and proto.get("criteria"):
-                CARD("Critères discriminants FRENCH", "")
-                selected_crit = render_discriminants(SS.motif, key=WK("t_disc"))
-                CARD_END()
+            if _selected_crit:
                 SS.niv, SS.just, SS.crit = apply_discriminant_selection(
-                    SS.niv, SS.just, SS.crit, selected_crit
-                )
-            N2_BANNER(SS.v_news2)
-            PURPURA(det)
-            GAUGE(SS.v_news2, SS.v_bpco)
-            TRI_CARD_INLINE(SS.niv, SS.just, SS.v_news2)
-            st.caption(f"Critère FRENCH : {SS.crit}")
+                    SS.niv, SS.just, SS.crit, _selected_crit)
 
-            D, A = verifier_coherence(
+        # ── RÉSULTAT — toujours visible si calculé ────────────────────────────
+        if SS.niv:
+            _css = TCSS.get(SS.niv, "tri-3B")
+            _lbl = LABELS.get(SS.niv, f"TRI {SS.niv}")
+            _sec = SECTEURS.get(SS.niv, "À définir")
+            _del = DELAIS.get(SS.niv, 60)
+            H(f'<div class="tri-hero {_css}">'
+              f'<div class="tri-hero-level">{_lbl}</div>'
+              f'<div class="tri-hero-just">{SS.just}</div>'
+              f'<div class="tri-hero-meta">'
+              f'<span class="tri-meta-chip">📍 {_sec}</span>'
+              f'<span class="tri-meta-chip">⏱ Délai ≤ {_del} min</span>'
+              f'<span class="tri-meta-chip">NEWS2 {SS.v_news2}</span>'
+              f'</div></div>')
+
+            # Alertes transversales
+            _D, _A = verifier_coherence(
                 SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
                 SS.v_gcs, SS.v_temp, SS.eva, SS.motif,
-                atcd, det, SS.v_news2, gl_t)
-            for d in D: AL(d, "danger")
-            for a in A: AL(a, "warning")
+                atcd, SS.det, SS.v_news2, SS.gl)
+            for d in _D: AL(d, "danger")
+            for a in _A: AL(a, "warning")
 
-            if st.button("💾 Enregistrer ce patient", type="primary",
-                          key=WK("save_patient"),
-                          use_container_width=True):
-                uid = enregistrer_patient({
+            st.divider()
+
+            # ── Synthèse IAO copy-pasteable ────────────────────────────────────
+            _si_txt  = f"{_si_val}"
+            _gl_txt  = f"{SS.gl:.0f} mg/dl ({SS.gl/18.016:.1f} mmol/l)" if SS.gl else "Non mesurée"
+            _atcd_txt = ", ".join(atcd) if atcd else "Aucun"
+            _now_txt  = datetime.now().strftime("%d/%m/%Y à %H:%M")
+            _synt = (
+                f"SYNTHÈSE IAO — {_now_txt}\n"
+                f"Op. : {SS.op or 'IAO'} | Session : {SS.uid_cur or '—'}\n"
+                f"{'═'*50}\n"
+                f"TRIAGE  : {SS.niv} — {_lbl}\n"
+                f"Raison  : {SS.just}\n"
+                f"Secteur : {_sec} | Délai médecin ≤ {_del} min\n"
+                f"Motif   : {SS.motif} ({SS.cat})\n"
+                f"EVA     : {SS.eva}/10\n"
+                f"{'─'*50}\n"
+                f"FC {SS.v_fc} | PAS {SS.v_pas} | SpO2 {SS.v_spo2}%\n"
+                f"FR {SS.v_fr} | T° {SS.v_temp}°C | GCS {SS.v_gcs}/15\n"
+                f"Shock Index {_si_txt} | NEWS2 {SS.v_news2}\n"
+                f"Glycémie : {_gl_txt}\n"
+                f"{'─'*50}\n"
+                f"ATCD   : {_atcd_txt}\n"
+                f"Allergie: {alg or 'aucune'}\n"
+                f"O₂     : {'OUI' if o2 else 'Non'}\n"
+                f"{'═'*50}\n"
+                f"FRENCH V1.1 | BCFI Belgique — Ismail Ibn-Daifa — AKIR-IAO v19.0"
+            )
+
+            with st.expander("📋 Synthèse IAO — Copier / Télécharger", expanded=False):
+                st.code(_synt, language=None)
+                st.download_button("📥 Télécharger (.txt)", data=_synt,
+                    file_name=f"IAO_{datetime.now().strftime('%Y%m%d_%H%M')}_Tri{SS.niv}.txt",
+                    mime="text/plain", use_container_width=True)
+
+            # ── Enregistrer + SBAR rapide ──────────────────────────────────────
+            _sv1, _sv2 = st.columns(2)
+            if _sv1.button("💾 Enregistrer patient", use_container_width=True, key="tr_save"):
+                _uid = enregistrer_patient({
                     "motif": SS.motif, "cat": SS.cat, "niv": SS.niv,
                     "n2": SS.v_news2, "fc": SS.v_fc, "pas": SS.v_pas,
                     "spo2": SS.v_spo2, "fr": SS.v_fr, "temp": SS.v_temp,
                     "gcs": SS.v_gcs, "op": SS.op,
                 })
-                SS.uid_cur = uid
-                SS.reevs   = []
-                SS.t_reev  = datetime.now()
-                SS.histo.insert(0, {
-                    "uid": uid, "h": datetime.now().strftime("%H:%M"),
-                    "motif": SS.motif, "niv": SS.niv, "n2": SS.v_news2,
-                })
-                st.success(f"✅ Patient enregistré — UID : {uid}")
+                SS.uid_cur = _uid; SS.t_reev = datetime.now()
+                SS.histo.insert(0, {"uid": _uid, "h": datetime.now().strftime("%H:%M"),
+                                     "motif": SS.motif, "niv": SS.niv, "n2": SS.v_news2})
+                st.success(f"✅ Enregistré — UID : {_uid}")
 
-            if SS.niv:
-                st.divider()
-                CARD("📋 Synthèse IAO — Copier pour le dossier", "")
-                _si_val = round((SS.v_fc or 80) / max(1, (SS.v_pas or 120)), 2)
-                _gl_txt  = (f"{SS.gl:.0f} mg/dl ({SS.gl/18.016:.1f} mmol/l)"
-                            if SS.gl else "Non mesurée")
-                _atcd_txt = ", ".join(atcd) if atcd else "Aucun antécédent connu"
-                _alg_txt  = alg if alg else "Aucune allergie connue"
-                _now_txt  = datetime.now().strftime("%d/%m/%Y à %H:%M")
+            if _sv2.button("📡 SBAR rapide", use_container_width=True, key="tr_sbar"):
+                SS["show_sbar"] = True
 
-                _synthese_txt = f"""SYNTHÈSE IAO — {_now_txt}
-Opérateur : {SS.op or "IAO"} | Session anonyme : {SS.uid_cur or "—"}
-{"═"*55}
-NIVEAU DE TRIAGE : {SS.niv} — {LABELS.get(SS.niv, "")}
-Justification    : {SS.just}
-Référence FRENCH : {SS.crit}
-Orientation      : {SECTEURS.get(SS.niv,"—")} | Délai médecin ≤ {DELAIS.get(SS.niv,"?")} min
-{"─"*55}
-MOTIF DE RECOURS : {SS.motif} ({SS.cat})
-EVA / Douleur    : {SS.eva}/10
-{"─"*55}
-CONSTANTES VITALES
-  Température    : {SS.v_temp}°C
-  FC             : {SS.v_fc} bpm
-  PAS            : {SS.v_pas} mmHg
-  SpO2           : {SS.v_spo2} %
-  FR             : {SS.v_fr} /min
-  GCS            : {SS.v_gcs}/15
-  Shock Index    : {_si_val}
-  NEWS2          : {SS.v_news2}
-  Glycémie       : {_gl_txt}
-{"─"*55}
-ANTÉCÉDENTS      : {_atcd_txt}
-ALLERGIES        : {_alg_txt}
-O₂ supplémentaire : {"OUI" if o2 else "Non"}
-{"═"*55}
-Réf. FRENCH Triage SFMU V1.1 | BCFI Belgique
-Urgences — Province de Hainaut, Wallonie, Belgique
-Dév. exclusif : Ismail Ibn-Daifa — AKIR-IAO v19.0"""
-
-                st.code(_synthese_txt, language=None)
-                st.download_button(
-                    "📥 Télécharger la synthèse (.txt)",
-                    data=_synthese_txt,
-                    file_name=f"SyntheseIAO_{datetime.now().strftime('%Y%m%d_%H%M')}_Tri{SS.niv}.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-                CARD_END()
-
-            DISC()
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # ONGLET 1 — SCORES CLINIQUES
-    # ───────────────────────────────────────────────────────────────────────────
-    with T[1]:
-        S = st.tabs(["Cardio / Neuro", "Infectio / Respiratoire", "Règles Imagerie"])
-
-        with S[0]:
-            s_l, s_r = st.columns(2)
-
-            with s_l:
-                CARD("qSOFA — Dépistage Sepsis", "")
-                st.caption("Seymour CW et al., JAMA 2016")
-                qs = calculer_qsofa(SS.v_fr or 16, SS.v_gcs or 15, SS.v_pas or 120)
-                sv = qs.get("score_val") or 0
-                AL(qs.get("interpretation",""),
-                   "danger" if sv >= 2 else "warning" if sv == 1 else "success")
-                AL(qs.get("recommendation",""), "info")
-                CARD_END()
-
-                CARD("Score HEART — Douleur thoracique", "")
-                st.caption("Six AJ et al., NHJ 2008")
-                h1, h2 = st.columns(2)
-                h_hist = h1.select_slider("Histoire", [0,1,2], key=WK("ht_h"),
-                    format_func=lambda x: {0:"0–Peu évocateur",1:"1–Modéré",2:"2–Très suspect"}[x])
-                h_ecg  = h2.select_slider("ECG",     [0,1,2], key=WK("ht_e"),
-                    format_func=lambda x: {0:"0–Normal",1:"1–Non spéc.",2:"2–Bloc/STEMI"}[x])
-                h_age  = h1.select_slider("Âge",     [0,1,2], key=WK("ht_a"),
-                    format_func=lambda x: {0:"0–<45 ans",1:"1–45-65",2:"2–>65 ans"}[x])
-                h_rfcv = h2.select_slider("FRCV",    [0,1,2], key=WK("ht_r"),
-                    format_func=lambda x: {0:"0–Aucun",1:"1–1-2",2:"2–≥3 ou ATCD"}[x])
-                h_trop = h1.select_slider("Troponine",[0,1,2], key=WK("ht_t"),
-                    format_func=lambda x: {0:"0–Normale",1:"1–1-3x N",2:"2–>3x N"}[x])
-                ht = calculer_heart(h_hist, h_ecg, h_age, h_rfcv, h_trop)
-                AL(ht.get("interpretation",""),
-                   "danger"  if (ht.get("score_val") or 0) >= 7 else
-                   "warning" if (ht.get("score_val") or 0) >= 4 else "success")
-                AL(ht.get("recommendation",""), "info")
-                CARD_END()
-
-                # TIMI — visible uniquement si motif = douleur thoracique
-                _motif_lc = (SS.motif or "").lower()
-                _is_thoracique = any(k in _motif_lc
-                    for k in ("thoracique","sca","coronaire","infarctus"))
-                if _is_thoracique:
-                    CARD("Score TIMI — UA/NSTEMI (contexte SCA)", "")
-                    st.caption("Antman EM et al., JAMA 2000")
-                    st.info("ℹ️ TIMI activé automatiquement — motif : douleur thoracique")
-                    ti1, ti2 = st.columns(2)
-                    ti_age  = ti1.checkbox("Âge ≥ 65 ans",              key=WK("ti_age"),  value=age >= 65)
-                    ti_frcv = ti2.checkbox("≥ 3 facteurs de risque CV",  key=WK("ti_frcv"))
-                    ti_sten = ti1.checkbox("Sténose coronaire ≥ 50 %",   key=WK("ti_sten"))
-                    ti_ecg  = ti2.checkbox("Déviation ST à l'ECG",        key=WK("ti_ecg"))
-                    ti_ang  = ti1.checkbox("≥ 2 épisodes angineux/24 h", key=WK("ti_ang"))
-                    ti_asp  = ti2.checkbox("Aspirine dans les 7 jours",   key=WK("ti_asp"))
-                    ti_trop = ti1.checkbox("Marqueurs cardiaques +",      key=WK("ti_trop"))
-                    ti_res   = calculer_timi(ti_age, ti_frcv, ti_sten, ti_ecg,
-                                             ti_ang, ti_asp, ti_trop)
-                    ti_score = ti_res.get("score_val") or 0
-                    H(f"""<div style="background:#1E293B;border-radius:10px;padding:14px;
-                        margin:10px 0;text-align:center;">
-                      <div style="font-size:.65rem;color:#64748B;text-transform:uppercase;">Score TIMI</div>
-                      <div style="font-size:2.5rem;font-weight:900;color:{'#EF4444' if ti_score>=5 else '#F59E0B' if ti_score>=3 else '#22C55E'};">
-                        {ti_score}/7</div>
-                      <div style="font-size:.75rem;color:#94A3B8;margin-top:4px;">
-                        {ti_res.get("interpretation","")}</div>
-                    </div>""")
-                    AL(ti_res.get("recommendation",""),
-                       "danger" if ti_score >= 5 else
-                       "warning" if ti_score >= 3 else "info")
-                    CARD_END()
-                else:
-                    H('<div style="background:#F1F5F9;border-radius:10px;padding:12px;'
-                      'text-align:center;color:#94A3B8;font-size:.75rem;margin:8px 0;">'
-                      'TIMI NSTEMI — Disponible uniquement si motif = Douleur thoracique / SCA</div>')
-
-            with s_r:
-                CARD("BE-FAST — Dépistage AVC", "")
-                st.caption("Kothari RU, Ann Emerg Med 1999")
-                f1, f2 = st.columns(2)
-                bf_ba  = f1.checkbox("Balance (équilibre)", key=WK("bf_b"))
-                bf_ey  = f2.checkbox("Eyes (vision)",       key=WK("bf_e"))
-                bf_fa  = f1.checkbox("Face (asymétrie)",    key=WK("bf_f"))
-                bf_ar  = f2.checkbox("Arm (déficit moteur)",key=WK("bf_a"))
-                bf_sp  = f1.checkbox("Speech (langage)",    key=WK("bf_sp"))
-                bf_ti  = f2.text_input("Heure dernière fois vu bien", key="bf_t",
-                                        placeholder="14:30")
-                bf_res = evaluer_fast(bf_fa, bf_ar, bf_sp, bf_ti, bf_ba, bf_ey)
-                AL(bf_res.get("interpretation",""),
-                   "danger" if (bf_res.get("score_val") or 0) >= 1 else "success")
-                AL(bf_res.get("recommendation",""), "info")
-                CARD_END()
-
-                CARD("Algoplus — Douleur non communicant", "")
-                st.caption("Rat P et al., Eur J Pain 2011")
-                a1, a2 = st.columns(2)
-                alg_v = a1.checkbox("Visage douloureux",     key=WK("alg_v"))
-                alg_r = a2.checkbox("Regard distant",        key=WK("alg_r"))
-                alg_p = a1.checkbox("Plaintes verbales",     key=WK("alg_p"))
-                alg_a = a2.checkbox("Attitudes défensives",  key=WK("alg_a"))
-                alg_c = a1.checkbox("Comportements inhabituels", key=WK("alg_c"))
-                alg_res = calculer_algoplus(alg_v, alg_r, alg_p, alg_a, alg_c)
-                AL(alg_res.get("interpretation",""),
-                   "danger" if (alg_res.get("score_val") or 0) >= 2 else "success")
-                AL(alg_res.get("recommendation",""), "info")
-                CARD_END()
-
-        with S[1]:
-            s2_l, s2_r = st.columns(2)
-
-            with s2_l:
-                CARD("CURB-65 — Pneumonie communautaire", "")
-                st.caption("Lim WS et al., Thorax 2003")
-                cb_c = st.checkbox("Confusion",              key=WK("cb_c"))
-                cb_u = st.checkbox("Urée > 7 mmol/l",       key=WK("cb_u"))
-                cb_r = st.checkbox("FR ≥ 30/min",           key=WK("cb_r"),
-                                    value=(SS.v_fr or 16) >= 30)
-                cb_b = st.checkbox("PAS < 90 ou PAD < 60",  key=WK("cb_b"),
-                                    value=(SS.v_pas or 120) < 90)
-                cb_a = st.checkbox("Âge ≥ 65 ans",          key=WK("cb_a"),
-                                    value=age >= 65)
-                cb_res = calculer_curb65(cb_c, cb_u, cb_r, cb_b, cb_a)
-                AL(cb_res.get("interpretation",""),
-                   "danger"  if (cb_res.get("score_val") or 0) >= 3 else
-                   "warning" if (cb_res.get("score_val") or 0) == 2 else "success")
-                AL(cb_res.get("recommendation",""), "info")
-                CARD_END()
-
-                CARD("Wells TVP", "")
-                st.caption("Wells PS et al., Lancet 1997")
-                wt1, wt2 = st.columns(2)
-                wt_ca = wt1.checkbox("Cancer actif",          key=WK("wt_ca"))
-                wt_im = wt2.checkbox("Immobilisation > 3 j",  key=WK("wt_im"))
-                wt_ch = wt1.checkbox("Chirurgie récente",     key=WK("wt_ch"))
-                wt_se = wt2.checkbox("Sensibilité veine",     key=WK("wt_se"))
-                wt_oe = wt1.checkbox("Œdème à godet",        key=WK("wt_oe"))
-                wt_am = wt2.checkbox("Asymétrie mollet",      key=WK("wt_am"))
-                wt_av = wt1.checkbox("Asymétrie membre",      key=WK("wt_av"))
-                wt_vc = wt2.checkbox("Veines collatérales",   key=WK("wt_vc"))
-                wt_an = wt1.checkbox("ATCD TVP",              key=WK("wt_an"))
-                wt_da = wt2.checkbox("Diag. alternatif prob.",key=WK("wt_da"))
-                wt_res = calculer_wells_tvp(wt_ca, wt_im, wt_ch, wt_se, wt_oe,
-                                             wt_am, wt_av, wt_vc, wt_an, wt_da)
-                AL(wt_res.get("interpretation",""),
-                   "danger"  if (wt_res.get("score_val") or 0) >= 3 else
-                   "warning" if (wt_res.get("score_val") or 0) >= 1 else "success")
-                AL(wt_res.get("recommendation",""), "info")
-                CARD_END()
-
-            with s2_r:
-                CARD("Wells EP", "")
-                st.caption("Wells PS et al., Thromb Haemost 2000")
-                we1, we2 = st.columns(2)
-                we_tvp = we1.checkbox("Symptômes TVP",         key=WK("we_tvp"))
-                we_ep  = we2.checkbox("EP plus probable",      key=WK("we_ep"))
-                we_fc  = we1.checkbox("FC > 100/min",          key=WK("we_fc"),
-                                       value=(SS.v_fc or 80) > 100)
-                we_im  = we2.checkbox("Immobilisation/chir.",  key=WK("we_im"))
-                we_an  = we1.checkbox("ATCD TVP/EP",           key=WK("we_an"))
-                we_he  = we2.checkbox("Hémoptysie",            key=WK("we_he"))
-                we_ca  = we1.checkbox("Cancer",                key=WK("we_ca"))
-                we_res = calculer_wells_ep(we_tvp, we_ep, we_fc, we_im,
-                                            we_an, we_he, we_ca)
-                AL(we_res.get("interpretation",""),
-                   "danger"  if (we_res.get("score_val") or 0) > 4 else
-                   "warning" if (we_res.get("score_val") or 0) > 1 else "success")
-                AL(we_res.get("recommendation",""), "info")
-                CARD_END()
-
-                CARD("CFS — Clinical Frailty Scale", "")
-                st.caption("Rockwood K et al., CMAJ 2005")
-                cfs_n = st.select_slider("Niveau fragilité", list(range(1, 10)), 1,
-                    key=WK("cfs_n"),
-                    format_func=lambda x: {
-                        1:"1–Très robuste",2:"2–Bien portant",3:"3–Maladies traitées",
-                        4:"4–Vulnérable",5:"5–Légèrement fragile",6:"6–Modérément fragile",
-                        7:"7–Sévèrement fragile",8:"8–Très sévèrement",9:"9–Phase terminale",
-                    }[x])
-                cfs_res = evaluer_cfs(cfs_n)
-                AL(cfs_res.get("interpretation",""),
-                   "danger" if cfs_n >= 7 else "warning" if cfs_n >= 5 else "success")
-                AL(cfs_res.get("recommendation",""), "info")
-                CARD_END()
-
-        with S[2]:
-            s3_l, s3_r = st.columns(2)
-
-            with s3_l:
-                CARD("Règles d'Ottawa — Cheville / Pied", "")
-                st.caption("Stiell IG et al., JAMA 1993")
-                ot_ap = st.checkbox("Incapacité d'appui (4 pas)", key=WK("ot_ap"))
-                ot1, ot2 = st.columns(2)
-                ot_mm = ot1.checkbox("Douleur malléole médiale",   key=WK("ot_mm"))
-                ot_tl = ot2.checkbox("Douleur malléole latérale",  key=WK("ot_tl"))
-                ot_5m = ot1.checkbox("Douleur base 5e métatarse",  key=WK("ot_5m"))
-                ot_nv = ot2.checkbox("Douleur naviculaire",        key=WK("ot_nv"))
-                ot_res = regle_ottawa_cheville(ot_mm, ot_tl, ot_5m, ot_nv, ot_ap)
-                AL(ot_res.get("interpretation",""),
-                   "warning" if (ot_res.get("score_val") or 0) else "success")
-                AL(ot_res.get("recommendation",""), "info")
-                CARD_END()
-
-            with s3_r:
-                CARD("Règle Canadienne — TDM cérébral (GCS 13-15)", "")
-                st.caption("Stiell IG et al., Lancet 2001")
-                AL("Non applicable si : GCS < 13 | coagulopathie | convulsion | < 16 ans",
-                   "warning")
-                cc1, cc2 = st.columns(2)
-                cc_g  = cc1.checkbox("GCS < 15 à 2 h",          key=WK("cc_g"))
-                cc_s  = cc2.checkbox("Suspicion fracture ouverte",key=WK("cc_s"))
-                cc_f  = cc1.checkbox("Signe fracture base crâne",key=WK("cc_f"))
-                cc_v  = cc2.checkbox("Vomissements ≥ 2",        key=WK("cc_v"))
-                cc_a  = cc1.checkbox("Âge ≥ 65 ans",            key=WK("cc_a"),
-                                      value=age >= 65)
-                cc_am = cc2.checkbox("Amnésie ≥ 30 min",        key=WK("cc_am"))
-                cc_m  = cc1.checkbox("Mécanisme dangereux",      key=WK("cc_m"))
-                cc_res = regle_canadian_ct(cc_g, cc_s, cc_f, cc_v, cc_a, cc_am, cc_m)
-                AL(cc_res.get("interpretation",""),
-                   "danger"  if (cc_res.get("score_val") or 0) == 2 else
-                   "warning" if (cc_res.get("score_val") or 0) == 1 else "success")
-                AL(cc_res.get("recommendation",""), "info")
-                CARD_END()
+            if SS.get("show_sbar"):
+                _sbar = build_sbar(age, SS.motif, SS.cat, atcd, alg, o2,
+                    SS.v_temp, SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr, SS.v_gcs,
+                    SS.eva, SS.v_news2, SS.niv, SS.just, SS.crit,
+                    SS.op or "IAO", SS.gl)
+                SBAR_RENDER(_sbar)
 
         DISC()
 
-    # ───────────────────────────────────────────────────────────────────────────
-    # ONGLET 2 — PHARMACOPÉE ADAPTATIVE
-    # ───────────────────────────────────────────────────────────────────────────
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ONGLET 2 — PHARMACIE (filtrée par motif, doses calculées)
+    # ═══════════════════════════════════════════════════════════════════════════
     with T[2]:
-        gl_ph = (SS.det.get("glycemie_mgdl") if isinstance(SS.det, dict) else None) or SS.gl
+        _gl_ph = (SS.det.get("glycemie_mgdl") if isinstance(SS.det, dict) else None) or SS.gl
         _dose_mode = "mg/kg" if age < 15 else "adulte"
 
-        H(f"""<div style="background:linear-gradient(135deg,#004A99,#0066CC);
-            color:#fff;border-radius:10px;padding:12px 18px;margin-bottom:12px;
-            display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div style="font-size:.7rem;opacity:.8;">Doses calculées pour</div>
-            <div style="font-size:1.4rem;font-weight:800;">{poids} kg — {age} ans
-              <span style="font-size:.8rem;opacity:.7;margin-left:8px;">({_dose_mode})</span>
-            </div>
-          </div>
-          <div style="font-size:.72rem;opacity:.8;text-align:right;">
-            ATCD : {len(atcd)} | Allergies : {alg or 'aucune'}
-          </div>
-        </div>""")
+        # Bandeau patient + alertes critiques
+        H(f'<div style="background:linear-gradient(135deg,#004A99,#0069D9);color:#fff;'
+          f'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;'
+          f'justify-content:space-between;align-items:center;">'
+          f'<div><div style="font-size:.65rem;opacity:.75;">Doses pour</div>'
+          f'<div style="font-size:1.1rem;font-weight:800;">{poids:.0f} kg — {age:.0f} ans'
+          f' <span style="font-size:.75rem;opacity:.7;">({_dose_mode})</span></div></div>'
+          f'<div style="text-align:right;font-size:.7rem;opacity:.8;">'
+          f'{"⚠️ " + str(len([a for a in [_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")] if a])) + " alerte(s)" if any([_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")]) else "✅ Pas d\'alerte PV"}'
+          f'</div></div>')
 
-        # ── Intelligence clinique : Tri → Pharma ─────────────────────────────
-        _tri_critique = SS.niv in ("M", "1", "2")
-        _eva_severe   = SS.eva >= 7
-        _is_asthme    = "Asthme" in atcd
+        # Alertes PV critiques en haut
+        if _trt_checks.get("IMAO (inhibiteurs MAO)"):
+            H('<div class="pharma-alert-bar">🔴 IMAO — Tramadol CONTRE-INDIQUÉ ABSOLU</div>')
+        if atcd_checks.get("Insuffisance rénale chronique"):
+            H('<div class="pharma-alert-bar">🔴 Insuff. rénale — AINS tous CONTRE-INDIQUÉS</div>')
+        if _trt_checks.get("Anticoagulants/AOD"):
+            AL("Anticoagulants en cours — Vigilance hémorragique renforcée", "warning")
+        if SS.niv in ("M", "1", "2") and SS.eva >= 7:
+            H(f'<div style="background:#78350F;color:#FDE68A;border-radius:8px;padding:10px;font-weight:700;margin:6px 0;">'
+              f'⚠️ TRI {SS.niv} — EVA {SS.eva}/10 — ANTALGIE FORTE PRIORITAIRE (piritramide/morphine)</div>')
 
-        if _tri_critique and _eva_severe:
-            H(f"""<div class="pharma-urgent">
-              ⚠️ TRI {SS.niv} — EVA {SS.eva}/10 — ANTALGIE MAJEURE PRIORITAIRE<br>
-              <span style="font-size:.76rem;font-weight:400;opacity:.9;">
-                Piritramide IV ou Morphine IV titrée à initier sans délai
-                — Réévaluation EVA obligatoire à 30 min (Circulaire 2014)
-              </span></div>""")
+        # ── Raccourcis médicaments (boutons rapides) ───────────────────────────
+        H('<div class="card-title">⚡ Raccourcis — Doses immédiates</div>')
+        _rq1, _rq2, _rq3, _rq4, _rq5, _rq6 = st.columns(6)
+        for _col, _name, _fn, _args in [
+            (_rq1, "Para IV",     paracetamol,  (poids, age, atcd)),
+            (_rq2, "Adrénaline",  adrenaline,   (poids, atcd)),
+            (_rq3, "Ceftriaxone", ceftriaxone,  (poids, age, atcd)),
+            (_rq4, "Morphine",    morphine,      (poids, age, atcd)),
+            (_rq5, "Ondansétron", ondansetron,  (poids, age, atcd)),
+            (_rq6, "Naloxone",    naloxone,     (poids, age, False, atcd)),
+        ]:
+            if _col.button(_name, key=WK(f"rq_{_name}"), use_container_width=True):
+                _rx, _re = _fn(*_args)
+                if _re: AL(_re, "danger")
+                elif _rx:
+                    # Afficher la dose clé selon le médicament
+                    _dose_txt = (
+                        f"{_rx.get('dose_g',_rx.get('dose_mg',_rx.get('dose','?')))} — {_rx.get('admin',_rx.get('voie',''))}"
+                    )
+                    st.toast(f"✅ {_name} : {_dose_txt}", icon="💊")
 
-        # Alertes ATCD → Pharma contextuelles
-        if "IMAO (inhibiteurs MAO)" in atcd:
-            AL("IMAO — Tramadol contre-indiqué", "danger")
-        if "Insuffisance cardiaque" in atcd:
-            AL("Insuffisance cardiaque — Remplissage réduit à 15 ml/kg", "warning")
-        if _is_asthme:
-            AL("ASTHME — AINS déconseillés (risque bronchospasme) — Préférer paracétamol/opioïdes", "danger")
-        if "HTA" in atcd:
-            AL("HTA — Surveiller la TA sous AINS (naproxène, diclofénac, kétorolac)", "warning")
-        if gl_ph is None:
-            AL("Glycémie non saisie — Glucose 30 % désactivé", "warning")
+        # ── Protocoles IAO anticipés (selon motif actif) ──────────────────────
+        if SS.motif and SS.motif in PROTOCOLES_IAO:
+            st.divider()
+            H(f'<div class="card-title">🚑 Protocoles anticipés IAO — {SS.motif}</div>')
+            for _proto_iao in PROTOCOLES_IAO[SS.motif]:
+                _cond = _proto_iao.get("condition", lambda v: True)
+                try:
+                    _show = _cond({"pas": SS.v_pas, "spo2": SS.v_spo2, "fc": SS.v_fc})
+                except Exception:
+                    _show = True
+                if not _show:
+                    continue
+                _dose_iao = _proto_iao.get("dose") or ""
+                if not _dose_iao and _proto_iao.get("dose_fn"):
+                    try: _dose_iao = _proto_iao["dose_fn"](poids)
+                    except Exception: _dose_iao = "?"
+                AL(f"{_proto_iao['med']} : {_dose_iao} ({_proto_iao.get('voie','?')})", "info")
 
-        # ── Palier 1 ─────────────────────────────────────────────────────────
-        CARD("Paracétamol IV — Palier 1", "")
-        para_rx, para_err = paracetamol(poids, age, atcd)
-        if para_err:
-            AL(para_err, "danger")
-        else:
-            for m_, c_ in (para_rx or {}).get("alerts", []): AL(m_, c_)
-            RX("Paracétamol IV (Perfalgan)",
-               (para_rx or {}).get("dose_display",
-                   f"{(para_rx or {}).get('dose_mg', 1000):.0f} mg"),
-               [(para_rx or {}).get("admin",""), (para_rx or {}).get("note","")],
-               (para_rx or {}).get("ref","BCFI"), "1",
-               (para_rx or {}).get("alerts",[]))
-        CARD_END()
+        # ── Vérifications sécurité croisées pour médicaments courants ─────────
+        for _med_chk in ["Tramadol", "Morphine", "AINS", "Midazolam"]:
+            for _sa in check_safety(_med_chk, {"atcd": atcd}, {"age": age, "poids": poids}):
+                AL(_sa["message"], _sa["niveau"])
 
-        ph_c1, ph_c2 = st.columns(2)
+        st.divider()
 
-        with ph_c1:
-            CARD("Naproxène PO — AINS palier 1", "")
-            nap_rx, nap_err = naproxene(poids, age, atcd)
-            if nap_err:
-                AL(nap_err, "warning")
-            else:
-                RX("Naproxène PO", f"{(nap_rx or {}).get('dose_mg', 500):.0f} mg",
-                   [(nap_rx or {}).get("admin",""), (nap_rx or {}).get("note","")],
-                   (nap_rx or {}).get("ref","BCFI"), "1")
-            CARD_END()
+        # ── Filtre par catégorie ───────────────────────────────────────────────
+        _PH = st.tabs(["Antalgiques", "Urgences vitales", "Infectiologie", "Cardio/Respi", "Pédiatrie", "🧪 Perfusions IV"])
 
-            CARD("Taradyl® (Kétorolac) IM — AINS puissant", "")
-            # Avertissement AINS si insuffisance rénale
-            if "Insuffisance rénale chronique" in atcd:
-                AL("AINS CONTRE-INDIQUÉ — Insuffisance rénale chronique", "danger")
-            else:
-                kt2_rx, kt2_err = ketorolac(poids, age, atcd)
-                if kt2_err:
-                    AL(f"🔒 {kt2_err}", "danger")
+        # ── Antalgiques ───────────────────────────────────────────────────────
+        with _PH[0]:
+            # Palier 1
+            H('<div class="card-title">Palier 1 — Non opioïdes</div>')
+            _pc1, _pc2 = st.columns(2)
+
+            with _pc1:
+                _p, _pe = paracetamol(poids, age, atcd)
+                if _pe: AL(_pe, "danger")
                 else:
-                    for m_, c_ in (kt2_rx or {}).get("alerts", []): AL(m_, c_)
-                    RX("Taradyl® 30 mg/ml IM",
-                       f"{(kt2_rx or {}).get('dose_mg', 30):.0f} mg",
-                       [(kt2_rx or {}).get("admin",""), (kt2_rx or {}).get("note","")],
-                       (kt2_rx or {}).get("ref","BCFI"), "1",
-                       (kt2_rx or {}).get("alerts",[]))
-            CARD_END()
+                    _dose_p = (_p or {}).get("dose_display", f"{(_p or {}).get('dose_mg',1000):.0f} mg")
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{_dose_p}</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Paracétamol IV (Perfalgan)</div>'
+                      f'<div class="rx-compact-detail">{(_p or {}).get("admin","")} — {(_p or {}).get("note","")}</div>'
+                      f'<div class="rx-compact-detail" style="color:#64748B;font-style:italic;">{(_p or {}).get("ref","")}</div></div></div>')
 
-            CARD("Voltarène® (Diclofénac) 75 mg IM — Adulte", "")
-            # Avertissement AINS si insuffisance rénale
-            if "Insuffisance rénale chronique" in atcd:
-                AL("AINS CONTRE-INDIQUÉ — Insuffisance rénale chronique", "danger")
-            else:
-                dic_rx, dic_err = diclofenac(poids, age, atcd)
-                if dic_err:
-                    AL(f"🔒 {dic_err}", "danger")
+            with _pc2:
+                _n, _ne = naproxene(poids, age, atcd)
+                if _ne: H(f'<div class="rx-compact"><div class="rx-compact-dose" style="color:#EF4444;">🔒</div>'
+                           f'<div class="rx-compact-info"><div class="rx-compact-name">Naproxène PO</div>'
+                           f'<div class="rx-compact-detail" style="color:#EF4444;">{_ne}</div></div></div>')
                 else:
-                    for m_, c_ in (dic_rx or {}).get("alerts", []): AL(m_, c_)
-                    RX("Voltarène® 75 mg/3 ml IM",
-                       f"{(dic_rx or {}).get('dose_mg', 75):.0f} mg",
-                       [(dic_rx or {}).get("admin",""), (dic_rx or {}).get("note","")],
-                       (dic_rx or {}).get("ref","BCFI"), "1",
-                       (dic_rx or {}).get("alerts",[]))
-            CARD_END()
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_n or {}).get("dose_mg",500):.0f} mg</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Naproxène PO</div>'
+                      f'<div class="rx-compact-detail">{(_n or {}).get("admin","")} — {(_n or {}).get("note","")}</div></div></div>')
 
-        with ph_c2:
-            CARD("Tramadol — Palier 2", "")
-            tram_rx, tram_err = tramadol(poids, age, atcd)
-            if tram_err:
-                AL(tram_err, "danger" if "contre" in tram_err.lower() else "warning")
+            _pc3, _pc4 = st.columns(2)
+            with _pc3:
+                _k, _ke = ketorolac(poids, age, atcd)
+                if _ke: H(f'<div class="rx-compact"><div class="rx-compact-dose" style="color:#EF4444;">🔒</div>'
+                           f'<div class="rx-compact-info"><div class="rx-compact-name">Taradyl® IM</div>'
+                           f'<div class="rx-compact-detail" style="color:#EF4444;">{_ke}</div></div></div>')
+                else:
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_k or {}).get("dose_mg",30):.0f} mg IM</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Taradyl® (Kétorolac) IM</div>'
+                      f'<div class="rx-compact-detail">{(_k or {}).get("admin","")} — {(_k or {}).get("note","")}</div></div></div>')
+
+            with _pc4:
+                _d, _de = diclofenac(poids, age, atcd)
+                if _de: H(f'<div class="rx-compact"><div class="rx-compact-dose" style="color:#EF4444;">🔒</div>'
+                           f'<div class="rx-compact-info"><div class="rx-compact-name">Voltarène® IM</div>'
+                           f'<div class="rx-compact-detail" style="color:#EF4444;">{_de}</div></div></div>')
+                else:
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_d or {}).get("dose_mg",75):.0f} mg IM</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Voltarène® (Diclofénac) IM</div>'
+                      f'<div class="rx-compact-detail">{(_d or {}).get("admin","")} — {(_d or {}).get("note","")}</div></div></div>')
+
+            st.divider()
+            H('<div class="card-title">Palier 2 — Opioïdes faibles</div>')
+            _tr, _tre = tramadol(poids, age, atcd)
+            if _tre: AL(_tre, "danger" if "contre" in _tre.lower() else "warning")
             else:
-                for m_, c_ in (tram_rx or {}).get("alerts", []): AL(m_, c_)
-                RX("Tramadol (Tradonal)",
-                   f"{(tram_rx or {}).get('dose_mg', 50):.0f} mg",
-                   [(tram_rx or {}).get("admin",""), (tram_rx or {}).get("note","")],
-                   (tram_rx or {}).get("ref","BCFI"), "2")
-            CARD_END()
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_tr or {}).get("dose_mg",50):.0f} mg</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Tramadol (Tradonal®)</div>'
+                  f'<div class="rx-compact-detail">{(_tr or {}).get("admin","")} — {(_tr or {}).get("note","")}</div></div></div>')
 
-        CARD("Piritramide IV — Palier 3 (Dipidolor)", "")
-        dip_rx, dip_err = piritramide(poids, age, atcd)
-        if dip_err:
-            AL(dip_err, "danger")
-        else:
-            for m_, c_ in (dip_rx or {}).get("alerts", []): AL(m_, c_)
-            RX("Piritramide IV (Dipidolor)",
-               f"{(dip_rx or {}).get('dose_min', 0):.1f}–{(dip_rx or {}).get('dose_max', 0):.1f} mg",
-               [(dip_rx or {}).get("admin",""), (dip_rx or {}).get("note","")],
-               (dip_rx or {}).get("ref","BCFI"), "3",
-               (dip_rx or {}).get("alerts",[]))
-        CARD_END()
+            st.divider()
+            H('<div class="card-title">Palier 3 — Opioïdes forts</div>')
+            _di, _die = piritramide(poids, age, atcd)
+            if not _die:
+                for _ma, _mc in (_di or {}).get("alerts",[]): AL(_ma, _mc)
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_di or {}).get("dose_min",0):.1f}–{(_di or {}).get("dose_max",0):.1f} mg IV</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Dipidolor® (Piritramide) IV</div>'
+                  f'<div class="rx-compact-detail">{(_di or {}).get("admin","")} — {(_di or {}).get("note","")}</div></div></div>')
+            _mo, _moe = morphine(poids, age, atcd)
+            if not _moe:
+                for _ma, _mc in (_mo or {}).get("alerts",[]): AL(_ma, _mc)
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_mo or {}).get("dose_min",0):.1f}–{(_mo or {}).get("dose_max",0):.1f} mg IV</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Morphine IV titrée</div>'
+                  f'<div class="rx-compact-detail">{(_mo or {}).get("admin","")} — {(_mo or {}).get("note","")}</div></div></div>')
 
-        CARD("Morphine IV titrée — Palier 3", "")
-        morph_rx, morph_err = morphine(poids, age, atcd)
-        if morph_err:
-            AL(morph_err, "danger")
-        else:
-            for m_, c_ in (morph_rx or {}).get("alerts", []): AL(m_, c_)
-            RX("Morphine IV",
-               f"{(morph_rx or {}).get('dose_min', 0):.1f}–{(morph_rx or {}).get('dose_max', 0):.1f} mg",
-               [(morph_rx or {}).get("admin",""), (morph_rx or {}).get("note","")],
-               (morph_rx or {}).get("ref","BCFI"), "3",
-               (morph_rx or {}).get("alerts",[]))
-        CARD_END()
+            st.divider()
+            H('<div class="card-title">Antispasmodique</div>')
+            _li, _lie = litican(poids, age, atcd)
+            if not _lie:
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_li or {}).get("dose_mg",40):.0f} mg IM</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Litican® IM (Tiémonium)</div>'
+                  f'<div class="rx-compact-detail">{(_li or {}).get("voie","")} — {(_li or {}).get("dose_note","")}</div></div></div>')
 
         # ── Urgences vitales ──────────────────────────────────────────────────
-        ph2_c1, ph2_c2 = st.columns(2)
+        with _PH[1]:
+            H('<div class="card-title">Urgences vitales — Doses immédiates</div>')
 
-        with ph2_c1:
-            CARD("Adrénaline IM — Anaphylaxie", "")
-            ar, ae = adrenaline(poids, atcd)
-            if ae:
-                AL(ae, "danger")
+            _ar, _are = adrenaline(poids, atcd)
+            if not _are:
+                H(f'<div class="rx-compact urgent"><div class="rx-compact-dose">{(_ar or {}).get("dose_mg",0.5)} mg IM</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Adrénaline IM (Sterop 1 mg/ml)</div>'
+                  f'<div class="rx-compact-detail">{(_ar or {}).get("voie","")} — {(_ar or {}).get("rep","")}</div></div></div>')
+
+            if _gl_ph is not None:
+                _gr, _gre = glucose(poids, _gl_ph, atcd)
+                if not _gre:
+                    H(f'<div class="rx-compact urgent"><div class="rx-compact-dose">{(_gr or {}).get("dose_g",0)} g IV</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Glucose 30 % IV</div>'
+                      f'<div class="rx-compact-detail">{(_gr or {}).get("vol","")} — {(_gr or {}).get("ctrl","")}</div></div></div>')
             else:
-                for m_, c_ in (ar or {}).get("alerts", []): AL(m_, c_)
-                RX("Adrénaline IM (Sterop 1 mg/ml)",
-                   f"{(ar or {}).get('dose_mg', 0.5)} mg",
-                   [(ar or {}).get("voie",""), (ar or {}).get("note",""),
-                    (ar or {}).get("rep","")],
-                   (ar or {}).get("ref","BCFI"), "U",
-                   (ar or {}).get("alerts",[]))
-            CARD_END()
+                H('<div class="rx-compact" style="opacity:.5;"><div class="rx-compact-dose">?</div>'
+                  '<div class="rx-compact-info"><div class="rx-compact-name">Glucose 30 % IV</div>'
+                  '<div class="rx-compact-detail">Mesurer la glycémie d\'abord</div></div></div>')
 
-        with ph2_c2:
-            CARD("Naloxone IV — Antidote opioïdes", "")
-            dep_ph = st.checkbox("Patient dépendant aux opioïdes", key=WK("ph_dep"))
-            nr, _ = naloxone(poids, age, dep_ph, atcd)
-            if nr:
-                for m_, c_ in (nr or {}).get("alerts", []): AL(m_, c_)
-                RX("Naloxone IV (Narcan)",
-                   f"{(nr or {}).get('dose', 0.4)} mg",
-                   [(nr or {}).get("admin",""), (nr or {}).get("note","")],
-                   (nr or {}).get("ref","BCFI"), "U",
-                   (nr or {}).get("alerts",[]))
-            CARD_END()
+            _dep_ph = st.checkbox("Patient dépendant aux opioïdes (naloxone titrée)", key=WK("ph_dep2"))
+            _nr, _ = naloxone(poids, age, _dep_ph, atcd)
+            if _nr:
+                H(f'<div class="rx-compact urgent"><div class="rx-compact-dose">{(_nr or {}).get("dose",0.4)} mg IV</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Naloxone IV (Narcan®)</div>'
+                  f'<div class="rx-compact-detail">{(_nr or {}).get("admin","")}</div></div></div>')
 
-        CARD("Glucose 30 % IV — Hypoglycémie", "")
-        if gl_ph is None:
-            RX_LOCK("Glycémie capillaire non saisie — Mesurer d'abord la glycémie")
-        else:
-            gr, ge = glucose(poids, gl_ph, atcd)
-            if ge:
-                AL(ge, "info")
+            st.divider()
+            H('<div class="card-title">Sepsis bundle 1h (SSC 2021)</div>')
+            _sblact = st.number_input("Lactate (mmol/l, 0=non dosé)", 0.0, 20.0, 0.0, 0.1, key="ph_sblact")
+            _sb = sepsis_bundle_1h(SS.v_pas or 120, _sblact or None, SS.v_temp, SS.v_fc, poids, atcd) or {}
+            if _sb.get("choc_septique"):
+                AL("CHOC SEPTIQUE — Réanimation immédiate", "danger")
+            for _ml, _md, _mc in _sb.get("checklist", []):
+                H(f'<div class="al {_mc}" style="padding:6px 12px;margin:2px 0;">'
+                  f'<input type="checkbox" style="margin-right:8px;"><strong>{_ml}</strong> — {_md}</div>')
+
+            st.divider()
+            H('<div class="card-title">Acide tranexamique IV</div>')
+            H('<div class="rx-compact urgent"><div class="rx-compact-dose">1 g IV</div>'
+              '<div class="rx-compact-info"><div class="rx-compact-name">Acide tranexamique (CRASH-2)</div>'
+              '<div class="rx-compact-detail">En 10 min — Efficace < 3h post-trauma — puis 1 g/8h</div></div></div>')
+
+        # ── Infectiologie ─────────────────────────────────────────────────────
+        with _PH[2]:
+            H('<div class="card-title">Antibiotiques urgents</div>')
+            _cf, _cfe = ceftriaxone(poids, age, atcd)
+            if not _cfe:
+                H(f'<div class="rx-compact urgent"><div class="rx-compact-dose">{(_cf or {}).get("dose_g",2)} g IV</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Ceftriaxone IV (Rocéphine®)</div>'
+                  f'<div class="rx-compact-detail">{(_cf or {}).get("admin","")} — {(_cf or {}).get("note","")}</div></div></div>')
+
+            st.divider()
+            H('<div class="card-title">Crise hypertensive — Cibles par étiologie</div>')
+            AL("Ne jamais normaliser trop rapidement — risque ischémique cérébral", "warning")
+            _ctx_hta = st.selectbox("Étiologie HTA", [
+                "Urgence hypertensive standard", "AVC ischémique (non thrombolysé)",
+                "AVC ischémique (si thrombolyse)", "AVC hémorragique",
+                "Dissection aortique", "OAP hypertensif",
+            ], key="ph_ctx_hta2")
+            _chp, _che = crise_hypertensive(SS.v_pas or 120, _ctx_hta, poids, atcd)
+            if _che: AL(_che, "danger")
             else:
-                for m_, c_ in (gr or {}).get("alerts", []): AL(m_, c_)
-                RX("Glucose 30 % IV",
-                   f"{(gr or {}).get('dose_g', 0)} g",
-                   [(gr or {}).get("vol",""), (gr or {}).get("ctrl","")],
-                   (gr or {}).get("ref","BCFI"), "U",
-                   (gr or {}).get("alerts",[]))
-        CARD_END()
+                AL(f"Cible : {(_chp or {}).get('cible','À confirmer')}", "warning")
 
-        CARD("Ceftriaxone IV — Urgence infectieuse", "")
-        cr2, ce2 = ceftriaxone(poids, age, atcd)
-        if ce2:
-            AL(ce2, "danger")
-        else:
-            for m_, c_ in (cr2 or {}).get("alerts", []): AL(m_, c_)
-            RX("Ceftriaxone IV",
-               f"{(cr2 or {}).get('dose_g', 2)} g",
-               [(cr2 or {}).get("admin",""), (cr2 or {}).get("note","")],
-               (cr2 or {}).get("ref","BCFI"), "U",
-               (cr2 or {}).get("alerts",[]))
-        CARD_END()
+        # ── Cardio / Respi ────────────────────────────────────────────────────
+        with _PH[3]:
+            H('<div class="card-title">Bronchospasme</div>')
+            _grav2 = st.select_slider("Gravité bronchospasme", ["legere","moderee","severe"], "moderee",
+                key=WK("ph_grav2"),
+                format_func=lambda x: {"legere":"Légère","moderee":"Modérée","severe":"Sévère"}[x])
+            _sr, _se = salbutamol(poids, age, _grav2, atcd)
+            if not _se:
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_sr or {}).get("dose_mg",2.5)} mg</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Salbutamol nébulisation (Ventolin®)</div>'
+                  f'<div class="rx-compact-detail">{(_sr or {}).get("dilution","")} — {(_sr or {}).get("debit_o2","")}</div></div></div>')
 
-        CARD("Litican IM — Antispasmodique (Protocole Hainaut)", "")
-        lr, le = litican(poids, age, atcd)
-        if le:
-            AL(le, "danger")
-        else:
-            for m_, c_ in (lr or {}).get("alerts", []): AL(m_, c_)
-            RX("Litican IM (Tiémonium)",
-               f"{(lr or {}).get('dose_mg', 40):.0f} mg",
-               [(lr or {}).get("voie",""), (lr or {}).get("dose_note",""),
-                (lr or {}).get("freq","")],
-               (lr or {}).get("ref","BCFI"), "2",
-               (lr or {}).get("alerts",[]))
-        CARD_END()
+            st.divider()
+            H('<div class="card-title">OAP / Diurèse</div>')
+            _fu, _fue = furosemide(poids, age, atcd)
+            if not _fue:
+                H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_fu or {}).get("dose_min",40):.0f}–{(_fu or {}).get("dose_max",80):.0f} mg IV</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Furosémide IV (Lasix®)</div>'
+                  f'<div class="rx-compact-detail">IV lent en 2-5 min</div></div></div>')
 
-        CARD("Salbutamol nébulisation — Bronchospasme", "")
-        grav = st.select_slider("Gravité", ["legere","moderee","severe"], "moderee",
-            key=WK("ph_grav"),
-            format_func=lambda x: {"legere":"Légère","moderee":"Modérée","severe":"Sévère"}[x])
-        sr, se = salbutamol(poids, age, grav, atcd)
-        if se:
-            AL(se, "warning")
-        else:
-            RX("Salbutamol (Ventolin) nébulisation",
-               f"{(sr or {}).get('dose_mg', 2.5)} mg",
-               [(sr or {}).get("admin",""), (sr or {}).get("dilution",""),
-                (sr or {}).get("debit_o2",""), (sr or {}).get("rep","")],
-               (sr or {}).get("ref","BCFI"), "2")
-        CARD_END()
-
-        CARD("Sepsis Bundle — Première heure (SSC 2021)", "")
-        sb_lact = st.number_input("Lactate (mmol/l — 0 si non dosé)",
-                                   0.0, 20.0, 0.0, 0.1, key="sb_l")
-        sb = sepsis_bundle_1h(SS.v_pas or 120,
-                               sb_lact if sb_lact > 0 else None,
-                               SS.v_temp or 37, SS.v_fc or 80, poids, atcd)
-        _sb = sb or {}
-        if _sb.get("choc_septique"):
-            AL("CHOC SEPTIQUE — Réanimation immédiate", "danger")
-        for m_, c_ in _sb.get("alerts", []): AL(m_, c_)
-        for lbl, detail, css in _sb.get("checklist", []):
-            H(f'<div class="al {css}" style="padding:7px 14px;margin:3px 0;font-size:.78rem;">'
-              f'<input type="checkbox" style="margin-right:8px;">'
-              f'<strong>{lbl}</strong> — {detail}</div>')
-        CARD_END()
-
-        CARD("Crise hypertensive — Cible adaptée à l'étiologie", "")
-        AL("Cibles DIFFÉRENTES selon l'étiologie — Ne jamais baisser trop vite", "warning")
-        motif_hta = st.selectbox("Contexte clinique", [
-            "Urgence hypertensive standard", "AVC ischémique (non thrombolysé)",
-            "AVC ischémique (si thrombolyse)", "AVC hémorragique",
-            "Dissection aortique", "OAP hypertensif",
-        ], key="ph_hta")
-        _ch_payload, _ch_err = crise_hypertensive(SS.v_pas or 120, motif_hta, poids, atcd)
-        if _ch_err:
-            AL(_ch_err, "danger")
-        else:
-            AL(f"Objectif : {(_ch_payload or {}).get('cible','Cible clinique à confirmer')}",
-               "warning")
-            for m_, c_ in (_ch_payload or {}).get("alerts", []): AL(m_, c_)
-        CARD_END()
-
-        # ── Clévidipine IV (Vesierra®) — HTA réfractaire ─────────────────────
-        CARD("Clévidipine IV (Vesierra®) — HTA sévère réfractaire", "")
-        st.caption("BCFI / ESC 2023 — Inhibiteur calcique IV ultrarapide (T½ ~1 min)")
-        clev_ctx = st.selectbox("Contexte HTA", [
-            "HTA sévère", "OAP hypertensif", "Dissection aortique", "Péri-opératoire",
-        ], key="ph_clev_ctx")
-        clev_rx, clev_err = clevidipine(SS.v_pas or 120, poids, clev_ctx, atcd)
-        if clev_err:
-            AL(f"🔒 {clev_err}", "danger")
-        else:
-            for m_, c_ in (clev_rx or {}).get("alerts", []): AL(m_, c_)
-            AL(f"Cible : {(clev_rx or {}).get('cible','—')}", "warning")
-            RX("Clévidipine IV (Vesierra® 0,5 mg/ml)",
-               f"{(clev_rx or {}).get('debit_init',1)} → max {(clev_rx or {}).get('debit_max',32)} mg/h",
-               [(clev_rx or {}).get("admin",""),
-                (clev_rx or {}).get("note","")],
-               (clev_rx or {}).get("ref","BCFI"), "U",
-               (clev_rx or {}).get("alerts",[]))
-        CARD_END()
-
-        # ── Midazolam IV — Sédation / Convulsion ────────────────────────────
-        ph3_c1, ph3_c2 = st.columns(2)
-        with ph3_c1:
-            CARD("Midazolam IV (Hypnovel®) — Sédation/Convulsion", "")
-            st.caption("BCFI — Benzodiazépine IV — Antidote : Flumazénil")
-            midaz_ind = st.radio("Indication",
-                ["sedation", "convulsion"], horizontal=True, key="ph_midaz_ind",
-                format_func=lambda x: "Sédation procédurale" if x == "sedation" else "Crise convulsive")
-            midaz_rx, midaz_err = midazolam_iv(poids, age, midaz_ind, atcd)
-            if midaz_err:
-                AL(f"🔒 {midaz_err}", "danger")
+        # ── Pédiatrie ─────────────────────────────────────────────────────────
+        with _PH[4]:
+            if age >= 18:
+                AL("Cet onglet est réservé aux patients < 18 ans", "info")
             else:
-                for m_, c_ in (midaz_rx or {}).get("alerts", []): AL(m_, c_)
-                RX("Midazolam IV (Hypnovel®)",
-                   (midaz_rx or {}).get("dose_display", "—"),
-                   [(midaz_rx or {}).get("admin",""),
-                    (midaz_rx or {}).get("note",""),
-                    (midaz_rx or {}).get("antidote","")],
-                   (midaz_rx or {}).get("ref","BCFI"), "2",
-                   (midaz_rx or {}).get("alerts",[]))
-            CARD_END()
-
-        # ── MEOPA (Kalinox®) — Analgésie procédurale ────────────────────────
-        with ph3_c2:
-            CARD("MEOPA (Kalinox® 50/50) — Analgésie procédurale", "")
-            st.caption("BCFI / SFMU — 50 % O₂ / 50 % N₂O — Anxiolyse/Analgésie")
-            meopa_rx, meopa_err = meopa(age, atcd)
-            if meopa_err:
-                AL(f"🔒 {meopa_err}", "danger")
-            else:
-                for m_, c_ in (meopa_rx or {}).get("alerts", []): AL(m_, c_)
-                RX("MEOPA — Kalinox® 50/50",
-                   (meopa_rx or {}).get("melange","50% O₂/N₂O"),
-                   [(meopa_rx or {}).get("admin",""),
-                    (meopa_rx or {}).get("note",""),
-                    f"Débit : {(meopa_rx or {}).get('debit','')} — Durée max : {(meopa_rx or {}).get('duree_max','')}"],
-                   (meopa_rx or {}).get("ref","BCFI"), "2",
-                   (meopa_rx or {}).get("alerts",[]))
-            CARD_END()
-
-        if age < 18:
-            CARD("Protocole anticonvulsivant pédiatrique", "")
-            st.caption("BCFI / Lignes directrices belges — EME Pédiatrique")
-            _det = SS.det if isinstance(SS.det, dict) else {}
-            dur_epi  = float(_det.get("duree_min", 0) or 0)
-            encours  = bool(_det.get("en_cours", False))
-            eme = protocole_epilepsie_ped(poids, age, dur_epi, encours, atcd)
-            _eme = eme or {}
-            if _eme.get("eme_etabli"):
-                AL(f"EME établi ({dur_epi:.0f} min) — Traitement 2e ligne requis", "danger")
-            e1, e2 = st.columns(2)
-            with e1:
-                mid = _eme.get("midazolam_buccal") or {}
-                RX("Midazolam buccal",   mid.get("dose","?"), [mid.get("note","")],
-                   mid.get("ref","BCFI"), "2")
-                diz = _eme.get("diazepam_rectal") or {}
-                RX("Diazépam rectal",    diz.get("dose","?"), [diz.get("note","")],
-                   diz.get("ref","BCFI"), "2")
-            with e2:
-                lor = _eme.get("lorazepam_iv") or {}
-                RX("Lorazépam IV",       lor.get("dose","?"), [lor.get("note","")],
-                   lor.get("ref","BCFI"), "2")
+                H(f'<div class="card-title">EME Pédiatrique — {poids:.0f} kg</div>')
+                _det_ped = SS.det if isinstance(SS.det, dict) else {}
+                _dur_epi  = float(_det_ped.get("duree_min", 0) or 0)
+                _encours  = bool(_det_ped.get("en_cours", False))
+                _dur_epi_i = st.number_input("Durée de crise (min)", 0.0, 120.0, _dur_epi, 0.5, key="ph_dur_epi")
+                _encours_i = st.checkbox("Crise en cours", value=_encours, key="ph_encours_epi")
+                _eme = protocole_epilepsie_ped(poids, age, _dur_epi_i, _encours_i, atcd) or {}
                 if _eme.get("eme_etabli"):
-                    lev = _eme.get("levetiracetam_iv") or {}
-                    RX("Lévétiracétam IV", lev.get("dose","?"), [lev.get("note","")],
-                       lev.get("ref","BCFI"), "3")
-            CARD_END()
+                    AL(f"EME établi ({_dur_epi_i:.0f} min) — 2e ligne", "danger")
+                if _encours_i:
+                    AL("Crise EN COURS — anticonvulsivant IMMÉDIAT", "danger")
+
+                _e1, _e2 = st.columns(2)
+                for _col, _drug_key, _name in [
+                    (_e1, "midazolam_buccal", "Midazolam buccal"),
+                    (_e2, "diazepam_rectal",  "Diazépam rectal"),
+                    (_e1, "lorazepam_iv",     "Lorazépam IV"),
+                    (_e2, "levetiracetam_iv", "Lévétiracétam IV"),
+                ]:
+                    _d = _eme.get(_drug_key) or {}
+                    if _d.get("dose"):
+                        with _col:
+                            H(f'<div class="rx-compact"><div class="rx-compact-dose" style="font-size:.85rem;">{_d["dose"]}</div>'
+                              f'<div class="rx-compact-info"><div class="rx-compact-name">{_name}</div>'
+                              f'<div class="rx-compact-detail">{_d.get("note","")}</div></div></div>')
+
+                st.divider()
+                H('<div class="card-title">Kétamine intranasale</div>')
+                _ki, _kie = ketamine_intranasale(poids, age, atcd)
+                if _kie: AL(_kie, "warning")
+                else:
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_ki or {}).get("dose_mg",0):.0f} mg IN</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Kétamine intranasale</div>'
+                      f'<div class="rx-compact-detail">{(_ki or {}).get("admin","")} — Onset {(_ki or {}).get("onset","")}</div></div></div>')
+
+                st.divider()
+                H('<div class="card-title">Midazolam IM / IN (Hypnovel® 5 mg/ml)</div>')
+                _mi_im, _mi_im_err = midazolam_im(poids, age, atcd)
+                if _mi_im_err: AL(_mi_im_err, "danger")
+                else:
+                    for _ma, _mc in (_mi_im or {}).get("alerts", []): AL(_ma, _mc)
+                    H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_mi_im or {}).get("dose_mg",0):.1f} mg ({(_mi_im or {}).get("volume_ml",0):.2f} ml)</div>'
+                      f'<div class="rx-compact-info"><div class="rx-compact-name">Midazolam IM/IN (Hypnovel® 5 mg/ml)</div>'
+                      f'<div class="rx-compact-detail">{(_mi_im or {}).get("admin","")}</div>'
+                      f'<div class="rx-compact-detail" style="color:#64748B;">Onset : {(_mi_im or {}).get("onset","")}</div></div></div>')
+
+        # ── Générateur d'étiquette PSE ─────────────────────────────────────────
+        st.divider()
+        with st.expander("🏷️ Générateur d'étiquette PSE — traçabilité seringue", expanded=False):
+            st.caption("Compatible AR 78 AFMPS 2019 — Identification seringue auto-pousseuse")
+            _eq1, _eq2, _eq3 = st.columns(3)
+            _eq_med   = _eq1.text_input("Médicament", value="Morphine",   key=WK("eq_med"))
+            _eq_conc  = _eq2.number_input("Concentration (mg/ml)", 0.01, 50.0, 1.0, 0.1, key="eq_conc")
+            _eq_vol   = _eq3.number_input("Volume total (ml)", 10, 100, 50, key="eq_vol")
+            _eq4, _eq5 = st.columns(2)
+            _eq_debit = _eq4.number_input("Débit PSE (ml/h)", 0.1, 100.0, 5.0, 0.5, key="eq_debit")
+            _eq_op    = _eq5.text_input("Opérateur", value=SS.op or "IAO", key="eq_op")
+            if _eq_debit and _eq_conc:
+                _eq_txt = generer_etiquette(
+                    medicament=_eq_med, concentration=_eq_conc,
+                    debit_mlh=_eq_debit, vol_total=_eq_vol,
+                    poids=poids, operateur=_eq_op or "IAO",
+                )
+                st.code(_eq_txt, language=None)
+                import datetime as _dt
+                st.download_button("🖨️ Télécharger (.txt)", data=_eq_txt,
+                    file_name=f"etiq_{_eq_med}_{_dt.datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain", use_container_width=True)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # _PH[5] — CALCUL DE PERFUSIONS IV
+        # ─────────────────────────────────────────────────────────────────────
+        with _PH[5]:
+            H(f'''<div style="background:linear-gradient(135deg,#0F172A,#1E3A5F);color:#fff;
+                border-radius:10px;padding:12px 16px;margin-bottom:12px;">
+              <div style="font-size:.65rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Calcul perfusion</div>
+              <div style="font-size:1.05rem;font-weight:800;">Patient : {poids:.0f} kg</div>
+              <div style="font-size:.72rem;opacity:.75;margin-top:2px;">Concentrations standard Hainaut — BCFI Belgique</div>
+            </div>''')
+
+            # ── Aide-mémoire rapide ────────────────────────────────────────────
+            st.markdown("**Choisir la perfusion à calculer :**")
+            _perf_choice = st.selectbox("Médicament / Indication", [
+                "— Sélectionner —",
+                "Morphine PSE — Analgésie IV continue",
+                "Dipidolor® PSE — Analgésie IV continue",
+                "Kétamine PSE — Analgésie subanesthésique",
+                "Midazolam PSE — Sédation / Convulsion",
+                "Adrénaline IV — Anaphylaxie / Choc",
+                "Noradrénaline IV — Choc septique (SSC 2021)",
+                "Dobutamine IV — Choc cardiogénique",
+                "Amiodarone IV — FA / TV stable",
+                "Labétalol IV — HTA sévère / Dissection",
+                "Nicardipine IV — HTA sévère (alternative)",
+                "Magnésium IV — Pré-éclampsie / Torsades",
+                "Insuline rapide IV — Acidocétose / Hyperglycémie",
+                "🔢 Convertisseur débit ↔ dose",
+            ], key="perf_choice")
+
+            def _rx_perf(p: dict) -> None:
+                """Affiche un résultat de perfusion de façon standardisée."""
+                if not p:
+                    return
+                _details_html = ""
+                if p.get("details"):
+                    _items = "".join(f'<div style="font-size:.72rem;color:#94A3B8;margin:2px 0;">• {d}</div>' for d in p["details"])
+                    _details_html = f'<div style="border-top:1px solid #1E293B;margin-top:10px;padding-top:8px;">{_items}</div>'
+                H(f'''<div style="background:#0F172A;border:1.5px solid #334155;border-radius:10px;padding:14px 18px;margin:10px 0;">
+                  <div style="font-size:.65rem;color:#64748B;text-transform:uppercase;letter-spacing:.1em;">{p.get("label","")}</div>
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;">
+                    <div style="text-align:center;">
+                      <div style="font-size:2rem;font-weight:900;color:#38BDF8;font-family:\'IBM Plex Mono\',monospace;">{p.get("debit_mlh",0)}</div>
+                      <div style="font-size:.65rem;color:#64748B;">ml/h</div></div>
+                    <div style="text-align:center;">
+                      <div style="font-size:2rem;font-weight:900;color:#A78BFA;font-family:\'IBM Plex Mono\',monospace;">{int(p.get("gttes_min",0))}</div>
+                      <div style="font-size:.65rem;color:#64748B;">gttes/min</div></div>
+                    <div style="text-align:center;">
+                      <div style="font-size:1.3rem;font-weight:900;color:#4ADE80;font-family:\'IBM Plex Mono\',monospace;">{p.get("conc_mgml",0)}</div>
+                      <div style="font-size:.65rem;color:#64748B;">mg/ml</div></div>
+                  </div>
+                  <div style="border-top:1px solid #1E293B;margin-top:12px;padding-top:10px;">
+                    <div style="font-size:.7rem;color:#94A3B8;margin-bottom:6px;font-weight:600;">DILUTION :</div>
+                    <div style="font-size:.75rem;color:#CBD5E1;">{p.get("dilution","")}</div>
+                  </div>
+                  {_details_html}
+                  <div style="font-size:.6rem;color:#475569;margin-top:8px;font-style:italic;">{p.get("ref","")}</div>
+                </div>''')
+                for _am, _ac in p.get("alerts", []):
+                    AL(_am, _ac)
+                if p.get('duree_h', 0) > 0:
+                    _dur_txt = f"Durée d'autonomie : ≈ {p['duree_h']:.1f} h ({p['vol_total_ml']:.0f} ml à {p['debit_mlh']:.1f} ml/h)"
+                    st.caption(_dur_txt)
+            # ── Rendu selon sélection ─────────────────────────────────────────
+            if _perf_choice == "Morphine PSE — Analgésie IV continue":
+                _pc1, _pc2 = st.columns(2)
+                _mo_dose = _pc1.number_input("Dose µg/kg/h", 5.0, 80.0, 20.0, 5.0, key="pm_dose")
+                _mo_vol  = _pc2.selectbox("Volume seringue (ml)", [20, 50], index=1, key="pm_vol")
+                _rx_perf(perf_morphine(poids, _mo_dose, _mo_vol, atcd))
+
+            elif _perf_choice == "Dipidolor® PSE — Analgésie IV continue":
+                _pc1, _pc2 = st.columns(2)
+                _pi_dose = _pc1.number_input("Dose µg/kg/h", 5.0, 60.0, 15.0, 5.0, key="pp_dose")
+                _pi_vol  = _pc2.selectbox("Volume seringue (ml)", [20, 50], index=1, key="pp_vol")
+                _rx_perf(perf_piritramide(poids, _pi_dose, _pi_vol, atcd))
+
+            elif _perf_choice == "Kétamine PSE — Analgésie subanesthésique":
+                _ke_ind = st.radio("Indication", ["analgesie","sedation"],
+                    format_func=lambda x: {"analgesie":"Analgésie (0,1-0,5 mg/kg/h)", "sedation":"Sédation légère (0,5-2 mg/kg/h)"}[x],
+                    horizontal=True, key="pke_ind")
+                _rx_perf(perf_ketamine(poids, _ke_ind, atcd))
+
+            elif _perf_choice == "Midazolam PSE — Sédation / Convulsion":
+                _mi_ind = st.radio("Indication", ["sedation","convulsion","anxiolyse"],
+                    format_func=lambda x: {"sedation":"Sédation","convulsion":"Convulsion","anxiolyse":"Anxiolyse"}[x],
+                    horizontal=True, key="pmi_ind")
+                _rx_perf(perf_midazolam(poids, _mi_ind, atcd))
+
+            elif _perf_choice == "Adrénaline IV — Anaphylaxie / Choc":
+                _ae_ind = st.radio("Indication", ["anaphylaxie","choc_septique"],
+                    format_func=lambda x: {"anaphylaxie":"Anaphylaxie sévère","choc_septique":"Choc vasoplégique"}[x],
+                    horizontal=True, key="pae_ind")
+                _rx_perf(perf_adrenaline(poids, _ae_ind, atcd))
+
+            elif _perf_choice == "Noradrénaline IV — Choc septique (SSC 2021)":
+                _na_dose = st.number_input("Dose initiale µg/kg/min", 0.05, 3.0, 0.1, 0.05, key="pna_dose")
+                _rx_perf(perf_noradrenaline(poids, _na_dose, atcd))
+
+            elif _perf_choice == "Dobutamine IV — Choc cardiogénique":
+                _db_dose = st.number_input("Dose µg/kg/min", 2.0, 20.0, 5.0, 2.5, key="pdb_dose")
+                _rx_perf(perf_dobutamine(poids, _db_dose, atcd))
+
+            elif _perf_choice == "Amiodarone IV — FA / TV stable":
+                _am_ind = st.radio("Indication", ["fa","tv_stable","choc_refractaire"],
+                    format_func=lambda x: {"fa":"FA récente","tv_stable":"TV hémostable","choc_refractaire":"ACR / FV réfractaire"}[x],
+                    horizontal=True, key="pam_ind")
+                _rx_perf(perf_amiodarone(poids, _am_ind, atcd))
+
+            elif _perf_choice == "Labétalol IV — HTA sévère / Dissection":
+                _lb_ctx = st.selectbox("Contexte", ["hta_severe","dissection_aortique"], key="plb_ctx",
+                    format_func=lambda x: {"hta_severe":"HTA sévère","dissection_aortique":"Dissection aortique (cible < 120)"}[x])
+                _rx_perf(perf_labetalol(poids, _lb_ctx, atcd))
+
+            elif _perf_choice == "Nicardipine IV — HTA sévère (alternative)":
+                _rx_perf(perf_nicardipine(poids, atcd))
+
+            elif _perf_choice == "Magnésium IV — Pré-éclampsie / Torsades":
+                _mg_ind = st.radio("Indication", ["eclampsia","torsades","asthme"],
+                    format_func=lambda x: {"eclampsia":"Pré-éclampsie","torsades":"Torsades de pointes","asthme":"Asthme sévère réfractaire"}[x],
+                    horizontal=True, key="pmg_ind")
+                _rx_perf(perf_magnesium(poids, _mg_ind, atcd))
+
+            elif _perf_choice == "Insuline rapide IV — Acidocétose / Hyperglycémie":
+                _in_ind = st.radio("Indication", ["acidocetose","hyperkaliemie","hyperglycemie"],
+                    format_func=lambda x: {"acidocetose":"Acidocétose","hyperkaliemie":"Hyperkaliémie","hyperglycemie":"Hyperglycémie"}[x],
+                    horizontal=True, key="pin_ind")
+                _in_gl = float(SS.gl or 300)
+                _rx_perf(perf_insuline(poids, _in_ind, _in_gl, atcd))
+
+            elif _perf_choice == "🔢 Convertisseur débit ↔ dose":
+                st.markdown("##### Convertisseur universel ml/h ↔ dose")
+                _cv_c1, _cv_c2 = st.columns(2)
+                _cv_conc  = _cv_c1.number_input("Concentration (mg/ml)", 0.001, 50.0, 1.0, 0.1, key="cv_conc")
+                _cv_poids = _cv_c2.number_input("Poids (kg)", 1.0, 200.0, float(poids), 1.0, key="cv_poids")
+
+                st.markdown("**→ Débit → Dose :**")
+                _cv_debit = st.number_input("Débit connu (ml/h)", 0.1, 500.0, 10.0, 0.5, key="cv_debit")
+                _cv_res = convertir_debit(_cv_debit, _cv_conc, _cv_poids)
+                H(f'''<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin:6px 0;">
+                  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                    <div><div style="font-size:.6rem;color:#64748B;">Dose mg/h</div>
+                      <div style="font-size:1.1rem;font-weight:700;color:#004A99;">{_cv_res["dose_mg_h"]:.3f} mg/h</div></div>
+                    <div><div style="font-size:.6rem;color:#64748B;">mg/kg/h</div>
+                      <div style="font-size:1.1rem;font-weight:700;color:#004A99;">{_cv_res["dose_mg_kg_h"]:.4f} mg/kg/h</div></div>
+                    <div><div style="font-size:.6rem;color:#64748B;">µg/kg/min</div>
+                      <div style="font-size:1.1rem;font-weight:700;color:#7C3AED;">{_cv_res["dose_ug_kg_min"]:.3f} µg/kg/min</div></div>
+                    <div><div style="font-size:.6rem;color:#64748B;">Gttes/min (20 gttes/ml)</div>
+                      <div style="font-size:1.1rem;font-weight:700;color:#16A34A;">{int(_cv_debit*20/60)} gttes/min</div></div>
+                  </div>
+                </div>''')
+
+                st.markdown("**→ Dose → Débit :**")
+                _cv_dose2 = st.number_input("Dose souhaitée (mg/h)", 0.001, 1000.0, 1.0, 0.1, key="cv_dose2")
+                _cv_calc  = calculer_debit(_cv_dose2, _cv_conc)
+                H(f'''<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:12px;margin:6px 0;">
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    <div><div style="font-size:.6rem;color:#166534;">Débit ml/h</div>
+                      <div style="font-size:1.3rem;font-weight:800;color:#166534;">{_cv_calc["debit_mlh"]:.1f} ml/h</div></div>
+                    <div><div style="font-size:.6rem;color:#166534;">Gttes/min adulte (×20)</div>
+                      <div style="font-size:1.3rem;font-weight:800;color:#166534;">{int(_cv_calc["gttes_min_adulte"])} gttes/min</div></div>
+                    <div><div style="font-size:.6rem;color:#166534;">Microgottes/min (×60)</div>
+                      <div style="font-size:1.3rem;font-weight:800;color:#166534;">{int(_cv_calc["gttes_min_ped"])} µgttes/min</div></div>
+                  </div>
+                </div>''')
 
         DISC()
 
-    # ───────────────────────────────────────────────────────────────────────────
-    # ONGLET 3 — SYNTHÈSE
-    # ───────────────────────────────────────────────────────────────────────────
-    with T[3]:
-        ST = st.tabs(["Réévaluation", "Historique", "Transmission SBAR"])
 
-        with ST[0]:
-            CARD("Réévaluation clinique", "")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ONGLET 3 — SCORES CLINIQUES
+    # ═══════════════════════════════════════════════════════════════════════════
+    with T[3]:
+        _SC = st.tabs(["Cardio / Neuro", "Infectio / Respi", "Imagerie"])
+
+        with _SC[0]:
+            _sl, _sr = st.columns(2)
+            with _sl:
+                CARD("qSOFA — Sepsis", "")
+                _qs = calculer_qsofa(SS.v_fr or 16, SS.v_gcs or 15, SS.v_pas or 120)
+                _qsv = _qs.get("score_val") or 0
+                AL(_qs.get("interpretation",""), "danger" if _qsv >= 2 else "warning" if _qsv == 1 else "success")
+                AL(_qs.get("recommendation",""), "info")
+                CARD_END()
+
+                CARD("BE-FAST — AVC", "")
+                _f1, _f2 = st.columns(2)
+                _bf_ba = _f1.checkbox("Balance", key=WK("bf_b"))
+                _bf_ey = _f2.checkbox("Eyes",    key=WK("bf_e"))
+                _bf_fa = _f1.checkbox("Face",    key=WK("bf_f"))
+                _bf_ar = _f2.checkbox("Arm",     key=WK("bf_a"))
+                _bf_sp = _f1.checkbox("Speech",  key=WK("bf_sp"))
+                _bf_ti = _f2.text_input("Vu bien à", key="bf_t", placeholder="14:30")
+                _bf = evaluer_fast(_bf_fa, _bf_ar, _bf_sp, _bf_ti, _bf_ba, _bf_ey)
+                AL(_bf.get("interpretation",""), "danger" if (_bf.get("score_val") or 0) >= 1 else "success")
+                AL(_bf.get("recommendation",""), "info")
+                CARD_END()
+
+            with _sr:
+                CARD("HEART — Douleur thoracique", "")
+                st.caption("Six AJ et al., NHJ 2008")
+                _h1, _h2 = st.columns(2)
+                _hh = _h1.select_slider("Histoire", [0,1,2], key=WK("ht_h"),
+                    format_func=lambda x:{0:"0–Peu évoc.",1:"1–Modéré",2:"2–Très suspect"}[x])
+                _he = _h2.select_slider("ECG",     [0,1,2], key=WK("ht_e"),
+                    format_func=lambda x:{0:"0–Normal",1:"1–Non spéc.",2:"2–Bloc/STEMI"}[x])
+                _ha = _h1.select_slider("Âge",     [0,1,2], key=WK("ht_a"),
+                    format_func=lambda x:{0:"0–<45",1:"1–45-65",2:"2–>65"}[x])
+                _hr = _h2.select_slider("FRCV",    [0,1,2], key=WK("ht_r"),
+                    format_func=lambda x:{0:"0–Aucun",1:"1–1-2",2:"2–≥3"}[x])
+                _ht2 = _h1.select_slider("Tropo",  [0,1,2], key=WK("ht_t"),
+                    format_func=lambda x:{0:"0–Norm.",1:"1–1-3xN",2:"2–>3xN"}[x])
+                _ht = calculer_heart(_hh, _he, _ha, _hr, _ht2)
+                _htv = _ht.get("score_val") or 0
+                AL(_ht.get("interpretation",""), "danger" if _htv >= 7 else "warning" if _htv >= 4 else "success")
+                AL(_ht.get("recommendation",""), "info")
+                CARD_END()
+
+                # TIMI contextuel
+                if any(k in (SS.motif or "").lower() for k in ("thoracique","sca","coronaire","infarctus")):
+                    CARD("TIMI — NSTEMI (motif SCA actif)", "")
+                    st.caption("Antman EM et al., JAMA 2000")
+                    _ti1, _ti2 = st.columns(2)
+                    _tia = _ti1.checkbox("Âge ≥ 65 ans",   key=WK("ti_age"), value=age >= 65)
+                    _tif = _ti2.checkbox("≥ 3 FRCV",        key=WK("ti_frcv"))
+                    _tis = _ti1.checkbox("Sténose ≥ 50 %",  key=WK("ti_sten"))
+                    _tie = _ti2.checkbox("Dév. ST ECG",      key=WK("ti_ecg"))
+                    _tin = _ti1.checkbox("≥ 2 angor/24h",   key=WK("ti_ang"))
+                    _tiasp = _ti2.checkbox("Aspirine 7j",   key=WK("ti_asp"))
+                    _titr = _ti1.checkbox("Marqueurs +",    key=WK("ti_trop"))
+                    _tires = calculer_timi(_tia, _tif, _tis, _tie, _tin, _tiasp, _titr)
+                    _tisv  = _tires.get("score_val") or 0
+                    _ticol = "#EF4444" if _tisv >= 5 else "#F59E0B" if _tisv >= 3 else "#22C55E"
+                    H(f'<div style="background:#1E293B;border-radius:8px;padding:12px;text-align:center;margin:8px 0;">'
+                      f'<div style="font-size:.6rem;color:#64748B;text-transform:uppercase;">TIMI</div>'
+                      f'<div style="font-size:2.2rem;font-weight:900;color:{_ticol};">{_tisv}/7</div>'
+                      f'<div style="font-size:.72rem;color:#94A3B8;">{_tires.get("interpretation","")}</div>'
+                      f'</div>')
+                    AL(_tires.get("recommendation",""), "danger" if _tisv >= 5 else "warning" if _tisv >= 3 else "info")
+                    CARD_END()
+
+                CARD("Algoplus — Non communicant", "")
+                _al1, _al2 = st.columns(2)
+                _alv = _al1.checkbox("Visage",       key=WK("alg_v"))
+                _alr = _al2.checkbox("Regard",       key=WK("alg_r"))
+                _alp = _al1.checkbox("Plaintes",     key=WK("alg_p"))
+                _ala = _al2.checkbox("Attitudes",    key=WK("alg_a"))
+                _alc = _al1.checkbox("Comportement", key=WK("alg_c"))
+                _alres = calculer_algoplus(_alv, _alr, _alp, _ala, _alc)
+                AL(_alres.get("interpretation",""),
+                   "danger" if (_alres.get("score_val") or 0) >= 2 else "success")
+                AL(_alres.get("recommendation",""), "info")
+                CARD_END()
+
+        with _SC[1]:
+            _s2l, _s2r = st.columns(2)
+            with _s2l:
+                CARD("CURB-65 — Pneumonie", "")
+                _cbc = st.checkbox("Confusion",         key=WK("cb_c"))
+                _cbu = st.checkbox("Urée > 7 mmol/l",  key=WK("cb_u"))
+                _cbr = st.checkbox("FR ≥ 30/min",      key=WK("cb_r"), value=(SS.v_fr or 16) >= 30)
+                _cbb = st.checkbox("PAS < 90",          key=WK("cb_b"), value=(SS.v_pas or 120) < 90)
+                _cba = st.checkbox("Âge ≥ 65",          key=WK("cb_a"), value=age >= 65)
+                _cbres = calculer_curb65(_cbc, _cbu, _cbr, _cbb, _cba)
+                AL(_cbres.get("interpretation",""), "danger" if (_cbres.get("score_val") or 0) >= 3 else
+                   "warning" if (_cbres.get("score_val") or 0) == 2 else "success")
+                AL(_cbres.get("recommendation",""), "info")
+                CARD_END()
+
+            with _s2r:
+                CARD("Wells EP", "")
+                _we1, _we2 = st.columns(2)
+                _wetvp = _we1.checkbox("Symptômes TVP",   key=WK("we_tvp"))
+                _weep  = _we2.checkbox("EP probable",     key=WK("we_ep"))
+                _wefc  = _we1.checkbox("FC > 100",        key=WK("we_fc"), value=(SS.v_fc or 80) > 100)
+                _weim  = _we2.checkbox("Immobilisation",  key=WK("we_im"))
+                _wean  = _we1.checkbox("ATCD TVP/EP",     key=WK("we_an"))
+                _wehe  = _we2.checkbox("Hémoptysie",      key=WK("we_he"))
+                _weca  = _we1.checkbox("Cancer",          key=WK("we_ca"))
+                _weres = calculer_wells_ep(_wetvp, _weep, _wefc, _weim, _wean, _wehe, _weca)
+                AL(_weres.get("interpretation",""), "danger" if (_weres.get("score_val") or 0) > 4 else
+                   "warning" if (_weres.get("score_val") or 0) > 1 else "success")
+                AL(_weres.get("recommendation",""), "info")
+                CARD_END()
+
+        with _SC[2]:
+            _s3l, _s3r = st.columns(2)
+            with _s3l:
+                CARD("Ottawa — Cheville / Pied", "")
+                _otap = st.checkbox("Incapacité d'appui (4 pas)", key=WK("ot_ap"))
+                _ot1, _ot2 = st.columns(2)
+                _otmm = _ot1.checkbox("Malléole médiale",  key=WK("ot_mm"))
+                _ottl = _ot2.checkbox("Malléole latérale", key=WK("ot_tl"))
+                _ot5m = _ot1.checkbox("Base 5e métatar.", key=WK("ot_5m"))
+                _otnv = _ot2.checkbox("Naviculaire",       key=WK("ot_nv"))
+                _otres = regle_ottawa_cheville(_otmm, _ottl, _ot5m, _otnv, _otap)
+                AL(_otres.get("interpretation",""), "warning" if _otres.get("score_val") else "success")
+                AL(_otres.get("recommendation",""), "info")
+                CARD_END()
+            with _s3r:
+                CARD("Canadienne — TDM crânien (GCS 13-15)", "")
+                _cc1, _cc2 = st.columns(2)
+                _ccg  = _cc1.checkbox("GCS < 15 à 2h",        key=WK("cc_g"))
+                _ccs  = _cc2.checkbox("Fracture ouverte",      key=WK("cc_s"))
+                _ccf  = _cc1.checkbox("Fracture base crâne",   key=WK("cc_f"))
+                _ccv  = _cc2.checkbox("Vomissements ≥ 2",     key=WK("cc_v"))
+                _cca  = _cc1.checkbox("Âge ≥ 65",             key=WK("cc_a"), value=age >= 65)
+                _ccam = _cc2.checkbox("Amnésie ≥ 30 min",     key=WK("cc_am"))
+                _ccm  = _cc1.checkbox("Mécanisme dangereux",   key=WK("cc_m"))
+                _ccres = regle_canadian_ct(_ccg, _ccs, _ccf, _ccv, _cca, _ccam, _ccm)
+                AL(_ccres.get("interpretation",""), "danger" if (_ccres.get("score_val") or 0) == 2 else
+                   "warning" if (_ccres.get("score_val") or 0) == 1 else "success")
+                AL(_ccres.get("recommendation",""), "info")
+                CARD_END()
+
+        DISC()
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ONGLET 4 — SUIVI (Réévaluation + Historique + SBAR)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with T[4]:
+        _ST = st.tabs(["🔄 Réévaluation", "📜 Historique", "📡 SBAR"])
+
+        with _ST[0]:
             if not SS.uid_cur:
-                AL("Enregistrer d'abord un patient dans l'onglet Triage", "info")
+                AL("Enregistrer d'abord un patient dans l'onglet ⚡ Triage", "info")
             else:
                 st.caption(f"Patient actif : {SS.uid_cur}")
-                rc1, rc2, rc3 = st.columns(3)
-                re_temp = rc1.number_input("T°",   30.0, 45.0, float(SS.v_temp), 0.1, key="re_t")
-                re_fc   = rc1.number_input("FC",    20, 220, int(SS.v_fc),   key="re_fc")
-                re_pas  = rc2.number_input("PAS",   40, 260, int(SS.v_pas),  key="re_pas")
-                re_spo2 = rc2.number_input("SpO2",  50, 100, int(SS.v_spo2), key="re_sp")
-                re_fr   = rc3.number_input("FR",     5,  60, int(SS.v_fr),   key="re_fr")
-                re_gcs  = rc3.number_input("GCS",    3,  15, int(SS.v_gcs),  key="re_gcs")
-                re_n2, _ = calculer_news2(re_fr, re_spo2, o2, re_temp, re_pas,
-                                           re_fc, re_gcs, SS.v_bpco)
-                _det_reev = SS.det if isinstance(SS.det, dict) else {}
-                re_niv, re_just, _ = french_triage(
-                    SS.motif, _det_reev, re_fc, re_pas, re_spo2,
-                    re_fr, re_gcs, re_temp, age, re_n2, SS.gl)
-                st.metric("NEWS2 réévaluation", re_n2,
-                           delta=re_n2 - SS.v_news2, delta_color="inverse")
-                TRI_CARD_INLINE(re_niv, re_just, re_n2)
-                if re_n2 > SS.v_news2:
-                    AL("NEWS2 en hausse — Réévaluation médicale urgente", "danger")
-                elif re_n2 < SS.v_news2:
-                    AL("NEWS2 en baisse — Amélioration clinique", "success")
+                _rc1, _rc2, _rc3 = st.columns(3)
+                _re_temp = _rc1.number_input("T°",  30.0, 45.0, float(SS.v_temp), 0.1, key="re_t")
+                _re_fc   = _rc1.number_input("FC",   20, 220, int(SS.v_fc),   key="re_fc")
+                _re_pas  = _rc2.number_input("PAS",  40, 260, int(SS.v_pas),  key="re_pas")
+                _re_spo2 = _rc2.number_input("SpO2", 50, 100, int(SS.v_spo2), key="re_sp")
+                _re_fr   = _rc3.number_input("FR",    5,  60, int(SS.v_fr),   key="re_fr")
+                _re_gcs  = _rc3.number_input("GCS",   3,  15, int(SS.v_gcs),  key="re_gcs")
+                _ren2, _ = calculer_news2(_re_fr, _re_spo2, o2, _re_temp, _re_pas,
+                                          _re_fc, _re_gcs, SS.v_bpco)
+                _reniv, _rejust, _ = french_triage(SS.motif, SS.det, _re_fc, _re_pas, _re_spo2,
+                                                    _re_fr, _re_gcs, _re_temp, age, _ren2, SS.gl)
+                _delta = _ren2 - SS.v_news2
+                st.metric("NEWS2 réévaluation", _ren2, delta=_delta, delta_color="inverse")
+                TRI_CARD_INLINE(_reniv, _rejust, _ren2)
+                if _delta > 0:   AL("NEWS2 en hausse — Réévaluation médicale urgente", "danger")
+                elif _delta < 0: AL("NEWS2 en baisse — Amélioration clinique", "success")
 
+                # Alertes temporelles
                 if SS.t_reev:
-                    mins = (datetime.now() - SS.t_reev).total_seconds() / 60
-                    if 25 <= mins <= 35:
-                        AL("⏱ Réévaluation douleur à 30 min POST-ANTALGIE — Obligatoire (Circulaire 2014)", "warning")
-                    elif 55 <= mins <= 65:
-                        AL("⏱ Réévaluation douleur à 60 min POST-ANTALGIE — Obligatoire", "warning")
-                    delai_cible = {"M":5,"1":5,"2":15,"3A":30,"3B":60}.get(SS.niv, 60)
-                    if mins > delai_cible:
-                        AL(f"⏱ Délai cible Tri {SS.niv} dépassé ({delai_cible} min) — Relancer le médecin", "danger")
+                    _mins = (datetime.now() - SS.t_reev).total_seconds() / 60
+                    _del_cible = {"M":5,"1":5,"2":15,"3A":30,"3B":60}.get(SS.niv, 60)
+                    if 25 <= _mins <= 35:
+                        AL("⏱ 30 min — Réévaluation douleur POST-ANTALGIE obligatoire (Circulaire 2014)", "warning")
+                    elif 55 <= _mins <= 65:
+                        AL("⏱ 60 min — Réévaluation POST-ANTALGIE obligatoire", "warning")
+                    if _mins > _del_cible:
+                        AL(f"⏱ Délai cible Tri {SS.niv} ({_del_cible} min) DÉPASSÉ — Relancer le médecin", "danger")
 
-                if st.button("✅ Enregistrer la réévaluation", key=WK("save_reeval"), use_container_width=True):
+                if st.button("✅ Enregistrer la réévaluation", key="re_save", use_container_width=True):
                     SS.reevs.append({
                         "h": datetime.now().strftime("%H:%M"),
-                        "fc": re_fc, "pas": re_pas, "spo2": re_spo2,
-                        "fr": re_fr, "gcs": re_gcs, "temp": re_temp,
-                        "n2": re_n2, "niv": re_niv,
+                        "fc": _re_fc, "pas": _re_pas, "spo2": _re_spo2,
+                        "fr": _re_fr, "gcs": _re_gcs, "temp": _re_temp,
+                        "n2": _ren2, "niv": _reniv,
                     })
-                    st.success(f"Réévaluation à {SS.reevs[-1]['h']} — Tri {re_niv}")
-            CARD_END()
+                    st.success(f"Réévaluation à {SS.reevs[-1]['h']} — Tri {_reniv}")
 
             if SS.reevs:
                 COURBE_VITAUX(SS.reevs)
 
+            # Règle des 5B
             st.divider()
-            CARD("Sécurité avant injection — Règle des 5B", "")
-            st.caption("AR 78 sur l'exercice infirmier — AFMPS 2019")
-            para_5b, _  = paracetamol(poids, age, atcd)
-            nap_5b, _   = naproxene(poids, age, atcd)
-            trad_5b, _  = tramadol(poids, age, atcd)
-            dip_5b, _   = piritramide(poids, age, atcd)
-            morph_5b, _ = morphine(poids, age, atcd)
-            ves_5b, _   = vesiera(poids, age, atcd)
-            gluc_5b, _  = glucose(poids, SS.gl, atcd) if SS.gl is not None else (None, None)
-            _det_5b     = SS.det if isinstance(SS.det, dict) else {}
-            dur_5b      = float(_det_5b.get("duree_min", 0) or 0)
-            encours_5b  = bool(_det_5b.get("en_cours", False))
-            eme_5b      = protocole_epilepsie_ped(poids, age, dur_5b, encours_5b, atcd)
-
-            med_sel = st.selectbox("Médicament à injecter", [
-                "Perfu — Paracétamol IV", "Naproxène PO", "Tradonal® — Tramadol",
-                "Dipidolor® — Piritramide", "Morphine IV titrée", "Litican IM (40 mg)",
-                "Adrénaline IM (0,5 mg)", "Ceftriaxone IV (2 g)", "Glucose 30 % IV",
-                "Salbutamol nébulisation", "Furosémide IV", "Midazolam buccal",
-                "Vesiera® — Kétamine perfusion", "Acide tranexamique IV (1 g)", "Autre",
+            H('<div class="card-title">🔒 Sécurité injection — Règle des 5B (AR 78 AFMPS 2019)</div>')
+            _med_5b = st.selectbox("Médicament", [
+                "Paracétamol IV", "Dipidolor® IV", "Morphine IV", "Adrénaline IM",
+                "Ceftriaxone IV", "Glucose 30% IV", "Litican® IM", "Tramadol",
+                "Midazolam buccal", "Acide tranexamique IV", "Autre",
             ], key="re_5b_med")
-
-            doses_default = {
-                "Perfu — Paracétamol IV":
-                    (f"{(para_5b or {}).get('dose_display', '1 g')} IV en 15 min"),
-                "Naproxène PO":
-                    f"{(nap_5b or {}).get('dose_mg', 500):.0f} mg PO" if nap_5b else "500 mg PO",
-                "Tradonal® — Tramadol":
-                    f"{(trad_5b or {}).get('dose_mg', 50):.0f} mg PO" if trad_5b else "50 mg PO",
-                "Dipidolor® — Piritramide":
-                    (f"{(dip_5b or {}).get('dose_min',3):.1f}–"
-                     f"{(dip_5b or {}).get('dose_max',6):.1f} mg IV lent") if dip_5b else "3–6 mg IV lent",
-                "Morphine IV titrée":
-                    (f"{(morph_5b or {}).get('dose_min',2):.1f}–"
-                     f"{(morph_5b or {}).get('dose_max',7.5):.1f} mg IV titré") if morph_5b else "2–7,5 mg IV titré",
-                "Litican IM (40 mg)":         "40 mg IM",
-                "Adrénaline IM (0,5 mg)":     "0,5 mg IM cuisse antéro-latérale",
-                "Ceftriaxone IV (2 g)":       "2 g IV en 3-5 min",
-                "Glucose 30 % IV":
-                    str((gluc_5b or {}).get("vol","Selon glycémie mesurée")) if gluc_5b else "Selon glycémie",
-                "Salbutamol nébulisation":    "2,5–5 mg nébulisation",
-                "Furosémide IV":              "40–80 mg IV lent",
-                "Midazolam buccal":
-                    str((eme_5b or {}).get("midazolam_buccal", {}).get("dose", "Selon poids")),
-                "Vesiera® — Kétamine perfusion":
-                    str((ves_5b or {}).get("dose","Selon protocole algologue")) if ves_5b else "Selon protocole",
-                "Acide tranexamique IV (1 g)": "1 g IV en 10 min",
-                "Autre": "À compléter",
-            }
-            dose_pre = st.text_input("Dose calculée",
-                                      value=doses_default.get(med_sel,""), key="re_5b_dose")
-            voie_pre = st.selectbox("Voie",
-                ["IV","IM","SC","IN (intranasale)","Buccale","Nébulisation","PO"],
-                key="re_5b_voie")
-            CHECKLIST_5B(
-                medicament=med_sel, dose=dose_pre, voie=voie_pre,
-                poids=poids, uid=SS.uid_cur or SS.uid,
-            )
-            CARD_END()
+            _dose_5b = st.text_input("Dose", key="re_5b_dose", placeholder="ex: 1 g IV en 15 min")
+            _voie_5b = st.selectbox("Voie", ["IV","IM","SC","Buccale","IN","Nébulisation","PO"], key="re_5b_voie")
+            CHECKLIST_5B(medicament=_med_5b, dose=_dose_5b, voie=_voie_5b,
+                         poids=poids, uid=SS.uid_cur or SS.uid)
             DISC()
 
-        with ST[1]:
-            reg = charger_registre()
-            if reg:
-                CARD("Statistiques session", "")
-                s1, s2, s3 = st.columns(3)
-                s1.metric("Patients", len(reg))
-                s2.metric("Critiques (Tri M/1/2)",
-                           sum(1 for r in reg if r.get("niv") in ("M","1","2")))
-                s3.metric("NEWS2 moyen",
-                           round(sum(r.get("n2",0) for r in reg) / len(reg), 1))
+        with _ST[1]:
+            _reg = charger_registre()
+            if _reg:
+                CARD("Session — Statistiques", "")
+                _rs1, _rs2, _rs3 = st.columns(3)
+                _rs1.metric("Patients", len(_reg))
+                _rs2.metric("Critiques", sum(1 for r in _reg if r.get("niv") in ("M","1","2")))
+                _rs3.metric("NEWS2 moyen", round(sum(r.get("n2",0) for r in _reg)/max(1,len(_reg)),1))
                 CARD_END()
 
-            CARD("Registre session (RGPD — anonyme)", "")
-            if not reg:
-                st.info("Aucun patient enregistré dans cette session")
+            CARD("Registre RGPD anonyme", "")
+            if not _reg:
+                st.info("Aucun patient dans cette session")
             else:
-                for r in reg[:20]:
-                    c = st.columns([1, 3, 1, 1])
-                    c[0].caption(r.get("heure","")[-5:])
-                    c[1].write(r.get("motif",""))
-                    c[2].write(f"**Tri {r.get('niv','')}**")
-                    c[3].caption(r.get("uid",""))
+                for _r in _reg[:20]:
+                    _rc = st.columns([1,3,1,1])
+                    _rc[0].caption((_r.get("heure","") or "")[-5:])
+                    _rc[1].write(_r.get("motif",""))
+                    _rc[2].write(f"**Tri {_r.get('niv','')}**")
+                    _rc[3].caption(_r.get("uid",""))
             CARD_END()
 
-            CARD("Export RGPD", "")
-            if reg:
-                out = io.StringIO()
-                w   = csv_mod.writer(out)
-                w.writerow(["uid","heure","motif","niv","n2","fc","pas",
-                             "spo2","fr","temp","gcs","op"])
-                for r in reg:
-                    w.writerow([r.get(k,"") for k in
-                                ["uid","heure","motif","niv","n2","fc","pas",
-                                 "spo2","fr","temp","gcs","op"]])
-                st.download_button(
-                    "📥 Télécharger CSV", data=out.getvalue(),
+            if _reg:
+                _out = io.StringIO()
+                _w = csv_mod.writer(_out)
+                _w.writerow(["uid","heure","motif","niv","n2","fc","pas","spo2","fr","temp","gcs","op"])
+                for _r in _reg:
+                    _w.writerow([_r.get(k,"") for k in ["uid","heure","motif","niv","n2","fc","pas","spo2","fr","temp","gcs","op"]])
+                st.download_button("📥 Export CSV", data=_out.getvalue(),
                     file_name=f"akir_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv", use_container_width=True)
-
-            if st.button("🔐 Vérifier intégrité audit", key=WK("audit_integrity"), use_container_width=True):
-                audit = audit_verifier_integrite()
-                AL(audit.get("message",""), "success" if audit.get("ok") else "danger")
-            CARD_END()
+            if st.button("🔐 Intégrité audit", key="audit_int", use_container_width=True):
+                _au = audit_verifier_integrite()
+                AL(_au.get("message",""), "success" if _au.get("ok") else "danger")
             DISC()
 
-        with ST[2]:
-            CARD("Transmission SBAR", "")
+        with _ST[2]:
             if not SS.niv:
-                AL("Calculer d'abord le triage (onglet Triage ou Tri Rapide)", "info")
+                AL("Calculer d'abord le triage (onglet ⚡ Triage)", "info")
             else:
-                sbar = build_sbar(
-                    age, SS.motif, SS.cat, atcd, alg, o2,
+                _sbar = build_sbar(age, SS.motif, SS.cat, atcd, alg, o2,
                     SS.v_temp, SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr, SS.v_gcs,
                     SS.eva, SS.v_news2, SS.niv, SS.just, SS.crit,
-                    SS.op or "IAO", SS.gl,
-                )
-                SBAR_RENDER(sbar)
-            CARD_END()
+                    SS.op or "IAO", SS.gl)
+                SBAR_RENDER(_sbar)
             DISC()
 
-except Exception as e:
-    st.error(f"🚨 Erreur critique dans l'application : {str(e)}")
-    st.error("Veuillez contacter le développeur ou redémarrer l'application.")
-    st.code(f"Traceback:\n{traceback.format_exc()}", language="text")
+except Exception as _e:
+    st.error(f"🚨 Erreur : {_e}")
+    st.code(traceback.format_exc(), language="text")
