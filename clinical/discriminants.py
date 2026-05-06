@@ -187,6 +187,33 @@ DISCRIMINANTS_ENRICHIS: dict = {
 }
 
 
+def _option_value(option):
+    if isinstance(option, (list, tuple)) and option:
+        return option[0]
+    return option
+
+
+def _option_label(value, options):
+    for option in options:
+        if isinstance(option, (list, tuple)) and option:
+            label = option[1] if len(option) > 1 else option[0]
+            if option[0] == value:
+                return label
+        elif option == value:
+            return option
+    return value
+
+
+def _default_bool(question: dict) -> bool:
+    auto = question.get("auto")
+    if callable(auto) and st is not None:
+        try:
+            return bool(auto(st.session_state))
+        except Exception:
+            return False
+    return bool(question.get("default", False))
+
+
 def process_answers(motif: str, answers: dict) -> dict:
     """
     Transforme les réponses aux discriminants enrichis en un dict compatible
@@ -204,11 +231,13 @@ def process_answers(motif: str, answers: dict) -> dict:
         if val is None:
             continue
 
-        if q["type"] == "bool":
+        qtype = q.get("type")
+
+        if qtype == "bool":
             if dk:
                 stored = q.get("true_val", True) if val else q.get("false_val", False)
                 det_updates[dk] = stored
-        elif q["type"] == "select":
+        elif qtype in ("select", "radio"):
             mapping = q.get("mapping") or {}
             if dk:
                 det_updates[dk] = mapping.get(val, val)
@@ -217,12 +246,16 @@ def process_answers(motif: str, answers: dict) -> dict:
                 det_updates["deshydrat_legere"]   = val == "legere"
                 det_updates["deshydrat_moderee"]  = val == "moderee"
                 det_updates["deshydrat_severe"]   = val == "severe"
-        elif q["type"] == "number":
+        elif qtype == "number":
             if dk:
                 try:
                     det_updates[dk] = float(val)
                 except (TypeError, ValueError):
                     pass
+        elif qtype == "text":
+            text = str(val).strip()
+            if dk and text:
+                det_updates[dk] = text
 
     return det_updates
 
@@ -243,23 +276,41 @@ def render_discriminants_enrichis(motif: str, key_prefix: str = "disc") -> dict:
     answers: dict = {}
     for q in questions:
         qid = q["id"]
-        if q["type"] == "bool":
-            answers[qid] = st.checkbox(q["text"], key=f"{key_prefix}_{qid}")
-        elif q["type"] == "select":
+        qtype = q.get("type")
+        if qtype == "bool":
+            answers[qid] = st.checkbox(q["text"], value=_default_bool(q), key=f"{key_prefix}_{qid}")
+        elif qtype == "select":
             opts = q["options"]
+            values = [_option_value(o) for o in opts]
             answers[qid] = st.selectbox(
                 q["text"],
-                options=[o[0] for o in opts],
-                format_func=lambda v, opts=opts: next((lbl for k, lbl in opts if k == v), v),
+                options=values,
+                format_func=lambda v, opts=opts: _option_label(v, opts),
                 key=f"{key_prefix}_{qid}",
             )
-        elif q["type"] == "number":
+        elif qtype == "radio":
+            opts = q["options"]
+            values = [_option_value(o) for o in opts]
+            answers[qid] = st.radio(
+                q["text"],
+                options=values,
+                format_func=lambda v, opts=opts: _option_label(v, opts),
+                key=f"{key_prefix}_{qid}",
+                horizontal=True,
+            )
+        elif qtype == "number":
             answers[qid] = st.number_input(
                 q["text"],
                 min_value=q.get("min", 0.0),
                 max_value=q.get("max", 100.0),
                 value=q.get("default", 0.0),
                 step=0.5,
+                key=f"{key_prefix}_{qid}",
+            )
+        elif qtype == "text":
+            answers[qid] = st.text_input(
+                q["text"],
+                value=str(q.get("default", "")),
                 key=f"{key_prefix}_{qid}",
             )
     return answers
