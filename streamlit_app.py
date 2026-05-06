@@ -1,4 +1,4 @@
-# streamlit_app.py — AKIR-IAO v19.0 — Système Expert Grade Hospitalier
+# streamlit_app.py — AKIR-IAO v20 — Système Expert Grade Hospitalier
 # Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
 # UX refonte : "One-screen workflow" — confort IAO urgences — Mobile-first
 
@@ -22,6 +22,14 @@ from clinical.scores import (
     calculer_wells_tvp, calculer_wells_ep, calculer_nihss,
     calculer_sofa_partiel, calculer_curb65,
     regle_ottawa_cheville, regle_canadian_ct,
+    calculer_abcd2, calculer_perc, calculer_grace,
+    calculer_ciwa, calculer_pews,
+    calculer_nihss_rapide, calculer_pram,
+    calculer_croup, poids_estime_enfant,
+    surface_corporelle_mosteller, terme_naegele,
+    calculer_pss, identifier_toxidrome, evaluer_paracetamol_intox,
+    evaluer_tricycliques_ecg, calculer_toxic2,
+    TOXIDROMES, PSS_CRITERES,
 )
 from clinical.vitaux import si, sipa
 from clinical.perfusion import (
@@ -51,7 +59,19 @@ from ui.eva_pqrst import (
     EVA_WIDGET_COMPLET, SCHEMA_BRULURES, QUESTIONS_AVANCEES,
     CHECKLIST_5B, COURBE_VITAUX, PRESCRIPTIONS_ANTICIPEES,
 )
+# clinical/mug.py retiré (dead code — onglet MUG abandonné)
+from clinical.tools import (
+    calculer_rsi, calculer_recharge_volemique, broselow,
+    convertir_opioides, corriger_natrémie, calculer_dfge,
+    code_stroke_delais, joules_defibrillateur, calculer_blatchford,
+    RSI_AGENTS, CURARES_RSI, OPIOIDES_RATIO_IV,
+)
 from persistence.registry import enregistrer_patient, charger_registre
+from akir_iao_enhancements import (
+    gcs_visual_scale, borg_visual_scale, cam_icu_visual,
+    section_dilutions_hainaut, calculateur_noradrenaline,
+    section_fiches_medicaments,
+)
 from persistence.audit import audit_verifier_integrite
 from ui.styles import load_css
 from ui.components import (
@@ -71,6 +91,7 @@ _defaults = {
     "t_arr": None, "t_cont": None, "t_reev": None,
     "v_temp": 37.0, "v_fc": 80, "v_pas": 120,
     "v_spo2": 98, "v_fr": 16, "v_gcs": 15,
+    "gcs_y": 4, "gcs_v": 5, "gcs_m": 6,
     "v_news2": 0, "v_bpco": False,
     "age": 45, "age_mois": 3, "poids": 70, "taille": 170,
     "alg": "", "o2": False, "atcd_other": [],
@@ -78,6 +99,7 @@ _defaults = {
     "niv": None, "just": "", "crit": "",
     "det": {}, "uid_cur": None,
     "histo": [], "reevs": [],
+    "timers": {},  # {"nom": datetime}
     "atcd": [], "atcd_checks": {}, "risk_checks": {}, "trt_checks": {},
     "tab_active": 0,
 }
@@ -277,10 +299,20 @@ with st.sidebar:
     if _sc2.button("👨‍⚕️ Contact", key="sb_cont", use_container_width=True):
         SS.t_cont = datetime.now()
     if SS.t_arr:
-        _el = (datetime.now() - SS.t_arr).total_seconds()
+        _el   = (datetime.now() - SS.t_arr).total_seconds()
         _m, _s = divmod(int(_el), 60)
-        _col = "#EF4444" if _el > 600 else ("#F59E0B" if _el > 300 else "#22C55E")
+        _col  = "#EF4444" if _el > 600 else ("#F59E0B" if _el > 300 else "#22C55E")
         H(f'<div style="text-align:center;font-family:monospace;font-size:2rem;font-weight:700;color:{_col};">{_m:02d}:{_s:02d}</div>')
+        # Chrono délai cible selon le niveau de triage actif
+        if SS.niv and SS.niv in DELAIS:
+            _del_sec = DELAIS[SS.niv] * 60
+            _reste   = _del_sec - _el
+            if _reste > 0:
+                _rm, _rs = divmod(int(_reste), 60)
+                H(f'<div style="text-align:center;font-size:.72rem;color:#22C55E;font-weight:600;margin-top:2px;">⏱ Délai Tri {SS.niv} : {_rm:02d}:{_rs:02d} restant</div>')
+            else:
+                _dm, _ds = divmod(int(-_reste), 60)
+                H(f'<div style="text-align:center;font-size:.72rem;color:#EF4444;font-weight:800;margin-top:2px;">⚠️ DÉLAI TRI {SS.niv} DÉPASSÉ {_dm:02d}:{_ds:02d}</div>')
     if SS.niv:
         st.divider()
         _css = TCSS.get(SS.niv, "tri-3B")
@@ -305,17 +337,15 @@ def _sticky_bar():
         _el2 = (datetime.now() - SS.t_arr).total_seconds()
         _m2, _s2 = divmod(int(_el2), 60)
         _timer_txt = f"⏱ {_m2:02d}:{_s2:02d}"
-    _badges = [f'<span class="sticky-badge badge-age">👤 {_age_txt} — {poids:.0f} kg</span>']
-    if _atcd_n:
-        _badges.append(f"<span class='sticky-badge badge-atcd'>⚕️ {_atcd_n} ATCD</span>")
-    if alg:
-        _badges.append(f"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 {alg}</span>")
-    _badges.append(f'<span class="sticky-badge badge-triage {_niv_css}" style="font-size:.7rem;">{_niv_txt}</span>')
-    if SS.v_news2 >= 5:
-        _badges.append(f"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>")
-    if _timer_txt:
-        _badges.append(f"<span class='badge-chrono'>{_timer_txt}</span>")
-    H('<div class="sticky-bar">' + "".join(_badges) + "</div>")
+    H(f"""<div class="sticky-bar">
+      <span class="sticky-badge badge-age">👤 {_age_txt} — {poids:.0f} kg</span>
+      {"<span class='sticky-badge badge-atcd'>⚕️ " + str(_atcd_n) + " ATCD</span>" if _atcd_n else ""}
+      {"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 " + alg + "</span>" if alg else ""}
+      <span class="sticky-badge badge-triage {_niv_css}" style="font-size:.72rem;">{_niv_txt}</span>
+      {("<span class='sticky-badge' style='color:#38BDF8;border-color:#7DD3FC;background:#EFF6FF;font-size:.72rem;'>" + str(len(SS.reevs)) + " réév.</span>") if SS.reevs else ""}
+      {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>" if SS.v_news2 >= 5 else ""}
+      {"<span class='badge-chrono'>" + _timer_txt + "</span>" if _timer_txt else ""}
+    </div>""")
 
 
 try:
@@ -342,6 +372,7 @@ try:
         "⚡ Triage",
         "💊 Pharmacie",
         "🧬 Scores",
+        "🛠️ Outils",
         "📋 Suivi",
     ])
 
@@ -351,7 +382,7 @@ try:
     # ═══════════════════════════════════════════════════════════════════════════
     with T[0]:
         H('<div style="background:linear-gradient(135deg,#004A99,#0069D9);color:#fff;border-radius:10px;padding:12px 16px;margin-bottom:12px;">'
-          '<div style="font-size:.65rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Renseigner en premier</div>'
+          '<div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Renseigner en premier</div>'
           '<div style="font-size:1rem;font-weight:700;">Profil patient</div></div>')
 
         # Opérateur
@@ -387,6 +418,15 @@ try:
             elif imc < 30.0: AL(f"IMC {imc} — Surpoids", "info")
             elif imc < 40.0: AL(f"IMC {imc} — Obésité", "warning")
             else:             AL(f"IMC {imc} — Obésité morbide ≥ 40", "danger")
+            # Poids idéal théorique (Devine 1974) — important pour dosage opioïdes/BZD
+            _pit = poids_ideal_theorique(taille, SS.get("sexe","H"))
+            if _pit and imc >= 30:
+                _pit_diff = poids - _pit
+                H(f'<div style="background:#1E293B;border-radius:6px;padding:6px 12px;margin:4px 0;'
+                  f'font-size:.72rem;color:#94A3B8;">'
+                  f'💊 Poids idéal (Devine 1974) : <strong style="color:#38BDF8;">{_pit:.0f} kg</strong> '
+                  f'(+{_pit_diff:.0f} kg réels) — '
+                  f'<strong style="color:#F59E0B;">Doses opioïdes/BZD sur PIT</strong></div>')
 
         st.divider()
 
@@ -440,6 +480,17 @@ try:
         _o2  = st.checkbox("💨 O₂ supplémentaire à l'admission", key=WK("pt_o2"))
         _other = st.multiselect("Autres ATCD", [a for a in ATCD if a not in list(_atcd_checks.keys())],
                                 key="pt_atcd_other")
+        st.divider()
+        H('<div class="card-title">⚖️ Fragilité — Clinical Frailty Scale (Rockwood 2005)</div>')
+        _cfs_n = st.select_slider("CFS", options=list(range(1,10)), value=1,
+            key=WK("pt_cfs"),
+            format_func=lambda x: {1:"1–Très robuste",2:"2–En forme",3:"3–Bien portant",
+                4:"4–Vulnérable",5:"5–Fragile léger",6:"6–Fragile modéré",
+                7:"7–Fragile sévère",8:"8–Très fragile",9:"9–Fin de vie"}[x])
+        if _cfs_n >= 7:
+            AL(f"CFS {_cfs_n} — Fragilité sévère — Triage majoré automatiquement (worst-case)", "warning")
+        elif _cfs_n >= 5:
+            AL(f"CFS {_cfs_n} — Fragilité modérée — Adapter doses et surveillance", "info")
 
         # Consolidation SS
         _all = {**_atcd_checks, **_risk_checks, **_trt_checks}
@@ -449,6 +500,7 @@ try:
         SS["trt_checks"]  = _trt_checks
         SS["alg"]         = _alg
         SS["o2"]          = _o2
+        SS.det = {**(SS.det or {}), "cfs_score": _cfs_n}
         atcd = SS["atcd"]; alg = SS["alg"]; o2 = SS["o2"]
         atcd_checks = _atcd_checks; risk_checks = _risk_checks; trt_checks = _trt_checks
 
@@ -481,7 +533,6 @@ try:
         else:
             st.success("✅ Aucune alerte pharmacovigilance")
 
-        DISC()
 
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -522,6 +573,10 @@ try:
         SS.v_temp = _vc5.number_input("T° (°C)",    30.0, 45.0, float(SS.v_temp), 0.1, key="tr_t")
         SS.v_gcs  = _vc6.number_input("GCS (3-15)",  3,  15, int(SS.v_gcs),        key="tr_gcs")
 
+        # ── GCS détaillé — sous-scores visuels ────────────────────────────
+        with st.expander("🧠 GCS détaillé par sous-scores", expanded=False):
+            gcs_visual_scale()
+
         SS.v_bpco = st.checkbox("BPCO — utiliser SpO2 cible 88-92 %", key=WK("tr_bp"),
                                  value=bool(SS.v_bpco or "BPCO" in atcd))
         if SS.v_bpco:
@@ -530,13 +585,46 @@ try:
         # NEWS2 calculé en temps réel
         _n2 = _n2()
 
+        # ── PEWS — score pédiatrique si âge < 16 ans ──────────────────────
+        if age < 16 and age > 0:
+            _pews_s, _pews_al, _pews_md = calculer_pews(
+                fc=SS.v_fc, fr=SS.v_fr, spo2=SS.v_spo2, gcs=SS.v_gcs,
+                temp=SS.v_temp, age_ans=age, supp_o2=o2)
+            _pews_m   = pews_meta(_pews_s)
+            _pews_col = _pews_m["color"]
+            _pews_n   = seuils_normaux_ped(age)
+            H(f'''<div style="background:{_pews_col}18;border:2px solid {_pews_col};
+                border-radius:10px;padding:12px 16px;margin:8px 0;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                  <div style="font-size:.72rem;color:#64748B;text-transform:uppercase;letter-spacing:.08em;">
+                    PEWS — Pédiatrie {_pews_n["label"]}
+                  </div>
+                  <div style="font-size:1.5rem;font-weight:900;color:{_pews_col};">{_pews_s}/9</div>
+                  <div style="font-size:.75rem;color:{_pews_col};font-weight:700;">{_pews_m["reco"]}</div>
+                </div>
+                <div style="text-align:right;font-size:.68rem;color:#64748B;line-height:1.6;">
+                  <div>FC : {_pews_n["fc"][0]}-{_pews_n["fc"][1]} bpm</div>
+                  <div>FR : {_pews_n["fr"][0]}-{_pews_n["fr"][1]} /min</div>
+                  <div>SpO2 ≥ {_pews_n["spo2_min"]} %</div>
+                </div>
+              </div>
+            </div>''')
+            for _pa in _pews_al:
+                AL(_pa, "danger" if _pews_s >= 5 else "warning")
+            if _pews_md.get("fc_anormale"):
+                AL(f"FC {SS.v_fc:.0f} bpm hors norme pour {_pews_n['label']} (attendu {_pews_n['fc'][0]}-{_pews_n['fc'][1]})", "warning")
+            if _pews_md.get("spo2_anormale"):
+                AL(f"SpO2 {SS.v_spo2:.0f}% < cible {_pews_n['spo2_min']}% pour cet âge", "warning")
+            H('<div style="font-size:.72rem;color:#94A3B8;margin:-4px 0 6px;">NEWS2 non validé avant 16 ans — PEWS utilisé (Monaghan 2005)</div>')
+
         # Affichage NEWS2 inline avec code couleur
         _n2_color = "#7C3AED" if _n2 >= 9 else "#EF4444" if _n2 >= 7 else "#F59E0B" if _n2 >= 5 else "#22C55E" if _n2 >= 1 else "#3B82F6"
         _n2_risk  = ("CRITIQUE — Déchocage" if _n2 >= 9 else
                      "ÉLEVÉ — Appel médecin immédiat" if _n2 >= 7 else
                      "MODÉRÉ — Surveillance rapprochée" if _n2 >= 5 else
                      "Faible — Surveillance standard" if _n2 >= 1 else "Stable")
-        _bpco_sub = ('<div style="font-size:.65rem;color:#64748B;">Echelle SpO2-2 (BPCO)</div>' if SS.v_bpco else '')
+        _bpco_sub = ('<div style="font-size:.72rem;color:#64748B;">Echelle SpO2-2 (BPCO)</div>' if SS.v_bpco else '')
         H(f'<div class="news2-inline">'
           f'<div class="news2-number" style="color:{_n2_color};">{_n2}</div>'
           f'<div><div class="news2-label">NEWS2 / 20</div>'
@@ -595,6 +683,16 @@ try:
             AL(f"EVA {SS.eva}/10 — Antalgie palier 2-3 à initier", "warning")
         elif SS.eva >= 2:
             AL(f"EVA {SS.eva}/10 — Antalgie palier 1 (paracétamol)", "info")
+
+        # ── Borg CR10 — affiché si dyspnée significative ─────────────────────
+        if SS.v_fr > 20 or SS.v_spo2 < 95:
+            st.divider()
+            borg_visual_scale()
+
+        # ── CAM-ICU — confusion aiguë ─────────────────────────────────────────
+        if age >= 75 or SS.v_gcs < 15:
+            st.divider()
+            cam_icu_visual()
 
         st.divider()
 
@@ -655,8 +753,85 @@ try:
 
         st.divider()
 
-        # ── BLOC F : CALCUL DU TRIAGE (bouton proéminent) ─────────────────────
-        if st.button("⚡ CALCULER LE TRIAGE", type="primary", use_container_width=True, key="tr_calc"):
+        # ── qSOFA bedside — temps réel pendant saisie vitaux ────────────────
+        if age >= 16:
+            _qs_fr  = int(SS.v_fr  or 16)
+            _qs_gcs = int(SS.v_gcs or 15)
+            _qs_pas = int(SS.v_pas or 120)
+            _qs_s   = int(_qs_fr >= 22) + int(_qs_gcs < 15) + int(_qs_pas <= 100)
+            _qs_col = "#EF4444" if _qs_s >= 2 else "#F59E0B" if _qs_s == 1 else "#22C55E"
+            H(f'''<div style="background:{_qs_col}15;border-left:4px solid {_qs_col};
+                border-radius:0 8px 8px 0;padding:7px 14px;margin:4px 0;
+                display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <span style="font-size:.78rem;font-weight:800;color:{_qs_col};">qSOFA {_qs_s}/3</span>
+                <span style="font-size:.72rem;color:#64748B;margin-left:8px;">
+                  {"⚠️ Sepsis suspecté — cultures + lactate + ATB < 1h" if _qs_s >= 2 else "Surveiller" if _qs_s == 1 else "Pas de sepsis suspecté"}
+                </span>
+              </div>
+              <div style="font-size:.68rem;color:#94A3B8;text-align:right;">
+                FR{"✓" if _qs_fr>=22 else "·"}&nbsp;GCS{"✓" if _qs_gcs<15 else "·"}&nbsp;PAS{"✓" if _qs_pas<=100 else "·"}
+              </div>
+            </div>''')
+
+        # ── BLOC F : Validation sécurité + calcul du triage ─────────────────
+        # Validation constantes vitales impossibles (artefacts / erreurs saisie)
+        _crit_err = []
+        if not (20 <= (SS.v_fc or 80) <= 250):
+            _crit_err.append(f"FC {SS.v_fc} bpm hors plage physiologique (20-250)")
+        if not (40 <= (SS.v_pas or 120) <= 300):
+            _crit_err.append(f"PAS {SS.v_pas} mmHg impossible")
+        if not (50 <= (SS.v_spo2 or 98) <= 100):
+            _crit_err.append(f"SpO2 {SS.v_spo2}% hors plage (50-100)")
+        if not (4 <= (SS.v_fr or 16) <= 70):
+            _crit_err.append(f"FR {SS.v_fr}/min impossible")
+        if not (30.0 <= (SS.v_temp or 37.0) <= 44.0):
+            _crit_err.append(f"T° {SS.v_temp}°C incompatible avec la vie")
+        for _ce in _crit_err:
+            AL(f"🚫 Valeur impossible : {_ce} — Corriger avant calcul", "danger")
+
+        # Alerte NEWS2 pré-calcul (si déjà calculé lors de la saisie)
+        if _n2 >= NEWS2_TRI_M:
+            H('''<div style="background:#7C3AED20;border:3px solid #7C3AED;border-radius:10px;
+                padding:12px 16px;margin:8px 0;display:flex;align-items:center;gap:12px;">
+              <div style="font-size:1.8rem;">🚨</div>
+              <div style="color:#7C3AED;font-weight:800;font-size:.9rem;">
+                NEWS2 {n2} ≥ {thresh} — ENGAGEMENT VITAL — APPEL MÉDECIN IMMÉDIAT
+              </div>
+            </div>'''.format(n2=_n2, thresh=NEWS2_TRI_M))
+        elif _n2 >= 5:
+            AL(f"⚠️ NEWS2 {_n2} ≥ 5 — Risque élevé — Appel médecin dans les 5 min", "warning")
+
+        # Alerte glycémie critique avant triage
+        if SS.gl is not None and SS.gl < 54:
+            if (SS.v_gcs or 15) <= 8:
+                H('''<div style="background:#7F1D1D;color:#FEE2E2;border-radius:8px;
+                    padding:12px 16px;margin:6px 0;font-weight:800;font-size:.85rem;">
+                  🔴 COMA HYPOGLYCÉMIQUE — GCS ≤ 8 + Glycémie {gl:.0f} mg/dl
+                  → GLUCOSE IV IMMÉDIAT — Tri M
+                </div>'''.format(gl=SS.gl))
+            else:
+                AL(f"🟠 Hypoglycémie sévère {SS.gl:.0f} mg/dl (< 3 mmol/l) — Glucose IV urgent", "danger")
+
+        # Tableau valeurs normales selon l'âge (avant validation)
+        if age > 0:
+            from clinical.news2 import seuils_normaux_ped
+            _sv = seuils_normaux_ped(age) if age < 16 else {
+                "label": f"{int(age)} ans", "fc": (50,100), "pas": (90,140),
+                "fr": (12,20), "spo2_min": 96}
+            with st.expander(f"📊 Valeurs normales — {_sv['label']}", expanded=False):
+                _col1, _col2, _col3, _col4 = st.columns(4)
+                def _badge(val, lo, hi, unit):
+                    ok = lo <= val <= hi if val else True
+                    c  = "#22C55E" if ok else "#EF4444"
+                    return f'<div style="font-size:.72rem;color:{c};font-weight:700;">{val or "?"} {unit}<br><span style="color:#64748B;font-weight:400;">({lo}-{hi})</span></div>'
+                _col1.markdown(_badge(SS.v_fc or 0, *_sv["fc"], "bpm"), unsafe_allow_html=True)
+                _col2.markdown(_badge(SS.v_pas or 0, *_sv["pas"], "mmHg"), unsafe_allow_html=True)
+                _col3.markdown(_badge(SS.v_fr or 0, *_sv["fr"], "/min"), unsafe_allow_html=True)
+                _col4.markdown(f'<div style="font-size:.72rem;">SpO2 ≥ {_sv["spo2_min"]}%<br><span style="color:{"#22C55E" if (SS.v_spo2 or 98) >= _sv["spo2_min"] else "#EF4444"};font-weight:700;">{SS.v_spo2 or "?"}%</span></div>', unsafe_allow_html=True)
+
+        if st.button("⚡ CALCULER LE TRIAGE", type="primary", use_container_width=True, key="tr_calc",
+                     disabled=bool(_crit_err)):
             SS.v_news2 = _n2
             SS.niv, SS.just, SS.crit = french_triage(
                 SS.motif, SS.det, SS.v_fc, SS.v_pas, SS.v_spo2,
@@ -668,6 +843,64 @@ try:
 
         # ── RÉSULTAT — toujours visible si calculé ────────────────────────────
         if SS.niv:
+            # ── Alerte motif psychiatrique / suicidaire ─────────────────────
+            if SS.motif and any(k in SS.motif.lower() for k in
+                    ("suicidaire","psychiatrique","intoxication")):
+                H('''<div style="background:#1E3A5F;border:2px solid #3B82F6;
+                    border-radius:10px;padding:12px 16px;margin:8px 0;">
+                  <div style="font-size:.82rem;font-weight:700;color:#93C5FD;">
+                    🔵 Évaluation psychiatrique requise
+                  </div>
+                  <div style="font-size:.72rem;color:#94A3B8;margin-top:4px;">
+                    • Rester avec le patient — ne pas laisser seul<br>
+                    • Retirer objets dangereux / médicaments accessibles<br>
+                    • Ligne de crise Belgique : <strong style="color:#93C5FD;">0800 / 32.123</strong> (gratuite 24h/24)<br>
+                    • CBP si intoxication : <strong style="color:#93C5FD;">070 / 245.245</strong>
+                  </div>
+                </div>''')
+
+            # ── Alerte NEWS2 critique (≥ 7) — bandeau proéminent ─────────────
+            if SS.v_news2 >= NEWS2_TRI_M:
+                H(f'''<div style="background:linear-gradient(135deg,#7C3AED,#6D28D9);
+                    color:white;border-radius:12px;padding:16px 20px;margin:10px 0;
+                    text-align:center;box-shadow:0 0 20px #7C3AED60;
+                    animation:pulse 1.5s ease-in-out infinite;">
+                  <div style="font-size:1.4rem;font-weight:900;letter-spacing:.05em;">
+                    🚨 NEWS2 {SS.v_news2} — APPEL MÉDICAL IMMÉDIAT 🚨
+                  </div>
+                  <div style="font-size:.78rem;margin-top:4px;opacity:.9;">
+                    Engagement vital — Déchocage — Monitorage continu
+                  </div>
+                </div>''')
+
+            # ── Worst-case terrain : explication si la règle a joué ──────────
+            if SS.crit and 'Worst-Case' in SS.crit:
+                H(f'''<div style="background:#78350F20;border-left:4px solid #F59E0B;
+                    border-radius:0 8px 8px 0;padding:10px 14px;margin:6px 0;">
+                  <div style="font-size:.72rem;font-weight:700;color:#F59E0B;">
+                    ⚠️ Terrain à risque — Niveau majoré automatiquement
+                  </div>
+                  <div style="font-size:.72rem;color:#94A3B8;margin-top:2px;">{SS.just}</div>
+                </div>''')
+
+            # ── Checklist actions immédiates ───────────────────────────────
+            _actions_imm = []
+            if SS.niv in ("M","1","2"):
+                _actions_imm.append("📞 Appeler le médecin (≤ 5 min pour Tri M/1)")
+                _actions_imm.append("📡 Monitorage continu — scope, SpO2, TA /5 min")
+            if SS.eva >= 4:
+                _actions_imm.append(f"💊 Antalgie — EVA {SS.eva}/10 → onglet Pharmacie")
+            if SS.motif and any(k in SS.motif for k in ("SCA","thoracique","coronaire")):
+                _actions_imm.append("❤️ ECG 18 dérivations + Troponines + Glycémie")
+            if SS.motif and "AVC" in SS.motif:
+                _actions_imm.append("🧠 Code Stroke — Glycémie + TDM cérébral urgent")
+            if SS.motif and "purpura" in SS.motif.lower():
+                _actions_imm.append("💉 Ceftriaxone 2g IV IMMÉDIAT — sans attendre")
+            if _actions_imm:
+                H('<div class="card-title" style="margin-top:10px;">✅ Actions immédiates</div>')
+                for _act_i, _act in enumerate(_actions_imm):
+                    st.checkbox(_act, key=WK(f"act_{_act_i}"))
+
             _css = TCSS.get(SS.niv, "tri-3B")
             _lbl = LABELS.get(SS.niv, f"TRI {SS.niv}")
             _sec = SECTEURS.get(SS.niv, "À définir")
@@ -685,7 +918,7 @@ try:
             _D, _A = verifier_coherence(
                 SS.v_fc, SS.v_pas, SS.v_spo2, SS.v_fr,
                 SS.v_gcs, SS.v_temp, SS.eva, SS.motif,
-                atcd, SS.det, SS.v_news2, SS.gl)
+                atcd, SS.det, SS.v_news2, SS.gl, age, SS.niv or "")
             for d in _D: AL(d, "danger")
             for a in _A: AL(a, "warning")
 
@@ -748,7 +981,6 @@ try:
                     SS.op or "IAO", SS.gl)
                 SBAR_RENDER(_sbar)
 
-        DISC()
 
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -758,22 +990,21 @@ try:
         _gl_ph = (SS.det.get("glycemie_mgdl") if isinstance(SS.det, dict) else None) or SS.gl
         _dose_mode = "mg/kg" if age < 15 else "adulte"
 
-        # Bandeau patient + alertes critiques
-        _pv_keys = [
-            _trt_checks.get("IMAO (inhibiteurs MAO)"),
-            atcd_checks.get("Insuffisance rénale chronique"),
-            trt_checks.get("Anticoagulants/AOD"),
-        ]
-        _pv_txt = ("⚠️ " + str(len([a for a in _pv_keys if a])) + " alerte(s)") if any(_pv_keys) else "✅ Pas d'alerte PV"
+        # Bandeau patient + PIT si obèse
+        _poids_eff, _pit_note = poids_dosage_opioides(poids, taille,
+            "H" if SS.get("pt_sex","Non précisé") == "Masculin" else "F")
+        _pit_label = f" — opioïdes : {_poids_eff:.0f} kg (PIT)" if _pit_note else ""
         H(f'<div style="background:linear-gradient(135deg,#004A99,#0069D9);color:#fff;'
           f'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;'
           f'justify-content:space-between;align-items:center;">'
-          f'<div><div style="font-size:.65rem;opacity:.75;">Doses pour</div>'
-          f'<div style="font-size:1.1rem;font-weight:800;">{poids:.0f} kg — {age:.0f} ans'
+          f'<div><div style="font-size:.72rem;opacity:.75;">Doses pour</div>'
+          f'<div style="font-size:1.1rem;font-weight:800;">{poids:.0f} kg — {age:.0f} ans{_pit_label}'
           f' <span style="font-size:.75rem;opacity:.7;">({_dose_mode})</span></div></div>'
           f'<div style="text-align:right;font-size:.7rem;opacity:.8;">'
-          f'{_pv_txt}'
+          f'{"⚠️ " + str(len([a for a in [_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")] if a])) + " alerte(s)" if any([_trt_checks.get("IMAO (inhibiteurs MAO)"), atcd_checks.get("Insuffisance rénale chronique"), trt_checks.get("Anticoagulants/AOD")]) else "✅ Pas d\'alerte PV"}'
           f'</div></div>')
+        if _pit_note:
+            AL(f"Obésité — {_pit_note}", "warning")
 
         # Alertes PV critiques en haut
         if _trt_checks.get("IMAO (inhibiteurs MAO)"):
@@ -788,7 +1019,9 @@ try:
 
         # ── Raccourcis médicaments (boutons rapides) ───────────────────────────
         H('<div class="card-title">⚡ Raccourcis — Doses immédiates</div>')
-        _rq1, _rq2, _rq3, _rq4, _rq5, _rq6 = st.columns(6)
+        # D-03 : Grille 6 → 2 rangées de 3 sur mobile via CSS responsive
+        _rq1, _rq2, _rq3 = st.columns(3)
+        _rq4, _rq5, _rq6 = st.columns(3)
         for _col, _name, _fn, _args in [
             (_rq1, "Para IV",     paracetamol,  (poids, age, atcd)),
             (_rq2, "Adrénaline",  adrenaline,   (poids, atcd)),
@@ -911,7 +1144,7 @@ try:
             _li, _lie = litican(poids, age, atcd)
             if not _lie:
                 H(f'<div class="rx-compact"><div class="rx-compact-dose">{(_li or {}).get("dose_mg",40):.0f} mg IM</div>'
-                  f'<div class="rx-compact-info"><div class="rx-compact-name">Litican® IM (Tiémonium)</div>'
+                  f'<div class="rx-compact-info"><div class="rx-compact-name">Litican® IV/IM (Alizapride)</div>'
                   f'<div class="rx-compact-detail">{(_li or {}).get("voie","")} — {(_li or {}).get("dose_note","")}</div></div></div>')
 
         # ── Urgences vitales ──────────────────────────────────────────────────
@@ -941,9 +1174,45 @@ try:
                 H(f'<div class="rx-compact urgent"><div class="rx-compact-dose">{(_nr or {}).get("dose",0.4)} mg IV</div>'
                   f'<div class="rx-compact-info"><div class="rx-compact-name">Naloxone IV (Narcan®)</div>'
                   f'<div class="rx-compact-detail">{(_nr or {}).get("admin","")}</div></div></div>')
+                # Bouton activation rappel re-narcose
+                if st.checkbox("✅ Naloxone administrée — Activer rappel re-narcose", key=WK("nalox_done")):
+                    SS["nalox_time"] = datetime.now()
+                    st.toast("⏱ Rappel réévaluation naloxone programmé (15 et 30 min)", icon="⚠️")
+            # Alertes temporisées re-narcose (demi-vie naloxone 45 min < morphine)
+            if SS.get("nalox_time"):
+                _mins_post_nalox = (datetime.now() - SS["nalox_time"]).total_seconds() / 60
+                if 13 <= _mins_post_nalox <= 20:
+                    H('<div style="background:#7F1D1D;color:#FEE2E2;border-radius:10px;padding:14px 16px;'
+                      'margin:8px 0;font-weight:800;font-size:.85rem;animation:pulse 1s infinite;">'
+                      f'🔴 RE-NARCOSE POSSIBLE — {_mins_post_nalox:.0f} min post-naloxone<br>'
+                      '<span style="font-weight:400;font-size:.75rem;">RÉÉVALUER FR / GCS / SpO2 MAINTENANT (demi-vie naloxone < morphine)</span>'
+                      '</div>')
+                elif 28 <= _mins_post_nalox <= 35:
+                    AL(f"⚠️ 30 min post-naloxone — Réévaluation obligatoire FR / GCS / SpO2", "warning")
 
             st.divider()
-            H('<div class="card-title">Sepsis bundle 1h (SSC 2021)</div>')
+            H('<div class="card-title">🦠 Sepsis bundle 1h — SSC 2021</div>')
+            st.caption("Surviving Sepsis Campaign 2021 — Evans L et al.")
+            if SS.v_news2 >= 5 or (SS.motif and "sepsis" in SS.motif.lower()):
+                AL("⚠️ qSOFA ≥ 2 ou NEWS2 ≥ 5 — Sepsis à exclure activement", "warning")
+            # Checklist avec horodatage
+            _sep_actions = [
+                ("Lactate ≥ 2 mmol/L : hémocultures × 2 avant ABX", "hemo"),
+                ("ABX large spectre IV dans les 60 min", "abx"),
+                ("Remplissage NaCl 0,9% ou Ringer 30 ml/kg si PAS < 90", "vol"),
+                ("Noradrénaline si PAM < 65 mmHg après remplissage", "nora"),
+                ("Oxygène cible SpO2 92-96%", "o2"),
+            ]
+            if "sep_times" not in SS: SS["sep_times"] = {}
+            for _sa_label, _sa_key in _sep_actions:
+                _sc1, _sc2 = st.columns([5,2])
+                _done = _sc1.checkbox(_sa_label, key=WK(f"sep_{_sa_key}"))
+                if _done and _sa_key not in SS["sep_times"]:
+                    SS["sep_times"][_sa_key] = datetime.now()
+                if _done and _sa_key in SS["sep_times"]:
+                    _dt = (datetime.now() - SS["sep_times"][_sa_key]).total_seconds()
+                    _dm, _ = divmod(int(_dt), 60)
+                    _sc2.caption(f"✅ il y a {_dm} min")
             _sblact = st.number_input("Lactate (mmol/l, 0=non dosé)", 0.0, 20.0, 0.0, 0.1, key="ph_sblact")
             _sb = sepsis_bundle_1h(SS.v_pas or 120, _sblact or None, SS.v_temp, SS.v_fc, poids, atcd) or {}
             if _sb.get("choc_septique"):
@@ -1080,10 +1349,42 @@ try:
         with _PH[5]:
             H(f'''<div style="background:linear-gradient(135deg,#0F172A,#1E3A5F);color:#fff;
                 border-radius:10px;padding:12px 16px;margin-bottom:12px;">
-              <div style="font-size:.65rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Calcul perfusion</div>
+              <div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Calcul perfusion</div>
               <div style="font-size:1.05rem;font-weight:800;">Patient : {poids:.0f} kg</div>
               <div style="font-size:.72rem;opacity:.75;margin-top:2px;">Concentrations standard Hainaut — BCFI Belgique</div>
             </div>''')
+
+            # ── Timer multi-médicaments ───────────────────────────────────────
+            H('<div class="card-title">⏱ Timers médicaments</div>')
+            st.caption("Horodatage des administrations — Alertes automatiques")
+            _tm_c1, _tm_c2 = st.columns([3,1])
+            _tm_nom = _tm_c1.text_input("Médicament / Action", placeholder="ex: Ceftriaxone IV, Naloxone, Paracétamol…", key=WK("tm_nom"))
+            if _tm_c2.button("▶ Démarrer", key=WK("tm_start"), use_container_width=True):
+                if _tm_nom.strip():
+                    SS["timers"] = SS.get("timers") or {}
+                    SS["timers"][_tm_nom.strip()] = datetime.now()
+            # Afficher les timers actifs
+            if SS.get("timers"):
+                for _tn, _ts in list(SS["timers"].items()):
+                    _elapsed = (datetime.now() - _ts).total_seconds()
+                    _em, _es = divmod(int(_elapsed), 60)
+                    _eh, _em2 = divmod(_em, 60)
+                    _timer_str = f"{_eh:02d}:{_em2:02d}:{_es:02d}" if _eh else f"{_em:02d}:{_es:02d}"
+                    _tc = "#EF4444" if _elapsed > 3600 else "#F59E0B" if _elapsed > 1800 else "#22C55E"
+                    _ta, _tb = st.columns([5, 1])
+                    H(f'<div style="background:#0F172A;border-left:4px solid {_tc};border-radius:0 6px 6px 0;'
+                      f'padding:6px 12px;margin:3px 0;display:flex;justify-content:space-between;align-items:center;">'
+                      f'<span style="font-size:.78rem;color:#E2E8F0;">{_tn}</span>'
+                      f'<span style="font-family:monospace;font-weight:700;color:{_tc};">{_timer_str}</span></div>')
+                    if _ta.button(f"🗑 {_tn[:15]}", key=WK(f"tm_del_{_tn[:12]}"), use_container_width=True):
+                        del SS["timers"][_tn]; st.rerun()
+            st.divider()
+
+            # ── Dilutions PSE Hainaut + Calculateur Noradrénaline ───────────────
+            with st.expander("📊 Dilutions standard Hainaut + Calculateur Noradrénaline", expanded=True):
+                section_dilutions_hainaut()
+                st.divider()
+                calculateur_noradrenaline(poids_defaut=float(poids))
 
             # ── Aide-mémoire rapide ────────────────────────────────────────────
             st.markdown("**Choisir la perfusion à calculer :**")
@@ -1113,24 +1414,24 @@ try:
                     _items = "".join(f'<div style="font-size:.72rem;color:#94A3B8;margin:2px 0;">• {d}</div>' for d in p["details"])
                     _details_html = f'<div style="border-top:1px solid #1E293B;margin-top:10px;padding-top:8px;">{_items}</div>'
                 H(f'''<div style="background:#0F172A;border:1.5px solid #334155;border-radius:10px;padding:14px 18px;margin:10px 0;">
-                  <div style="font-size:.65rem;color:#64748B;text-transform:uppercase;letter-spacing:.1em;">{p.get("label","")}</div>
+                  <div style="font-size:.72rem;color:#64748B;text-transform:uppercase;letter-spacing:.1em;">{p.get("label","")}</div>
                   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;">
                     <div style="text-align:center;">
                       <div style="font-size:2rem;font-weight:900;color:#38BDF8;font-family:\'IBM Plex Mono\',monospace;">{p.get("debit_mlh",0)}</div>
-                      <div style="font-size:.65rem;color:#64748B;">ml/h</div></div>
+                      <div style="font-size:.72rem;color:#64748B;">ml/h</div></div>
                     <div style="text-align:center;">
                       <div style="font-size:2rem;font-weight:900;color:#A78BFA;font-family:\'IBM Plex Mono\',monospace;">{int(p.get("gttes_min",0))}</div>
-                      <div style="font-size:.65rem;color:#64748B;">gttes/min</div></div>
+                      <div style="font-size:.72rem;color:#64748B;">gttes/min</div></div>
                     <div style="text-align:center;">
                       <div style="font-size:1.3rem;font-weight:900;color:#4ADE80;font-family:\'IBM Plex Mono\',monospace;">{p.get("conc_mgml",0)}</div>
-                      <div style="font-size:.65rem;color:#64748B;">mg/ml</div></div>
+                      <div style="font-size:.72rem;color:#64748B;">mg/ml</div></div>
                   </div>
                   <div style="border-top:1px solid #1E293B;margin-top:12px;padding-top:10px;">
                     <div style="font-size:.7rem;color:#94A3B8;margin-bottom:6px;font-weight:600;">DILUTION :</div>
                     <div style="font-size:.75rem;color:#CBD5E1;">{p.get("dilution","")}</div>
                   </div>
                   {_details_html}
-                  <div style="font-size:.6rem;color:#475569;margin-top:8px;font-style:italic;">{p.get("ref","")}</div>
+                  <div style="font-size:.72rem;color:#475569;margin-top:8px;font-style:italic;">{p.get("ref","")}</div>
                 </div>''')
                 for _am, _ac in p.get("alerts", []):
                     AL(_am, _ac)
@@ -1214,13 +1515,13 @@ try:
                 _cv_res = convertir_debit(_cv_debit, _cv_conc, _cv_poids)
                 H(f'''<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin:6px 0;">
                   <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
-                    <div><div style="font-size:.6rem;color:#64748B;">Dose mg/h</div>
+                    <div><div style="font-size:.72rem;color:#64748B;">Dose mg/h</div>
                       <div style="font-size:1.1rem;font-weight:700;color:#004A99;">{_cv_res["dose_mg_h"]:.3f} mg/h</div></div>
-                    <div><div style="font-size:.6rem;color:#64748B;">mg/kg/h</div>
+                    <div><div style="font-size:.72rem;color:#64748B;">mg/kg/h</div>
                       <div style="font-size:1.1rem;font-weight:700;color:#004A99;">{_cv_res["dose_mg_kg_h"]:.4f} mg/kg/h</div></div>
-                    <div><div style="font-size:.6rem;color:#64748B;">µg/kg/min</div>
+                    <div><div style="font-size:.72rem;color:#64748B;">µg/kg/min</div>
                       <div style="font-size:1.1rem;font-weight:700;color:#7C3AED;">{_cv_res["dose_ug_kg_min"]:.3f} µg/kg/min</div></div>
-                    <div><div style="font-size:.6rem;color:#64748B;">Gttes/min (20 gttes/ml)</div>
+                    <div><div style="font-size:.72rem;color:#64748B;">Gttes/min (20 gttes/ml)</div>
                       <div style="font-size:1.1rem;font-weight:700;color:#16A34A;">{int(_cv_debit*20/60)} gttes/min</div></div>
                   </div>
                 </div>''')
@@ -1230,23 +1531,25 @@ try:
                 _cv_calc  = calculer_debit(_cv_dose2, _cv_conc)
                 H(f'''<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:12px;margin:6px 0;">
                   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-                    <div><div style="font-size:.6rem;color:#166534;">Débit ml/h</div>
+                    <div><div style="font-size:.72rem;color:#166534;">Débit ml/h</div>
                       <div style="font-size:1.3rem;font-weight:800;color:#166534;">{_cv_calc["debit_mlh"]:.1f} ml/h</div></div>
-                    <div><div style="font-size:.6rem;color:#166534;">Gttes/min adulte (×20)</div>
+                    <div><div style="font-size:.72rem;color:#166534;">Gttes/min adulte (×20)</div>
                       <div style="font-size:1.3rem;font-weight:800;color:#166534;">{int(_cv_calc["gttes_min_adulte"])} gttes/min</div></div>
-                    <div><div style="font-size:.6rem;color:#166534;">Microgottes/min (×60)</div>
+                    <div><div style="font-size:.72rem;color:#166534;">Microgottes/min (×60)</div>
                       <div style="font-size:1.3rem;font-weight:800;color:#166534;">{int(_cv_calc["gttes_min_ped"])} µgttes/min</div></div>
                   </div>
                 </div>''')
 
-        DISC()
+        # ── Pharmacopée locale Hainaut ─────────────────────────────────────────
+        section_fiches_medicaments()
+
 
 
     # ═══════════════════════════════════════════════════════════════════════════
     # ONGLET 3 — SCORES CLINIQUES
     # ═══════════════════════════════════════════════════════════════════════════
     with T[3]:
-        _SC = st.tabs(["Cardio / Neuro", "Infectio / Respi", "Imagerie"])
+        _SC = st.tabs(["Cardio / Neuro", "Infectio / Respi", "Imagerie", "Neuro Spéc.", "Pédia / Sevrage", "☠️ Toxicologie"])
 
         with _SC[0]:
             _sl, _sr = st.columns(2)
@@ -1307,7 +1610,7 @@ try:
                     _tisv  = _tires.get("score_val") or 0
                     _ticol = "#EF4444" if _tisv >= 5 else "#F59E0B" if _tisv >= 3 else "#22C55E"
                     H(f'<div style="background:#1E293B;border-radius:8px;padding:12px;text-align:center;margin:8px 0;">'
-                      f'<div style="font-size:.6rem;color:#64748B;text-transform:uppercase;">TIMI</div>'
+                      f'<div style="font-size:.72rem;color:#64748B;text-transform:uppercase;">TIMI</div>'
                       f'<div style="font-size:2.2rem;font-weight:900;color:{_ticol};">{_tisv}/7</div>'
                       f'<div style="font-size:.72rem;color:#94A3B8;">{_tires.get("interpretation","")}</div>'
                       f'</div>')
@@ -1388,13 +1691,765 @@ try:
                 AL(_ccres.get("recommendation",""), "info")
                 CARD_END()
 
-        DISC()
+        # ── SC[3] NEURO SPÉCIALISÉS ──────────────────────────────────────────────
+        with _SC[3]:
+            _n1, _n2c = st.columns(2)
+            with _n1:
+                CARD("ABCD2 — Risque AVC après AIT", "")
+                st.caption("Johnston SC et al., Lancet 2007")
+                AL("Applicable après tout déficit neurologique transitoire", "info")
+                _ab1, _ab2 = st.columns(2)
+                _ab_age  = _ab1.checkbox("Âge ≥ 60 ans", key=WK("ab_age"), value=age >= 60)
+                _ab_hta  = _ab2.checkbox("HTA / PAS ≥ 140", key=WK("ab_hta"))
+                _ab_diab = _ab1.checkbox("Diabète", key=WK("ab_diab"))
+                _ab_type = st.radio("Symptôme dominant",
+                    ["autre", "trouble_parole", "hemiplegie"],
+                    format_func=lambda x: {"autre":"Autre","trouble_parole":"Trouble parole","hemiplegie":"Hémiplégie"}[x],
+                    horizontal=True, key=WK("ab_type"))
+                _ab_dur = st.number_input("Durée symptômes (min)", 0, 1440, 0, 1, key="ab_dur")
+                _ab_res = calculer_abcd2(_ab_age, _ab_hta, _ab_type, float(_ab_dur), _ab_diab)
+                _ab_v = _ab_res.get("score_val") or 0
+                _ab_col = "#EF4444" if _ab_v >= 4 else "#F59E0B" if _ab_v >= 3 else "#22C55E"
+                H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;text-align:center;margin:8px 0;"><div style="font-size:.72rem;color:#64748B;">ABCD2</div><div style="font-size:2.2rem;font-weight:900;color:{_ab_col};">{_ab_v}/7</div></div>')
+                AL(_ab_res.get("interpretation",""), "danger" if _ab_v >= 4 else "warning" if _ab_v >= 3 else "success")
+                AL(_ab_res.get("recommendation",""), "info")
+                CARD_END()
+
+            with _n2c:
+                CARD("PERC Rule — Exclusion EP sans D-Dimères", "")
+                st.caption("Kline JA et al., J Thromb Haemost 2004")
+                AL("Valide SEULEMENT si Wells EP ≤ 1 et probabilité < 15 %", "warning")
+                _pr1, _pr2 = st.columns(2)
+                _p_age = _pr1.checkbox("Âge > 50 ans",       key=WK("perc_age"), value=age > 50)
+                _p_fc  = _pr2.checkbox("FC > 100/min",        key=WK("perc_fc"),  value=(SS.v_fc or 80) > 100)
+                _p_sp  = _pr1.checkbox("SpO2 < 95 %",         key=WK("perc_sp"),  value=(SS.v_spo2 or 98) < 95)
+                _p_he  = _pr2.checkbox("Hémoptysie",          key=WK("perc_he"))
+                _p_op  = _pr1.checkbox("Oestroprogestatifs",  key=WK("perc_oe"))
+                _p_ch  = _pr2.checkbox("Chir/trauma < 4 sem",key=WK("perc_ch"))
+                _p_at  = _pr1.checkbox("ATCD TVP/EP",         key=WK("perc_at"))
+                _p_oo  = _pr2.checkbox("Œdème unilatéral",   key=WK("perc_oo"))
+                _pr_res = calculer_perc(_p_age, _p_fc, _p_sp, _p_he, _p_op, _p_ch, _p_at, _p_oo)
+                _pv = _pr_res.get("score_val") or 0
+                AL(_pr_res.get("interpretation",""), "success" if _pv == 0 else "danger")
+                AL(_pr_res.get("recommendation",""), "info")
+                CARD_END()
+
+            CARD("GRACE Score — SCA pronostic (complément HEART/TIMI)", "")
+            st.caption("Eagle KA et al., JAMA 2004")
+            _gc1, _gc2, _gc3, _gc4 = st.columns(4)
+            _gr_cr  = _gc1.number_input("Créatinine (µmol/l)", 0, 2000, 90, key="gr_cr")
+            _gr_kp  = _gc2.select_slider("Killip", [1,2,3,4], key="gr_kp",
+                format_func=lambda x:{1:"I–Pas IC",2:"II–Râles",3:"III–OAP",4:"IV–Choc"}[x])
+            _gr_ac  = _gc3.checkbox("Arrêt cardiaque",   key=WK("gr_ac"))
+            _gr_st  = _gc4.checkbox("Déviation ST",      key=WK("gr_st"))
+            _gr_enz = _gc3.checkbox("Enzymes positives", key=WK("gr_enz"))
+            _gr_res = calculer_grace(age, SS.v_fc or 80, SS.v_pas or 120,
+                float(_gr_cr), _gr_ac, _gr_st, _gr_enz, int(_gr_kp))
+            _gv = _gr_res.get("score_val") or 0
+            _gc = "#EF4444" if _gv >= 140 else "#F59E0B" if _gv >= 109 else "#22C55E"
+            H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;display:flex;align-items:center;gap:16px;margin:8px 0;"><div style="text-align:center;min-width:80px;"><div style="font-size:.72rem;color:#64748B;">GRACE</div><div style="font-size:2.2rem;font-weight:900;color:{_gc};">{_gv}</div></div><div style="font-size:.78rem;color:#94A3B8;flex:1;">{_gr_res.get("interpretation","")}</div></div>')
+            AL(_gr_res.get("recommendation",""), "danger" if _gv >= 140 else "warning" if _gv >= 109 else "info")
+            CARD_END()
+
+
+            # ── NIHSS Simplifié 5 items (AVC) ───────────────────────────────────
+            CARD("NIHSS rapide — Déficit neurologique AVC (5 items)", "")
+            st.caption("Schiemanck SK et al., Cerebrovasc Dis 2006 | r = 0,89 avec NIHSS complet")
+            AL("Score ≥ 1 + délai < 4,5h → évaluer thrombolyse — Code Stroke immédiat", "warning")
+            _nh1, _nh2 = st.columns(2)
+            _ni_cons = _nh1.select_slider(
+                "Conscience (0-3)",
+                options=[0,1,2,3],
+                format_func=lambda x:{0:"0–Normal",1:"1–Somnolent",2:"2–Stuporeux",3:"3–Coma"}[x],
+                key=WK("ni_cons"))
+            _ni_reg  = _nh2.checkbox("Déviation conjuguée du regard", key=WK("ni_reg"))
+            _ni_fac  = _nh1.select_slider(
+                "Paralysie faciale (0-3)",
+                options=[0,1,2,3],
+                format_func=lambda x:{0:"0–Normal",1:"1–Légère",2:"2–Partielle",3:"3–Complète"}[x],
+                key=WK("ni_fac"))
+            _ni_mot  = _nh2.select_slider(
+                "Moteur bras (0-4)",
+                options=[0,1,2,3,4],
+                format_func=lambda x:{0:"0–Normal",1:"1–Dérive",2:"2–↓Gravité",3:"3–Aucun mvt",4:"4–Plégie"}[x],
+                key=WK("ni_mot"))
+            _ni_lan  = _nh1.select_slider(
+                "Langage (0-3)",
+                options=[0,1,2,3],
+                format_func=lambda x:{0:"0–Normal",1:"1–Aphasie légère",2:"2–Aphasie sévère",3:"3–Muet"}[x],
+                key=WK("ni_lan"))
+            _ni_res = calculer_nihss_rapide(
+                int(_ni_cons), bool(_ni_reg), int(_ni_fac), int(_ni_mot), int(_ni_lan))
+            _ni_v = _ni_res.get("score_val") or 0
+            _ni_col = "#EF4444" if _ni_v >= 16 else "#F59E0B" if _ni_v >= 5 else "#22C55E"
+            H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;display:flex;'
+              f'align-items:center;gap:16px;margin:8px 0;">'
+              f'<div style="text-align:center;min-width:80px;">'
+              f'<div style="font-size:.72rem;color:#64748B;">NIHSS</div>'
+              f'<div style="font-size:2.2rem;font-weight:900;color:{_ni_col};">{_ni_v}/18</div></div>'
+              f'<div style="font-size:.78rem;color:#94A3B8;flex:1;">{_ni_res.get("interpretation","")}</div></div>')
+            AL(_ni_res.get("recommendation",""), "danger" if _ni_v >= 16 else "warning" if _ni_v >= 5 else "info")
+            CARD_END()
+
+            # ── PRAM — Asthme pédiatrique ────────────────────────────────────────
+            CARD("PRAM — Asthme pédiatrique (0-12)", "")
+            st.caption("Chalut DS et al., J Pediatr 2000 | Sévérité GINA pédiatrique")
+            AL("PRAM < 4 : léger | 4-7 : modéré | ≥ 8 : sévère → appel pédiatre immédiat", "info")
+            _pm1, _pm2 = st.columns(2)
+            _pr_spo2 = float(SS.v_spo2 or 98)
+            _pr_tss  = _pm1.checkbox("Tirage sus-sternal", key=WK("pr_tss"))
+            _pr_tsc  = _pm2.checkbox("Tirage sous-costal", key=WK("pr_tsc"))
+            _pr_ti   = _pm1.checkbox("Tirage intercostal", key=WK("pr_ti"))
+            _pr_ea   = _pm2.select_slider(
+                "Entrée d'air",
+                options=[1,2,3],
+                format_func=lambda x:{1:"Normale",2:"Diminuée",3:"Très diminuée/absente"}[x],
+                key=WK("pr_ea"))
+            _pr_wh   = _pm1.select_slider(
+                "Wheezing",
+                options=[1,2,3,4],
+                format_func=lambda x:{1:"Absent",2:"Expi seul",3:"Inspi+expi",4:"Audible sans stétho"}[x],
+                key=WK("pr_wh"))
+            _pr_res = calculer_pram(
+                _pr_spo2, bool(_pr_tss), bool(_pr_tsc), bool(_pr_ti), int(_pr_ea), int(_pr_wh))
+            _pv3 = _pr_res.get("score_val") or 0
+            _pc3 = "#EF4444" if _pv3 >= 8 else "#F59E0B" if _pv3 >= 4 else "#22C55E"
+            H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;text-align:center;margin:8px 0;">'
+              f'<div style="font-size:.72rem;color:#64748B;">PRAM</div>'
+              f'<div style="font-size:2.2rem;font-weight:900;color:{_pc3};">{_pv3}/12</div></div>')
+            AL(_pr_res.get("interpretation",""), "danger" if _pv3 >= 8 else "warning" if _pv3 >= 4 else "success")
+            AL(_pr_res.get("recommendation",""), "info")
+            CARD_END()
+
+        # ── SC[4] PÉDIATRIE + SEVRAGE ─────────────────────────────────────────
+        with _SC[4]:
+            _sp1, _sp2 = st.columns(2)
+            with _sp1:
+                CARD("PEWS — Dégradation pédiatrique précoce", "")
+                st.caption("Monaghan A, Paediatric Nursing 2005")
+                if age >= 18:
+                    AL("PEWS réservé aux patients < 18 ans", "info")
+                else:
+                    _pw_co = st.select_slider("Comportement", [0,1,2,3,4], key=WK("pw_co"),
+                        format_func=lambda x:{0:"Normal",1:"Dormant",2:"Irritable",3:"Réduit",4:"Inconscient"}[x])
+                    _pw_ca = st.select_slider("Cardiovasculaire", [0,1,2,3], key=WK("pw_ca"),
+                        format_func=lambda x:{0:"Rosé CF≤2s",1:"Pâle CF>2s",2:"Gris CF≥3s",3:"Gris+tachy"}[x])
+                    _pw_re = st.select_slider("Respiratoire", [0,1,2,3], key=WK("pw_re"),
+                        format_func=lambda x:{0:"Normal",1:"Tachypnée",2:"Tirage modéré",3:"Tirage sévère"}[x])
+                    _pews_res = calculer_pews(int(_pw_co), int(_pw_ca), int(_pw_re))
+                    _pv2 = _pews_res.get("score_val") or 0
+                    _pc2 = "#EF4444" if _pv2 >= 5 else "#F59E0B" if _pv2 >= 3 else "#22C55E"
+                    H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;text-align:center;margin:8px 0;"><div style="font-size:.72rem;color:#64748B;">PEWS</div><div style="font-size:2.2rem;font-weight:900;color:{_pc2};">{_pv2}/9</div></div>')
+                    AL(_pews_res.get("interpretation",""), "danger" if _pv2 >= 5 else "warning" if _pv2 >= 3 else "success")
+                    AL(_pews_res.get("recommendation",""), "info")
+                CARD_END()
+
+            # ── Outils pédiatriques rapides ──────────────────────────────────
+            CARD("🧒 Outils pédiatriques rapides", "")
+            if 0 < age < 13:
+                _p_est = poids_estime_enfant(age)
+                _sc_m  = surface_corporelle_mosteller(poids, taille) if taille > 0 else None
+                _oa1, _oa2 = st.columns(2)
+                _oa1.metric("Poids estimé APLS", f"{_p_est:.0f} kg" if _p_est else "N/A",
+                    delta=f"{poids - _p_est:.0f} kg vs réel" if _p_est else None)
+                _oa2.metric("SC Mosteller", f"{_sc_m:.2f} m²" if _sc_m else "N/A")
+                if _p_est and abs(poids - _p_est) > 5:
+                    AL(f"Écart poids réel/estimé > 5 kg — vérifier le poids saisi", "warning")
+            else:
+                AL("Formules APLS valables jusqu'à 12 ans — utiliser le poids réel", "info")
+            st.divider()
+            # Score Croup (laryngite sous-glottique)
+            H('<div style="font-size:.72rem;font-weight:700;color:#64748B;margin-bottom:4px;">Croup — Score de Westley</div>')
+            _cg1, _cg2 = st.columns(2)
+            _cr_str = _cg1.select_slider("Stridor", [0,1,2], key=WK("cr_str"),
+                format_func=lambda x:{0:"Absent",1:"Au repos",2:"Sévère"}[x])
+            _cr_tir = _cg2.select_slider("Tirage", [0,1,2,3], key=WK("cr_tir"),
+                format_func=lambda x:{0:"Absent",1:"Léger",2:"Modéré",3:"Sévère"}[x])
+            _cr_air = _cg1.select_slider("Entrée air", [0,1,2], key=WK("cr_air"),
+                format_func=lambda x:{0:"Normale",1:"Diminuée",2:"Très diminuée"}[x])
+            _cr_con = _cg2.select_slider("Conscience", [0,1,2,3,4,5], key=WK("cr_con"),
+                format_func=lambda x:{0:"Normale",1:"Agitée",2:"Irritable",3:"Léthargique",4:"Stuporeux",5:"Coma"}[x])
+            _cr_cya = st.checkbox("Cyanose / SatO₂ basse", key=WK("cr_cya"))
+            _croup_res = calculer_croup(int(_cr_str), int(_cr_tir), bool(_cr_cya),
+                                        int(_cr_air), int(_cr_con))
+            _cv3 = _croup_res.get("score_val") or 0
+            _cc3 = "#EF4444" if _cv3 >= 6 else "#F59E0B" if _cv3 >= 3 else "#22C55E"
+            H(f'<div style="background:#0F172A;border-radius:8px;padding:10px;text-align:center;margin:6px 0;">'
+              f'<div style="font-size:.72rem;color:#64748B;">Westley</div>'
+              f'<div style="font-size:2rem;font-weight:900;color:{_cc3};">{_cv3}/17</div></div>')
+            AL(_croup_res.get("interpretation",""), "danger" if _cv3 >= 6 else "warning" if _cv3 >= 3 else "success")
+            AL(_croup_res.get("recommendation",""), "info")
+            CARD_END()
+
+            with _sp2:
+                CARD("CIWA-Ar — Sevrage alcoolique", "")
+                st.caption("Sullivan JT et al., Br J Addict 1989")
+                AL("Évaluer toutes les heures — Thiamine 500 mg IV AVANT tout glucosé", "warning")
+                _ci_nv = st.slider("Nausées / vomissements (0-7)", 0, 7, 0, key=WK("ci_nv"))
+                _ci_tr = st.slider("Tremblements (0-7)",           0, 7, 0, key=WK("ci_tr"))
+                _ci_su = st.slider("Sudation (0-7)",               0, 7, 0, key=WK("ci_su"))
+                _ci_ax = st.slider("Anxiété (0-7)",                0, 7, 0, key=WK("ci_ax"))
+                _ci_ag = st.slider("Agitation (0-7)",              0, 7, 0, key=WK("ci_ag"))
+                _ci_tp = st.slider("Troubles perceptifs (0-7)",    0, 7, 0, key=WK("ci_tp"))
+                _ci_ce = st.slider("Céphalée (0-7)",               0, 7, 0, key=WK("ci_ce"))
+                _ci_or = st.slider("Désorientation (0-4)",         0, 4, 0, key=WK("ci_or"))
+                _ciwa_res = calculer_ciwa(_ci_nv,_ci_tr,_ci_su,_ci_ax,_ci_ag,_ci_tp,_ci_tp,_ci_tp,_ci_ce,_ci_or)
+                _cv2 = _ciwa_res.get("score_val") or 0
+                _cc2 = "#EF4444" if _cv2 >= 20 else "#F59E0B" if _cv2 >= 8 else "#22C55E"
+                H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;text-align:center;margin:8px 0;"><div style="font-size:.72rem;color:#64748B;">CIWA-Ar</div><div style="font-size:2.2rem;font-weight:900;color:{_cc2};">{_cv2}/67</div></div>')
+                AL(_ciwa_res.get("interpretation",""), "danger" if _cv2 >= 20 else "warning" if _cv2 >= 8 else "success")
+                AL(_ciwa_res.get("recommendation",""), "info")
+                CARD_END()
+
+            CARD("🤰 Terme de grossesse — Règle de Naegele", "")
+            st.caption("Naegele FC 1812 — terme = DDR + 280 jours (40 SA)")
+            _ddr_str = st.text_input("Date des dernières règles (JJ/MM/AAAA)",
+                placeholder="ex: 15/03/2024", key=WK("ddr_input"))
+            if _ddr_str:
+                _terme_res = terme_naegele(_ddr_str)
+                if _terme_res:
+                    AL(_terme_res, "info")
+                    # Calculer le terme en SA pour le triage
+                    try:
+                        from datetime import datetime, timedelta
+                        for _fmt in ('%d/%m/%Y','%Y-%m-%d','%d-%m-%Y'):
+                            try:
+                                _ddr_d = datetime.strptime(_ddr_str.strip(), _fmt); break
+                            except ValueError: continue
+                        _sa = (datetime.now() - _ddr_d).days // 7
+                        if _sa >= 36:
+                            AL(f"Grossesse ≥ 36 SA — Contacter maternité IMMÉDIATEMENT", "danger")
+                        elif _sa >= 22:
+                            AL(f"Grossesse {_sa} SA — Position latérale gauche si allongée", "warning")
+                    except Exception:
+                        pass
+                else:
+                    AL("Format invalide — utiliser JJ/MM/AAAA", "warning")
+            CARD_END()
+
+        with _SC[5]:
+            H('''<div style="background:linear-gradient(135deg,#1E293B,#334155);color:#fff;
+                border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;">
+              <div style="font-size:1.8rem;">☠️</div>
+              <div>
+                <div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">Urgences toxicologiques</div>
+                <div style="font-size:.95rem;font-weight:800;">Évaluation des intoxications médicamenteuses</div>
+                <div style="font-size:.68rem;opacity:.7;margin-top:2px;">CBP Belgique : 070 / 245.245 (24h/24)</div>
+              </div>
+            </div>''')
+
+            _TOX = st.tabs(["🎯 Toxidrome", "📊 PSS", "💊 Paracétamol", "❤️ Tricycliques / ECG", "🏥 TOXIC2"])
+
+            # ── SOUS-ONGLET 0 : TOXIDROMES ────────────────────────────────────
+            with _TOX[0]:
+                H('<div class="card-title">🎯 Reconnaissance du syndrome toxidromique</div>')
+                st.caption("Isbister GK et al., J Toxicol 2004 — 7 syndromes cliniques reconnus")
+
+                # Checklist des signes cliniques
+                _signes_all = [
+                    "Myosis", "Mydriase", "Bradycardie", "Tachycardie",
+                    "Hypotension", "HTA", "Bradypnée", "Tachypnée",
+                    "Coma", "Agitation", "Convulsions", "Hallucinations",
+                    "Hyperthermie", "Hypothermie", "Peau sèche", "Diaphorèse",
+                    "Sialorrhée", "Bronchorrhée", "Hyperréflexie", "Hyporéflexie",
+                    "Clonus", "Iléus", "Rétention urinaire", "Fasciculations",
+                ]
+                st.markdown("**Cocher les signes présents :**")
+                _sc1, _sc2, _sc3 = st.columns(3)
+                _signes_coches = []
+                for _i, _s in enumerate(_signes_all):
+                    _col = [_sc1, _sc2, _sc3][_i % 3]
+                    if _col.checkbox(_s, key=WK(f"tox_s_{_s}")):
+                        _signes_coches.append(_s)
+
+                if _signes_coches:
+                    _toxidromes_trouvés = identifier_toxidrome(_signes_coches)
+                    if _toxidromes_trouvés:
+                        st.divider()
+                        H('<div class="card-title">🔍 Toxidromes compatibles (par pertinence)</div>')
+                        for _idx, _t in enumerate(_toxidromes_trouvés[:3]):
+                            _t_css = "#FEF2F2" if _t["alerte"] == "danger" else "#FFFBEB"
+                            _t_bdr = "#EF4444" if _t["alerte"] == "danger" else "#F59E0B"
+                            _concordants_txt = ", ".join(_t.get("_concordants", []))
+                            H(f'''<div style="background:{_t_css};border-left:4px solid {_t_bdr};
+                                border-radius:0 10px 10px 0;padding:12px 16px;margin:6px 0;">
+                              <div style="font-weight:800;font-size:.88rem;color:#1E293B;">
+                                #{_idx+1} — {_t["nom"]}
+                                <span style="font-size:.7rem;font-weight:400;color:#64748B;margin-left:8px;">
+                                  {_t.get("_score",0)} signe(s) concordant(s)
+                                </span>
+                              </div>
+                              <div style="font-size:.73rem;color:#374151;margin-top:4px;">
+                                Signes concordants : <em>{_concordants_txt}</em>
+                              </div>
+                              <div style="font-size:.73rem;margin-top:4px;color:#374151;">
+                                <strong>Molécules :</strong> {_t["molecules"]}
+                              </div>
+                              <div style="background:{"#EF444420" if _t["alerte"]=="danger" else "#F59E0B20"};
+                                  border-radius:6px;padding:7px 10px;margin-top:6px;font-size:.78rem;font-weight:600;color:{_t_bdr};">
+                                💊 Antidote : {_t["antidote"]}
+                              </div>
+                            </div>''')
+                    else:
+                        AL("Aucun toxidrome identifié clairement — Appel CBP 070/245.245", "info")
+                else:
+                    # Afficher tous les toxidromes en référence
+                    st.info("Cocher les signes cliniques pour identifier le toxidrome — ou consulter la référence ci-dessous")
+                    for _t in TOXIDROMES:
+                        with st.expander(f"{'🔴' if _t['alerte']=='danger' else '🟠'} {_t['nom']}"):
+                            st.markdown(f"**Signes :** {' | '.join(_t['signes'])}")
+                            st.markdown(f"**Molécules :** {_t['molecules']}")
+                            AL(f"Antidote : {_t['antidote']}", _t['alerte'])
+
+            # ── SOUS-ONGLET 1 : PSS ──────────────────────────────────────────
+            with _TOX[1]:
+                H('<div class="card-title">📊 PSS — Poisoning Severity Score (0-4)</div>')
+                st.caption("Persson HE et al., Eur J Clin Pharmacol 1998 — Standard EAPCCT")
+                st.markdown("Coter chaque système sur 0-4 — Le score final = grade le plus élevé")
+
+                _pss_scores = {}
+                for _sys_name, _sys_grades in PSS_CRITERES.items():
+                    H(f'<div class="card-title" style="margin-top:10px;">{_sys_name}</div>')
+                    _pss_scores[_sys_name] = st.select_slider(
+                        f"Grade {_sys_name}",
+                        options=[0, 1, 2, 3, 4],
+                        value=0,
+                        key=WK(f"pss_{_sys_name}"),
+                        format_func=lambda x, _grades=_sys_grades: f"{x} — {_grades[x]}",
+                        label_visibility="collapsed",
+                    )
+
+                _pss_res = calculer_pss(**{
+                    "neuro":       _pss_scores.get("Neurologique", 0),
+                    "cardio":      _pss_scores.get("Cardiovasculaire", 0),
+                    "respi":       _pss_scores.get("Respiratoire", 0),
+                    "digestif":    _pss_scores.get("Digestif", 0),
+                    "hepato_renal":_pss_scores.get("Hépatique/Rénal", 0),
+                })
+                _pss_v = _pss_res.get("score_val") or 0
+                _pss_col = ["#22C55E","#3B82F6","#F59E0B","#EF4444","#7C3AED"][_pss_v]
+                H(f'''<div style="background:{_pss_col}15;border:2px solid {_pss_col};
+                    border-radius:10px;padding:16px;text-align:center;margin:12px 0;">
+                  <div style="font-size:.72rem;color:#64748B;text-transform:uppercase;letter-spacing:.1em;">PSS</div>
+                  <div style="font-size:2.5rem;font-weight:900;color:{_pss_col};">{_pss_v}/4</div>
+                  <div style="font-size:.82rem;font-weight:700;color:{_pss_col};">{_pss_res.get("interpretation","")}</div>
+                </div>''')
+                AL(_pss_res.get("recommendation",""), "danger" if _pss_v >= 3 else "warning" if _pss_v >= 2 else "info")
+                AL("CBP Belgique : 070 / 245.245 — Disponible 24h/24 7j/7", "info")
+
+            # ── SOUS-ONGLET 2 : PARACÉTAMOL ──────────────────────────────────
+            with _TOX[2]:
+                H('<div class="card-title">💊 Intoxication au paracétamol — Nomogramme Rumack-Matthew</div>')
+                st.caption("Rumack BH et al., Arch Intern Med 1975 — MRCUK 2012 — BCFI Belgique")
+
+                _pm_c1, _pm_c2 = st.columns(2)
+                _pm_dose = _pm_c1.number_input("Dose ingérée estimée (mg/kg)", 0.0, 1000.0, 0.0, 10.0, key="pm_dose",
+                    help="0 = non connue")
+                _pm_dose = _pm_dose if _pm_dose > 0 else None
+
+                _pm_h = _pm_c2.number_input("Heure depuis ingestion (h)", 0.0, 72.0, 4.0, 0.5, key="pm_h")
+                _pm_serique = _pm_c1.number_input("Paracétamolémie (µg/ml)", 0.0, 1000.0, 0.0, 5.0, key="pm_ser",
+                    help="0 = non dosé")
+                _pm_serique = _pm_serique if _pm_serique > 0 else None
+
+                st.markdown("**Facteurs de risque (seuil de traitement abaissé) :**")
+                _rf1, _rf2 = st.columns(2)
+                _pm_alcool  = _rf1.checkbox("Alcoolisme chronique",      key="pm_alc")
+                _pm_hepato  = _rf2.checkbox("Hépatopathie chronique",    key="pm_hep")
+                _pm_jeune   = _rf1.checkbox("Jeûne / dénutrition",       key="pm_jeu")
+                _pm_induc   = _rf2.checkbox("Inducteurs enzymatiques (rifampicine, phénytoïne)", key="pm_ind")
+
+                _pm_res = evaluer_paracetamol_intox(
+                    dose_mg_kg=_pm_dose, heure_ingestion=_pm_h,
+                    paracetamol_serique_mgL=_pm_serique,
+                    atcd_alcool=_pm_alcool, atcd_hepatique=_pm_hepato,
+                    atcd_jeune=_pm_jeune, medicaments_inducteurs=_pm_induc,
+                )
+
+                _pm_nac = _pm_res.get("nac_indiquee", False)
+                _pm_col = "#EF4444" if _pm_nac else "#22C55E"
+                H(f'''<div style="background:{_pm_col}15;border:3px solid {_pm_col};
+                    border-radius:10px;padding:14px;text-align:center;margin:10px 0;">
+                  <div style="font-size:1.1rem;font-weight:900;color:{_pm_col};">
+                    {"🔴 NAC INDIQUÉE" if _pm_nac else "🟢 NAC probablement non indiquée"}
+                  </div>
+                  <div style="font-size:.78rem;margin-top:6px;color:#374151;">{_pm_res.get("interpretation","")}</div>
+                </div>''')
+
+                if _pm_res.get("terrain_risque"):
+                    AL("Terrain à risque — Seuil de traitement abaissé (ligne 100 µg/ml au lieu de 150)", "warning")
+
+                for _det in (_pm_res.get("details") or []):
+                    H(f'<div style="font-size:.75rem;color:#374151;padding:3px 0;">▶ {_det}</div>')
+
+                st.divider()
+                H('<div style="background:#0F172A;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:.75rem;color:#94A3B8;">')
+                H('<div style="color:#38BDF8;font-weight:700;margin-bottom:6px;">N-ACÉTYLCYSTÉINE IV (Fluimucil® Antidot) — Protocole 3 poches</div>')
+                for _ligne in [
+                    "① 150 mg/kg dans 200 ml G5 % en 1 h",
+                    "② 50 mg/kg dans 500 ml G5 % en 4 h",
+                    "③ 100 mg/kg dans 1000 ml G5 % en 16 h",
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                    f"Exemple {poids:.0f} kg : ① {int(150*poids)} mg | ② {int(50*poids)} mg | ③ {int(100*poids)} mg",
+                ]:
+                    H(f'<div>{_ligne}</div>')
+                H('</div>')
+                AL("Appel CBP Belgique 070/245.245 pour conseil thérapeutique personnalisé", "info")
+
+            # ── SOUS-ONGLET 3 : TRICYCLIQUES ─────────────────────────────────
+            with _TOX[3]:
+                H('<div class="card-title">❤️ Antidépresseurs tricycliques / Toxiques cardiaques — Critères ECG</div>')
+                st.caption("Boehnert MT, Lovejoy FH, NEJM 1985 / Kerr GW, Emerg Med J 2001")
+
+                _tc1, _tc2 = st.columns(2)
+                _tc_qrs = _tc1.number_input("QRS (ms)", 50, 300, 90, 5, key="tc_qrs",
+                    help="Normal < 80 ms | Risque convulsions ≥ 100 ms | Risque FV ≥ 160 ms")
+                _tc_qtc = _tc2.number_input("QTc (ms)", 300, 700, 440, 10, key="tc_qtc",
+                    help="Normal < 440 ms | Risque torsades > 500 ms")
+                _tc_ravr = _tc1.number_input("Amplitude R en aVR (mm)", 0.0, 10.0, 0.0, 0.5, key="tc_ravr",
+                    help="R aVR ≥ 3 mm = marqueur spécifique ADT")
+                _tc_rs = _tc2.number_input("Rapport R/S en aVR", 0.0, 5.0, 0.0, 0.1, key="tc_rs",
+                    help="R/S > 0.7 = marqueur indépendant")
+                _tc_bbd = st.checkbox("BBD ou morphologie S1Q3T3 (effet stabilisant membranaire)", key="tc_bbd")
+
+                _tc_res = evaluer_tricycliques_ecg(
+                    qrs_ms=_tc_qrs, qtc_ms=_tc_qtc,
+                    r_avr_mv=_tc_ravr, rap_s_avr=_tc_rs,
+                    branche_droite=_tc_bbd,
+                )
+                _tc_v = _tc_res.get("score_val") or 0
+                _tc_col = "#EF4444" if _tc_v >= 5 else "#F59E0B" if _tc_v >= 2 else "#22C55E"
+                H(f'''<div style="background:{_tc_col}15;border:2px solid {_tc_col};
+                    border-radius:10px;padding:14px;margin:10px 0;">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="font-size:2rem;font-weight:900;color:{_tc_col};font-family:monospace;">{_tc_v}</div>
+                    <div>
+                      <div style="font-size:.82rem;font-weight:700;color:{_tc_col};">{_tc_res.get("interpretation","")}</div>
+                    </div>
+                  </div>
+                </div>''')
+
+                for _ce in (_tc_res.get("criteres_ecg") or []):
+                    AL(_ce, "danger" if "Risque FV" in _ce or "≥ 160" in _ce else "warning")
+
+                if _tc_res.get("bicarbonate_urgent"):
+                    H('''<div style="background:#7F1D1D;color:#FEE2E2;border-radius:8px;padding:14px;margin:10px 0;font-weight:700;">
+                      🔴 BICARBONATE SODIQUE 8,4 % — INDIQUÉ<br>
+                      <span style="font-size:.8rem;font-weight:400;">
+                      Dose : 1-2 mEq/kg IV bolus (= 1-2 ml/kg de NaHCO3 8,4 %) | Cible pH 7,50-7,55<br>
+                      Répéter toutes les 5-10 min jusqu'à rétrécissement QRS<br>
+                      ⚠️ Eviter Flécaïnide, Lidocaïne, physostigmine
+                      </span>
+                    </div>''')
+
+                st.divider()
+                AL(_tc_res.get("recommendation",""), "danger" if _tc_v >= 5 else "warning" if _tc_v >= 2 else "info")
+
+                H('<div class="card-title" style="margin-top:12px;">Antidotes spécifiques par classe</div>')
+                for _ant in [
+                    ("Tricycliques (ADT)",  "Bicarbonate NaHCO3 8,4 % — 1-2 mEq/kg IV si QRS ≥ 100 ms"),
+                    ("Digitaliques",        "Anticorps anti-digitaliques (Digifab®) — 38 mg par ng/ml de digoxinémie × poids"),
+                    ("Bêtabloquants",       "Glucagon 3-5 mg IV bolus + HDES (High-dose Epinephrine) + Intralipid® 20 %"),
+                    ("Anticalciques",       "Chlorure de calcium IV + Glucagon + Insuline haute dose + Intralipid® 20 %"),
+                    ("Antiarythmiques (Ic)","Bicarbonate + Intralipid® 20 % si FV réfractaire — ECMO si disponible"),
+                ]:
+                    H(f'<div style="background:#F8FAFC;border-left:3px solid #7C3AED;border-radius:0 8px 8px 0;'
+                       f'padding:8px 14px;margin:4px 0;font-size:.78rem;">'
+                       f'<strong style="color:#5B21B6;">{_ant[0]}</strong><br>{_ant[1]}</div>')
+
+            # ── SOUS-ONGLET 4 : TOXIC2 ────────────────────────────────────────
+            with _TOX[4]:
+                H('<div class="card-title">🏥 TOXIC2 — Niveau de soins requis</div>')
+                st.caption("Eyer F et al., Clin Toxicol 2009 — Score ≥ 2 → hospitalisation USI")
+
+                _tx1, _tx2 = st.columns(2)
+                _tx_gcs  = _tx1.number_input("GCS actuel", 3, 15, int(SS.v_gcs or 15), key="tx_gcs")
+                _tx_fc   = _tx1.checkbox(f"FC < 50 ou > 130 bpm (actuelle : {SS.v_fc or 80:.0f})",
+                    key="tx_fc", value=bool(SS.v_fc and (SS.v_fc < 50 or SS.v_fc > 130)))
+                _tx_pas  = _tx2.checkbox(f"PAS < 90 mmHg (actuelle : {SS.v_pas or 120:.0f})",
+                    key="tx_pas", value=bool(SS.v_pas and SS.v_pas < 90))
+                _tx_spo  = _tx2.checkbox(f"SpO2 < 92 % (actuelle : {SS.v_spo2 or 98:.0f}%)",
+                    key="tx_spo", value=bool(SS.v_spo2 and SS.v_spo2 < 92))
+                _tx_qrs  = _tx1.checkbox("QRS ≥ 120 ms à l'ECG", key="tx_qrs")
+                _tx_qtc  = _tx2.checkbox("QTc > 500 ms", key="tx_qtc")
+                _tx_card = _tx1.checkbox("Molécule cardiotoxique (ADT, digitaliques, BB, anticalciques)",
+                    key="tx_card")
+                _tx_mul  = _tx2.checkbox("Poly-intoxication (≥ 2 molécules)", key="tx_mul")
+                _tx_ts   = st.checkbox("Contexte de tentative de suicide (évaluation psychiatrique requise)",
+                    key="tx_ts")
+
+                _tx_res = calculer_toxic2(
+                    gcs=_tx_gcs, fc_anormale=_tx_fc, pas_basse=_tx_pas,
+                    spo2_basse=_tx_spo, qrs_large=_tx_qrs, qtc_long=_tx_qtc,
+                    molecule_cardiotoxique=_tx_card, intox_multiple=_tx_mul,
+                    tentative_suicide=_tx_ts,
+                )
+                _tx_v   = _tx_res.get("score_val") or 0
+                _tx_col = "#EF4444" if _tx_v >= 5 else "#F59E0B" if _tx_v >= 3 else "#3B82F6" if _tx_v >= 1 else "#22C55E"
+                _tx_lbl = ["🟢 Ambulatoire / Obs. 4-6h","🔵 Hospitalisation","🟠 USI recommandée","🔴 Réanimation"][min(3, max(0,_tx_v//2 if _tx_v < 5 else 3))]
+                H(f'''<div style="background:{_tx_col}15;border:3px solid {_tx_col};
+                    border-radius:12px;padding:18px;text-align:center;margin:12px 0;">
+                  <div style="font-size:2rem;font-weight:900;color:{_tx_col};font-family:monospace;">{_tx_v}</div>
+                  <div style="font-size:.9rem;font-weight:700;color:{_tx_col};">{_tx_lbl}</div>
+                  <div style="font-size:.75rem;color:#374151;margin-top:4px;">{_tx_res.get("interpretation","")}</div>
+                </div>''')
+
+                for _item in (_tx_res.get("items_positifs") or []):
+                    AL(_item, "danger" if any(k in _item for k in ["Coma","< 90","< 92","FV"]) else "warning")
+
+                AL(_tx_res.get("recommendation",""), "danger" if _tx_v >= 5 else "warning" if _tx_v >= 3 else "info")
+
+                if _tx_ts:
+                    st.divider()
+                    H('''<div style="background:#1E3A5F;color:#93C5FD;border-radius:8px;padding:12px 16px;font-size:.78rem;">
+                      <div style="font-weight:700;margin-bottom:6px;">📋 Évaluation psychiatrique obligatoire</div>
+                      <div>• Évaluation du risque suicidaire avant sortie</div>
+                      <div>• Contrat de soins si retour à domicile</div>
+                      <div>• Sécurisation de l'environnement (médicaments, objets dangereux)</div>
+                      <div>• Ligne de crise : 0800 / 32.123 (Prévention Suicide Belgique)</div>
+                    </div>''')
+
+                st.divider()
+                H('''<div style="background:#0F172A;border-radius:8px;padding:12px 16px;font-size:.72rem;color:#94A3B8;">
+                  <div style="color:#38BDF8;font-weight:700;margin-bottom:6px;">☎️ CONTACTS TOXICOLOGIE</div>
+                  <div>🇧🇪 <strong style="color:#fff;">Centre Belge Anti-Poisons (CBP)</strong> — 070 / 245.245</div>
+                  <div>🌍 EAPCCT — European Ass. of Poisons Centres</div>
+                  <div style="margin-top:6px;">⚠️ Toujours appeler le CBP pour toute intoxication grave</div>
+                </div>''')
+
 
 
     # ═══════════════════════════════════════════════════════════════════════════
     # ONGLET 4 — SUIVI (Réévaluation + Historique + SBAR)
     # ═══════════════════════════════════════════════════════════════════════════
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ONGLET 4 — MUG / SMUR (Aide à la décision appel pré-hospitalier)
+    # ═══════════════════════════════════════════════════════════════════════════
     with T[4]:
+        # ═══════════════════════════════════════════════════════════════════════
+        # ONGLET 4 — 🛠️ OUTILS CLINIQUES
+        # ═══════════════════════════════════════════════════════════════════════
+        H('''<div style="background:linear-gradient(135deg,#1E3A5F,#1D4ED8);color:#fff;
+            border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:2rem;">🛠️</div>
+            <div>
+              <div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.12em;">Aide à la décision</div>
+              <div style="font-size:1rem;font-weight:800;">Outils Cliniques Urgences</div>
+              <div style="font-size:.72rem;opacity:.75;margin-top:2px;">RSI · Volémie · Broselow · Opioïdes · DFGe · Stroke · Défibrillateur</div>
+            </div>
+          </div>
+        </div>''')
+
+        _OT = st.tabs(["💉 RSI", "💧 Volémie", "👶 Broselow",
+                        "🔄 Opioïdes", "🧪 Rein/Na", "🧠 Stroke",
+                        "⚡ Défibrillateur", "🩸 Hémorragie digest."])
+
+        # ── OT[0] RSI ────────────────────────────────────────────────────────
+        with _OT[0]:
+            H('<div class="card-title">💉 Séquence Rapide d\'Intubation (RSI)</div>')
+            st.caption("SFAR 2017 / ERC 2021 — Doses calculées sur le poids réel")
+            _r1, _r2 = st.columns(2)
+            _rsi_hyp = _r1.selectbox("Hypnotique", list(RSI_AGENTS.keys()), key=WK("rsi_hyp"))
+            _rsi_cur = _r2.selectbox("Curare",     list(CURARES_RSI.keys()), key=WK("rsi_cur"))
+            _rsi_res = calculer_rsi(poids, age, _rsi_hyp, _rsi_cur)
+            for nom, ag in _rsi_res["agents"].items():
+                _bg = "#7F1D1D" if "Atropine" not in nom else "#1E3A5F"
+                H(f'<div style="background:{_bg};color:#fff;border-radius:8px;padding:10px 14px;margin:5px 0;">'
+                  f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                  f'<div style="font-weight:700;font-size:.85rem;">{nom}</div>'
+                  f'<div style="font-family:monospace;font-size:1.4rem;font-weight:900;">{ag["dose_mg"]} mg</div>'
+                  f'</div><div style="font-size:.72rem;opacity:.8;margin-top:3px;">{ag["voie"]} — {ag["note"][:60]}</div>'
+                  f'{"<div style=\'font-size:.72rem;color:#FCA5A5;margin-top:3px;\'>⚠️ CI : " + " | ".join(ag["ci"]) + "</div>" if ag["ci"] else ""}</div>')
+            st.divider()
+            H('<div class="card-title">📋 Ordre d\'exécution RSI</div>')
+            for step in _rsi_res["ordre"]:
+                st.markdown(f"- {step}")
+            st.info(f"Sonde IT : **{_rsi_res['sonde_it']}** | Canule Guedel : **{_rsi_res['guedel']}**")
+            st.caption(_rsi_res["source"])
+
+        # ── OT[1] VOLÉMIE ────────────────────────────────────────────────────
+        with _OT[1]:
+            H('<div class="card-title">💧 Recharge Volémique</div>')
+            st.caption("SSC 2021 / ATLS 11th / ESPGHAN 2014")
+            _vi = st.selectbox("Indication",
+                ["sepsis","trauma","deshy","general"],
+                format_func=lambda x: {"sepsis":"Sepsis","trauma":"Trauma hémorragique","deshy":"Déshydratation","general":"Général"}[x],
+                key=WK("vol_ind"))
+            _rv = calculer_recharge_volemique(poids, age, _vi)
+            H(f'<div style="background:{_rv["couleur"]}20;border:2px solid {_rv["couleur"]};border-radius:10px;padding:14px;margin:8px 0;text-align:center;">'
+              f'<div style="font-size:.72rem;color:#64748B;">{_rv["titre"]}</div>'
+              f'<div style="font-size:1.8rem;font-weight:900;color:{_rv["couleur"]};">{_rv["bolus_ml"]} ml</div>'
+              f'<div style="font-size:.78rem;color:#94A3B8;">{_rv["soluté"]} en {_rv["débit"]}</div></div>')
+            for b_info in _rv["bolus_list"]:
+                ok_col = "#22C55E" if b_info["num"] == 1 else "#F59E0B" if b_info["num"] == 2 else "#EF4444"
+                H(f'<div style="display:flex;justify-content:space-between;background:#0F172A;border-radius:6px;padding:8px 12px;margin:3px 0;">'
+                  f'<span style="color:#94A3B8;font-size:.75rem;">Bolus {b_info["num"]}</span>'
+                  f'<span style="color:{ok_col};font-weight:700;font-family:monospace;">{b_info["ml"]} ml</span>'
+                  f'<span style="color:#64748B;font-size:.72rem;">Cumulé : {b_info["total_ml"]} ml ({b_info["total_ml_kg"]} ml/kg)</span></div>')
+            AL(_rv["info"], "info")
+            AL(_rv["note_max"], "warning")
+            st.caption(_rv["source"])
+
+        # ── OT[2] BROSELOW ──────────────────────────────────────────────────
+        with _OT[2]:
+            H('<div class="card-title">👶 Broselow — Doses pédiatriques par taille</div>')
+            st.caption("Broselow JB et al., Ann Emerg Med 1988 / mise à jour 2018")
+            _taille_br = st.number_input("Taille enfant (cm)", 40, 160, int(SS.taille or 100), 1, key=WK("br_t"))
+            _br = broselow(float(_taille_br))
+            _br_col = _br["hex_couleur"]
+            H(f'<div style="background:{_br_col};border-radius:12px;padding:16px;text-align:center;margin:10px 0;">'
+              f'<div style="font-size:1.4rem;font-weight:900;color:#0F172A;">{_br["couleur"].upper()}</div>'
+              f'<div style="font-size:.8rem;color:#1E293B;">Poids estimé : {_br["poids_estimé"]} kg</div></div>')
+            if _br.get("doses"):
+                for nom_dose, val_dose in _br["doses"].items():
+                    H(f'<div style="display:flex;justify-content:space-between;border-bottom:1px solid #1E293B;padding:6px 0;font-size:.78rem;">'
+                      f'<span style="color:#94A3B8;">{nom_dose}</span>'
+                      f'<span style="color:#E2E8F0;font-weight:700;font-family:monospace;">{val_dose}</span></div>')
+            st.caption(_br.get("source","Broselow 2018"))
+
+        # ── OT[3] OPIOÏDES ──────────────────────────────────────────────────
+        with _OT[3]:
+            H('<div class="card-title">🔄 Convertisseur Opioïdes — Équianalgésie</div>')
+            st.caption("BCFI 2024 / OMS 2019 / BNF 2024")
+            AL("Toujours commencer à 50% de la dose calculée — titration obligatoire", "warning")
+            _o1, _o2 = st.columns(2)
+            _op_src = _o1.selectbox("Molécule actuelle", list(OPIOIDES_RATIO_IV.keys()), key=WK("op_src"))
+            _op_dst = _o2.selectbox("Convertir en",      list(OPIOIDES_RATIO_IV.keys()),
+                                     index=min(3, len(OPIOIDES_RATIO_IV)-1), key=WK("op_dst"))
+            _op_dose = st.number_input(f"Dose de {_op_src} (mg)", 0.01, 1000.0, 10.0, 0.5, key=WK("op_d"))
+            if _op_src != _op_dst:
+                _oc = convertir_opioides(_op_src, _op_dose, _op_dst)
+                if "erreur" not in _oc:
+                    H(f'<div style="background:#0F172A;border-radius:10px;padding:16px;margin:10px 0;">'
+                      f'<div style="color:#94A3B8;font-size:.72rem;">Équivalent morphine IV</div>'
+                      f'<div style="color:#38BDF8;font-family:monospace;font-size:1.1rem;font-weight:700;">{_oc["morphine_iv_eq_mg"]} mg morphine IV</div>'
+                      f'<div style="color:#94A3B8;font-size:.72rem;margin-top:8px;">Dose {_op_dst} calculée</div>'
+                      f'<div style="color:#F59E0B;font-family:monospace;font-size:1.5rem;font-weight:900;">{_oc["dose_calculee_mg"]} mg</div>'
+                      f'<div style="color:#22C55E;font-family:monospace;font-size:.9rem;margin-top:4px;">Démarrer à : {_oc["dose_demarrage_mg"]} mg (50%)</div></div>')
+                    AL(_oc["avertissement"], "danger")
+                    st.caption(_oc["source"])
+
+        # ── OT[4] REIN / Na ──────────────────────────────────────────────────
+        with _OT[4]:
+            _rt1, _rt2 = st.tabs(["🔬 DFGe CKD-EPI", "🧂 Correction Na"])
+            with _rt1:
+                H('<div class="card-title">🔬 DFGe — CKD-EPI 2021</div>')
+                st.caption("Inker LA et al., NEJM 2021 / KDIGO 2022 (sans coefficient racial)")
+                _dk1, _dk2 = st.columns(2)
+                _cr_umol = _dk1.number_input("Créatinine (µmol/L)", 30, 2000, 80, 5, key=WK("ck_cr"))
+                _cr_sexe = _dk2.radio("Sexe", ["H","F"], key=WK("ck_sx"), horizontal=True)
+                _dfge_r  = calculer_dfge(float(_cr_umol), age, _cr_sexe)
+                _dfge_v  = _dfge_r["dfge"]
+                _dfge_c  = _dfge_r["couleur"]
+                H(f'<div style="background:{_dfge_c}20;border:2px solid {_dfge_c};border-radius:10px;padding:14px;text-align:center;margin:8px 0;">'
+                  f'<div style="font-size:2.5rem;font-weight:900;color:{_dfge_c};font-family:monospace;">{_dfge_v}</div>'
+                  f'<div style="font-size:.72rem;color:#94A3B8;">ml/min/1,73 m²</div>'
+                  f'<div style="font-size:.8rem;font-weight:700;color:{_dfge_c};margin-top:4px;">{_dfge_r["stade"]}</div></div>')
+                AL(_dfge_r["note"], "warning" if _dfge_v < 60 else "info")
+                if _dfge_r["adaptations"]:
+                    st.divider()
+                    H('<div class="card-title">Adaptations posologiques requises</div>')
+                    for adapt in _dfge_r["adaptations"]:
+                        AL(adapt, "danger" if "🔴" in adapt else "warning")
+                st.caption(_dfge_r["source"])
+            with _rt2:
+                H('<div class="card-title">🧂 Correction natrémie (hyperglycémie)</div>')
+                st.caption("Hillier TA et al., NEJM 1999 / Katz MA, NEJM 1973")
+                _na1, _na2 = st.columns(2)
+                _na_mes  = _na1.number_input("Natrémie mesurée (mmol/L)", 110, 165, 135, 1, key=WK("na_m"))
+                _gly_mml = _na2.number_input("Glycémie (mmol/L)", 1.0, 60.0, 5.5, 0.5, key=WK("na_g"))
+                _na_res  = corriger_natrémie(float(_na_mes), float(_gly_mml))
+                H(f'<div style="background:#0F172A;border-radius:10px;padding:14px;margin:10px 0;">'
+                  f'<div style="display:flex;justify-content:space-between;margin-bottom:6px;">'
+                  f'<span style="color:#94A3B8;font-size:.72rem;">Formule Katz</span>'
+                  f'<span style="color:#38BDF8;font-family:monospace;font-weight:700;">{_na_res["na_corrige_katz"]} mmol/L</span></div>'
+                  f'<div style="display:flex;justify-content:space-between;">'
+                  f'<span style="color:#94A3B8;font-size:.72rem;">Formule Hillier (recommandée)</span>'
+                  f'<span style="color:#22C55E;font-family:monospace;font-weight:900;font-size:1.1rem;">{_na_res["na_corrige_hillier"]} mmol/L</span></div></div>')
+                AL(_na_res["interpretation"], _na_res["niveau"])
+                st.caption(_na_res["source"])
+
+        # ── OT[5] CODE STROKE ────────────────────────────────────────────────
+        with _OT[5]:
+            H('<div class="card-title">🧠 Code Stroke — Délais ESO 2021</div>')
+            st.caption("ESO 2021 — Door-to-CT ≤ 25 min | Door-to-needle ≤ 60 min | Fenêtre ≤ 4,5h")
+            _cs1, _cs2, _cs3 = st.columns(3)
+            _cs_deb = _cs1.text_input("Heure début symptômes (HH:MM)", placeholder="08:30", key=WK("cs_d"))
+            _cs_arr = _cs2.text_input("Heure arrivée urgences (HH:MM)", placeholder="09:00", key=WK("cs_a"))
+            _cs_ct  = _cs3.text_input("Heure TDM cérébral (HH:MM)", placeholder="09:20", key=WK("cs_ct"))
+            _cs = code_stroke_delais(_cs_deb or None, _cs_arr or None, _cs_ct or None)
+            if "duree_symptomes_min" in _cs:
+                _dure = _cs["duree_symptomes_min"]
+                _fen  = _cs.get("fenetre_thrombolyse", False)
+                _rest = _cs.get("temps_restant_thrombo_min", 0)
+                _col_f = "#22C55E" if _fen else "#EF4444"
+                H(f'<div style="background:{_col_f}20;border:2px solid {_col_f};border-radius:10px;padding:14px;text-align:center;margin:8px 0;">'
+                  f'<div style="font-size:.72rem;color:#94A3B8;">Durée symptômes</div>'
+                  f'<div style="font-size:2rem;font-weight:900;color:{_col_f};font-family:monospace;">{_dure} min</div>'
+                  f'<div style="font-size:.8rem;color:{_col_f};font-weight:700;">{"✅ Fenêtre thrombolyse ouverte — " + str(_rest) + " min restantes" if _fen else "🔴 Fenêtre thrombolyse FERMÉE (> 4,5h)"}</div></div>')
+            if "door_to_ct_min" in _cs:
+                _dtct_col = "#22C55E" if _cs.get("door_to_ct_ok") else "#EF4444"
+                AL(f"Door-to-CT : {_cs['door_to_ct_min']} min (objectif ≤ 25 min {'✅' if _cs.get('door_to_ct_ok') else '❌'})", "success" if _cs.get("door_to_ct_ok") else "danger")
+            st.divider()
+            H('<div class="card-title">Checklist Code Stroke</div>')
+            for item in _cs["checklist"]:
+                st.checkbox(item, key=WK(f"cs_{item[:15]}"))
+            with st.expander("⚠️ Contre-indications thrombolyse"):
+                for ci_item in _cs["ci_thrombolyse"]:
+                    st.markdown(f"• {ci_item}")
+            st.caption(_cs["source"])
+
+        # ── OT[6] DÉFIBRILLATEUR ─────────────────────────────────────────────
+        with _OT[6]:
+            H('<div class="card-title">⚡ Défibrillateur — Énergie recommandée</div>')
+            st.caption("ERC 2021 — Soar J et al. / ESC 2020 FA")
+            _dj1, _dj2 = st.columns(2)
+            _def_type = _dj1.selectbox("Type de choc",
+                ["FV","TV sans pouls","FA","Flutter","TV tolérée"],
+                key=WK("def_t"))
+            _j = joules_defibrillateur(poids, age, _def_type)
+            if "erreur" not in _j:
+                H(f'<div style="background:#0F172A;border-radius:10px;padding:16px;margin:8px 0;">'
+                  f'<div style="color:#94A3B8;font-size:.72rem;margin-bottom:8px;">{_j["type"]}</div>')
+                for label, key in [("1er choc","choc_1"),("2e choc / suivants","choc_2")]:
+                    if key in _j:
+                        H(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1E293B;">'
+                          f'<span style="color:#64748B;font-size:.72rem;">{label}</span>'
+                          f'<span style="color:#F59E0B;font-family:monospace;font-weight:900;font-size:1.1rem;">{_j[key]}</span></div>')
+                if "note" in _j:
+                    H(f'</div>')
+                    AL(_j["note"], "info")
+                else:
+                    H('</div>')
+            st.caption(_j.get("source","ERC 2021"))
+
+        # ── OT[7] HÉMORRAGIE DIGESTIVE ───────────────────────────────────────
+        with _OT[7]:
+            H('<div class="card-title">🩸 Glasgow-Blatchford — Hémorragie digestive haute</div>')
+            st.caption("Blatchford O et al., Lancet 2000 — Score 0 = ambulatoire possible")
+            _hd1, _hd2 = st.columns(2)
+            _hd_ure  = _hd1.number_input("Urée sanguine (mmol/L)", 0.0, 60.0, 5.0, 0.5, key=WK("hd_u"))
+            _hd_hb   = _hd2.number_input("Hémoglobine (g/dL)", 4.0, 20.0, 13.0, 0.5, key=WK("hd_h"))
+            _hd_sx   = _hd1.radio("Sexe", ["H","F"], key=WK("hd_sx"), horizontal=True)
+            _hd_tach = _hd2.checkbox("Tachycardie ≥ 100 bpm", value=(SS.v_fc or 80) >= 100, key=WK("hd_tc"))
+            _hd_mel  = _hd1.checkbox("Méléna présent", key=WK("hd_ml"))
+            _hd_syn  = _hd2.checkbox("Syncope à l'entrée", key=WK("hd_sy"))
+            _hd_hep  = _hd1.checkbox("Hépatopathie chronique", key=WK("hd_hp"))
+            _hd_ic   = _hd2.checkbox("Insuffisance cardiaque", key=WK("hd_ic"))
+            _hd_pas  = st.number_input("PAS (mmHg)", 50, 220, int(SS.v_pas or 120), key=WK("hd_p"))
+            _gb = calculer_blatchford(float(_hd_ure), float(_hd_hb), float(_hd_pas),
+                                       _hd_sx, _hd_tach, _hd_mel, _hd_syn, _hd_hep, _hd_ic)
+            _gb_v = _gb["score_val"]
+            _gb_c = "#EF4444" if _gb_v >= 6 else "#F59E0B" if _gb_v >= 1 else "#22C55E"
+            H(f'<div style="background:{_gb_c}20;border:2px solid {_gb_c};border-radius:10px;padding:14px;text-align:center;margin:10px 0;">'
+              f'<div style="font-size:2.5rem;font-weight:900;color:{_gb_c};font-family:monospace;">{_gb_v}/23</div>'
+              f'<div style="font-size:.8rem;color:{_gb_c};font-weight:700;">{_gb["interpretation"]}</div></div>')
+            AL(_gb["recommendation"], _gb["niveau"])
+            st.caption(_gb["source"])
+
+    with T[5]:
         _ST = st.tabs(["🔄 Réévaluation", "📜 Historique", "📡 SBAR"])
 
         with _ST[0]:
@@ -1416,8 +2471,15 @@ try:
                 _delta = _ren2 - SS.v_news2
                 st.metric("NEWS2 réévaluation", _ren2, delta=_delta, delta_color="inverse")
                 TRI_CARD_INLINE(_reniv, _rejust, _ren2)
-                if _delta > 0:   AL("NEWS2 en hausse — Réévaluation médicale urgente", "danger")
-                elif _delta < 0: AL("NEWS2 en baisse — Amélioration clinique", "success")
+                if _delta >= 3:
+                    AL(f"🔴 Δ NEWS2 +{_delta} — Aggravation rapide — Appel médical IMMÉDIAT", "danger")
+                elif _delta > 0:
+                    AL(f"NEWS2 +{_delta} — Score en hausse — Surveillance renforcée", "warning")
+                elif _delta <= -2:
+                    AL(f"Δ NEWS2 {_delta} — Amélioration clinique confirmée", "success")
+                elif _delta < 0:
+                    AL(f"NEWS2 {_delta} — Score en légère baisse", "success")
+                SS.det = {**(SS.det or {}), "n2_precedent": SS.v_news2}
 
                 # Alertes temporelles
                 if SS.t_reev:
@@ -1447,14 +2509,13 @@ try:
             H('<div class="card-title">🔒 Sécurité injection — Règle des 5B (AR 78 AFMPS 2019)</div>')
             _med_5b = st.selectbox("Médicament", [
                 "Paracétamol IV", "Dipidolor® IV", "Morphine IV", "Adrénaline IM",
-                "Ceftriaxone IV", "Glucose 30% IV", "Litican® IM", "Tramadol",
+                "Ceftriaxone IV", "Glucose 30% IV", "Litican® (Alizapride) IV/IM", "Tramadol",
                 "Midazolam buccal", "Acide tranexamique IV", "Autre",
             ], key="re_5b_med")
             _dose_5b = st.text_input("Dose", key="re_5b_dose", placeholder="ex: 1 g IV en 15 min")
             _voie_5b = st.selectbox("Voie", ["IV","IM","SC","Buccale","IN","Nébulisation","PO"], key="re_5b_voie")
             CHECKLIST_5B(medicament=_med_5b, dose=_dose_5b, voie=_voie_5b,
                          poids=poids, uid=SS.uid_cur or SS.uid)
-            DISC()
 
         with _ST[1]:
             _reg = charger_registre()
@@ -1490,7 +2551,6 @@ try:
             if st.button("🔐 Intégrité audit", key="audit_int", use_container_width=True):
                 _au = audit_verifier_integrite()
                 AL(_au.get("message",""), "success" if _au.get("ok") else "danger")
-            DISC()
 
         with _ST[2]:
             if not SS.niv:
@@ -1501,7 +2561,10 @@ try:
                     SS.eva, SS.v_news2, SS.niv, SS.just, SS.crit,
                     SS.op or "IAO", SS.gl)
                 SBAR_RENDER(_sbar)
-            DISC()
+
+    # ── Footer légal — affiché une seule fois ──────────────────────────────
+    st.divider()
+    DISC()
 
 except Exception as _e:
     st.error(f"🚨 Erreur : {_e}")

@@ -74,7 +74,7 @@ PIRI_PLAFOND_GE70 = 6.0    # mg — plafond bolus ≥ 70 kg
 # ── Naloxone — BCFI ───────────────────────────────────────────────────────────
 NALOO_ADULTE_MG = 0.4    # mg — bolus IV adulte
 NALOO_PED_KG    = 0.01   # mg/kg — enfant
-NALOO_DEP_MG    = 2.0    # mg — dépression respiratoire sévère
+NALOO_DEP_MG    = 0.04   # mg — titration douce si dépendance (40 µg / 2 min — BCFI)
 
 # ── Morphine IV — BCFI / SFAR ────────────────────────────────────────────────
 MORPH_MIN_KG     = 0.05   # mg/kg — dose initiale
@@ -85,21 +85,24 @@ MORPH_PLAFOND_GE100 = 15.0 # mg — plafond patient > 100 kg
 
 # ── Ceftriaxone IV — BCFI ────────────────────────────────────────────────────
 CEFRTRX_ADULTE_G = 2.0    # g — dose adulte
-CEFRTRX_PED_KG   = 0.05   # g/kg — enfant (50 mg/kg)
+CEFRTRX_PED_KG   = 0.1    # g/kg — 100 mg/kg dose unique (urgences : purpura, méningite — BCFI)
 
-# ── Litican (kétoprofène lysine) — BCFI ──────────────────────────────────────
-LITICAN_DOSE_ADULTE_MG  = 80.0   # mg — adulte ≥ 50 kg
+# ── Litican® (Alizapride) — BCFI ────────────────────────────────────────────
+# Antiémétique dopaminergique (antagoniste D2) — famille benzamides substitués
+# Indications : N/V, colique néphrétique, migraine
+# NE PAS CONFONDRE avec : Tiémonium (Visceralgine®) ou Phloroglucinol (Spasfon®)
+LITICAN_DOSE_ADULTE_MG  = 50.0   # mg — adulte (Alizapride — ampoule 50mg/2ml)
 LITICAN_DOSE_KG_ENF     = 1.0    # mg/kg — enfant < 50 kg
 LITICAN_DOSE_MAX_ENF_MG = 80.0   # mg — plafond enfant
 LITICAN_POIDS_PIVOT_KG  = 50.0   # kg
-LITICAN_DOSE_MAX_JOUR   = 240.0  # mg/jour
+LITICAN_DOSE_MAX_JOUR   = 200.0  # mg/jour (4×50mg max — RCP Litican®)
 
 # ── Anticonvulsivants — BCFI / Lignes directrices belges ─────────────────────
 # Diazépam rectal
 DIAZEPAM_RECT_KG     = 0.5    # mg/kg
 DIAZEPAM_RECT_MAX_MG = 10.0   # mg
 # Diazépam IV
-DIAZEPAM_IV_KG       = 0.2    # mg/kg
+DIAZEPAM_IV_KG       = 0.3    # mg/kg — urgences convulsives (BCFI / SFNP 2023)
 DIAZEPAM_IV_MAX_MG   = 10.0   # mg
 # Midazolam buccal
 MIDAZOLAM_BUCC_MAX_MG = 10.0  # mg
