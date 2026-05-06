@@ -242,13 +242,36 @@ def _h_colique(**kw) -> TriageResult:
 
 
 def _h_fievre(**kw) -> TriageResult:
-    """Fièvre."""
-    temp, det, age, gcs = kw["temp"], kw["det"], kw["age"], kw["gcs"]
-    if det.get("purpura") or det.get("raideur_nuque"):
-        return "1", "Fièvre + purpura/méningisme — Méningite suspecté — Ceftriaxone IMMÉDIAT", "FRENCH Tri 1"
+    """Fièvre — Adulte et enfant ≥ 3 mois.
+    Intègre les critères pédiatriques pour enfant < 3 ans saisi avec motif générique.
+    Source : SFMU FRENCH V1.1 / SFP 2017.
+    """
+    temp, det, age, gcs, fc = (
+        kw["temp"], kw["det"], kw["age"], kw["gcs"], kw["fc"]
+    )
+    # ── ALWAYS Tri 1 : Purpura ou méningisme ────────────────────────────────
+    if det.get("purpura") or det.get("raideur_nuque") or det.get("neff"):
+        return "1", "Fièvre + purpura/méningisme — Ceftriaxone 2 g IV IMMÉDIAT", "SPILF/SFP 2017"
+
+    # ── Auto-détection nourrisson ≤ 3 mois (motif générique) ────────────────
+    if age <= 3/12 and temp >= 38.0:
+        return "1", f"Fièvre {temp:.1f}°C nourrisson ≤ 3 mois — Bilan sepsis IMMÉDIAT", "SFP/SFMU"
+
+    # ── Enfant 3 mois – 3 ans : critères SFP ────────────────────────────────
+    if 3/12 < age < 3:
+        tachy = _fc_tachy_ped(fc, age)
+        if temp >= 40.0 or det.get("somnolence") or det.get("encephalopathie"):
+            return "2", f"Fièvre {temp:.1f}°C enfant < 3 ans — Signe de gravité", "FRENCH Pédiatrie"
+        if det.get("immunodepression") or det.get("cardiopathie"):
+            return "2", f"Fièvre enfant < 3 ans — terrain à risque", "FRENCH Pédiatrie"
+        if tachy or det.get("mauvaise_tolerance"):
+            return "3A", f"Fièvre {temp:.1f}°C — mauvaise tolérance", "FRENCH Tri 3A"
+        return "3B", f"Fièvre {temp:.1f}°C — bonne tolérance", "FRENCH Tri 3B"
+
+    # ── Adulte / grand enfant ≥ 3 ans ────────────────────────────────────────
     if temp >= 40.0 or gcs < 15:
         return "2", f"Fièvre élevée {temp:.1f}°C avec signe de gravité", "FRENCH Tri 2"
-    if temp >= 39.0 or (age < 3/12 and temp >= 38.0):
+    if temp >= 39.0:
         return "3A", f"Fièvre {temp:.1f}°C — Évaluation rapide", "FRENCH Tri 3A"
     if temp >= 38.0:
         return "4", f"Fièvre {temp:.1f}°C — Évaluation", "FRENCH Tri 4"
@@ -288,16 +311,35 @@ def _h_trauma_distal(**kw) -> TriageResult:
 
 
 def _h_hypoglycemie(**kw) -> TriageResult:
-    """Hypoglycémie."""
+    """Hypoglycémie — Arbre décisionnel BCFI / SFMU.
+
+    Tri 1 : Coma hypoglycémique (GCS ≤ 8) — Glucose IV IMMÉDIAT
+    Tri 2 : Hypoglycémie sévère (< 54 mg/dl) OU altération conscience (GCS 9-14)
+    Tri 3A : Hypoglycémie modérée (54-70 mg/dl) sans altération de conscience
+    Source : BCFI — Hypoglycémie / SFMU FRENCH V1.1.
+    """
     gl, gcs, det = kw.get("gl"), kw["gcs"], kw["det"]
+
+    # Tri 1 : coma hypoglycémique (GCS ≤ 8)
+    if gcs <= 8:
+        gl_txt = f"{gl:.0f} mg/dl" if gl is not None else "non mesurée"
+        return "1", f"Coma hypoglycémique — GCS {gcs}/15 — Glycémie {gl_txt} — Glucose IV IMMÉDIAT", "FRENCH Tri 1"
+
     if gl is not None:
-        if gl < GLYC["hs"] or gcs < 13:
-            return "1", f"Hypoglycémie sévère {gl:.0f} mg/dl — GCS {gcs} — Glucose IV IMMÉDIAT", "FRENCH Tri 1"
+        if gl < GLYC["hs"]:
+            # Hypoglycémie sévère < 54 mg/dl mais patient éveillé/conscient
+            if gcs >= 13:
+                return "2", f"Hypoglycémie sévère {gl:.0f} mg/dl (< 3 mmol/l) — Glucose IV urgent", "FRENCH Tri 2"
+            else:
+                # GCS 9-12 : altération + hypoglycémie sévère
+                return "2", f"Hypoglycémie sévère {gl:.0f} mg/dl + GCS {gcs}/15 — Glucose IV IMMÉDIAT", "FRENCH Tri 2"
         if gl < GLYC["hm"]:
-            return "2", f"Hypoglycémie {gl:.0f} mg/dl — Correction urgente", "FRENCH Tri 2"
+            return "2", f"Hypoglycémie {gl:.0f} mg/dl (< 3,9 mmol/l) — Correction urgente", "FRENCH Tri 2"
+
+    # Conscience altérée sans glycémie connue → Tri 2 prudence
     if gcs < 15:
-        return "2", "Hypoglycémie suspecté — Conscience altérée", "FRENCH Tri 2"
-    return "3A", "Hypoglycémie légère — Correction per os / IV", "FRENCH Tri 3A"
+        return "2", f"Conscience altérée GCS {gcs}/15 — Hypoglycémie à exclure — Glycémie capillaire urgente", "FRENCH Tri 2"
+    return "3A", "Hypoglycémie légère — Correction per os / IV selon conscience", "FRENCH Tri 3A"
 
 
 def _h_hyperglycemie(**kw) -> TriageResult:
@@ -460,8 +502,8 @@ def _h_ped_gastro(**kw) -> TriageResult:
         return "2", f"Nourrisson {int(age*12)} mois — vomissements + fièvre", "FRENCH Pédiatrie"
     if tachy and temp >= 38.5:
         return "2", f"Tachycardie FC {fc:.0f} + fièvre {temp:.1f}°C", "FRENCH Pédiatrie"
-    if (det.get("vomiss_freq") or 0) >= _VOMISS_FREQ_SEVERE:
-        return "2", f"Vomissements ≥ {_VOMISS_FREQ_SEVERE}/h", "FRENCH Pédiatrie"
+    if det.get("vomiss_freq"):
+        return "2", f"Vomissements > {_VOMISS_FREQ_SEVERE}/h", "FRENCH Pédiatrie"
     if det.get("refus_alimentation") and (tachy or det.get("deshydrat_legere")):
         return "2", "Refus alimentaire + déshydratation", "FRENCH Pédiatrie"
 
@@ -522,13 +564,33 @@ def _h_ped_epilepsie(**kw) -> TriageResult:
 
 
 def _h_ped_asthme(**kw) -> TriageResult:
-    """Pédiatrie — Asthme / Bronchospasme."""
-    spo2, fr, det = kw["spo2"], kw["fr"], kw["det"]
-    if spo2 < 90 or det.get("silencieux"):
-        return "1", "Asthme pédiatrique sévère / silencieux — Tri 1", "FRENCH Tri 1"
-    if spo2 < 94 or fr > 30:
-        return "2", f"Asthme pédiatrique — SpO2 {spo2:.0f}%", "FRENCH Tri 2"
-    return "3A", "Asthme pédiatrique modéré — Salbutamol", "FRENCH Tri 3A"
+    """Pédiatrie — Asthme / Bronchospasme — Arbre GINA pédiatrique.
+
+    Tri 1 : Asthme quasi-fatal (silence auscultatoire, cyanose, épuisement)
+    Tri 2 : Asthme sévère (SpO2 < 92%, orthopnée, incapacité à parler)
+    Tri 3A : Asthme modéré (SpO2 92-95%, FC/FR élevées, parole possible)
+    Tri 3B : Asthme léger (SpO2 ≥ 95%, parole normale, bon état général)
+    Source : GINA 2023 Pédiatrique / BTS 2022 / SFMPED.
+    """
+    spo2, fr, fc, age, det = kw["spo2"], kw["fr"], kw["fc"], kw["age"], kw["det"]
+    tachy = _fc_tachy_ped(fc, age)
+
+    # Tri 1 — Asthme quasi-fatal / menace vitale
+    if (det.get("silencieux") or det.get("cyanose") or
+            det.get("epuisement") or spo2 < 88):
+        return "1", f"Asthme quasi-fatal — SpO2 {spo2:.0f}% / silence / cyanose — Tri 1", "GINA 2023 Pédiatrie"
+
+    # Tri 2 — Asthme sévère
+    if (spo2 < 92 or not det.get("parole", True) or
+            det.get("orthopnee") or det.get("tirage_severe")):
+        return "2", f"Asthme sévère — SpO2 {spo2:.0f}% / orthopnée / parole impossible", "GINA 2023 Pédiatrie"
+
+    # Tri 3A — Asthme modéré : SpO2 92-95% ou FR très haute pour l'âge
+    if spo2 < 95 or (tachy and fr > (40 if age < 1 else 30 if age < 5 else 25)):
+        return "3A", f"Asthme modéré — SpO2 {spo2:.0f}% — Salbutamol nébulisation", "GINA 2023 Pédiatrie"
+
+    # Tri 3B — Asthme léger : SpO2 ≥ 95%, parole normale
+    return "3B", f"Asthme léger — SpO2 {spo2:.0f}% — Salbutamol inhalateur", "GINA 2023 Pédiatrie"
 
 
 def _h_malaise(**kw) -> TriageResult:
@@ -620,6 +682,202 @@ def _h_non_urgent(**kw) -> TriageResult:
 # TABLE DE DISPATCH (lookup O(1) normalisé)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+
+def _h_ped_bronchiolite(**kw) -> TriageResult:
+    """Pédiatrie — Bronchiolite (nourrisson < 2 ans) — Score de Wang adapté.
+
+    Tri 1 : Apnée / SpO2 < 88% / épuisement
+    Tri 2 : SpO2 < 92%, tirage majeur, nourrisson < 3 mois, prématuré
+    Tri 3A : SpO2 92-95%, signes modérés, alimentation possible
+    Tri 3B : SpO2 ≥ 95%, léger, alimentation normale
+    Source : Wang et al., JAMA 1992 / SFP 2020 / HAS 2019 Bronchiolite.
+    """
+    spo2, fr, fc, age, det = kw["spo2"], kw["fr"], kw["fc"], kw["age"], kw["det"]
+
+    # Tri 1 — Détresse vitale
+    if (spo2 < 88 or det.get("apnee") or det.get("cyanose") or
+            det.get("epuisement")):
+        return "1", f"Bronchiolite critique — SpO2 {spo2:.0f}% / apnée — Tri 1", "HAS 2019 Bronchiolite"
+
+    # Tri 2 — Signes sévères
+    if (spo2 < 92 or (age < 0.25 and spo2 < 95) or    # < 3 mois = plus strict
+            det.get("tirage_severe") or det.get("premature") or
+            det.get("alimentation_impossible") or (age < 0.25)):
+        return "2", f"Bronchiolite sévère — SpO2 {spo2:.0f}% / nourrisson < 3 mois", "HAS 2019 Bronchiolite"
+
+    # Tri 3A — Signes modérés
+    if spo2 < 95 or det.get("tirage_mod") or det.get("alimentation_difficile"):
+        return "3A", f"Bronchiolite modérée — SpO2 {spo2:.0f}% — Surveillance", "HAS 2019 Bronchiolite"
+
+    return "3B", f"Bronchiolite légère — SpO2 {spo2:.0f}% — Surveillance ambulatoire", "HAS 2019 Bronchiolite"
+
+
+def _h_ped_deshydratation(**kw) -> TriageResult:
+    """Pédiatrie — Déshydratation isolée — Critères ESPGHAN 2014.
+
+    Évaluation clinique en pourcentage du poids corporel perdu :
+    < 5% : légère | 5-10% : modérée | > 10% : sévère
+    Source : ESPGHAN 2014 / SRAEP / SFP.
+    """
+    det, fc, pas, age = kw["det"], kw["fc"], kw["pas"], kw["age"]
+    tachy   = _fc_tachy_ped(fc, age)
+    si_val  = fc / max(1.0, pas)
+
+    # Tri 1 — Choc hypovolémique
+    if si_val >= 1.0 or pas < 70 or det.get("deshydrat_severe"):
+        return "1", f"Choc hypovolémique — SI {si_val:.2f} / PAS {pas:.0f} mmHg", "ESPGHAN 2014"
+
+    # Tri 2 — Déshydratation modérée (5-10%)
+    if det.get("deshydrat_moderee") or (tachy and det.get("yeux_creux")):
+        return "2", "Déshydratation modérée — Réhydratation urgente", "ESPGHAN 2014"
+
+    # Tri 2 — Nourrisson < 3 mois déshydraté
+    if age < 0.25 and (tachy or det.get("deshydrat_legere")):
+        return "2", f"Nourrisson {int(age*12)} mois déshydraté — Bilan urgent", "SFP/SFMU 2017"
+
+    # Tri 3A — Déshydratation légère (< 5%)
+    if det.get("deshydrat_legere") or tachy:
+        return "3A", "Déshydratation légère — SRO per os", "ESPGHAN 2014"
+
+    return "3B", "Déshydratation minime — Conseils et surveillance ambulatoire", "FRENCH Tri 3B"
+
+
+def _h_ped_douleur_abdominale(**kw) -> TriageResult:
+    """Pédiatrie — Douleur abdominale — Drapeaux rouges chirurgicaux.
+
+    Source : SFCP / SFMPED / HAS.
+    """
+    det, fc, pas, temp, age = kw["det"], kw["fc"], kw["pas"], kw["temp"], kw["age"]
+    si_val = fc / max(1.0, pas)
+
+    # Tri 1 / 2 — Péritonite / urgence chirurgicale
+    if det.get("defense_musculaire") or det.get("contracture"):
+        return "2", "Abdomen chirurgical pédiatrique — Défense / contracture", "SFCP Tri 2"
+    if si_val >= 1.0 or pas < 80:
+        return "2", f"Douleur abdominale + choc hémodynamique SI {si_val:.2f}", "FRENCH Tri 2"
+    if det.get("bilieux"):
+        return "2", "Vomissements bilieux + douleur — Occlusion à exclure", "FRENCH Pédiatrie Tri 2"
+    if det.get("pleurs_inconsolables") and age < 2:
+        return "2", "Pleurs inconsolables + douleur — IIA suspecte", "FRENCH Pédiatrie Tri 2"
+
+    # Tri 3A — Douleur signficative
+    if det.get("douleur_fosse_iliaque_droite") or det.get("appendicite_suspectee"):
+        return "3A", "Douleur FID — Appendicite à exclure", "FRENCH Tri 3A"
+    if temp >= 38.5:
+        return "3A", "Douleur abdominale + fièvre", "FRENCH Tri 3A"
+
+    return "3B", "Douleur abdominale pédiatrique modérée", "FRENCH Tri 3B"
+
+
+def _h_ped_trauma(**kw) -> TriageResult:
+    """Pédiatrie — Traumatisme pédiatrique — Critères ATLS/PHTLS adaptés.
+
+    Source : PHTLS 10th / ATLS 11th — Traumatisme pédiatrique.
+    """
+    det, fc, pas, spo2, gcs, age = (kw["det"], kw["fc"], kw["pas"],
+                                     kw["spo2"], kw["gcs"], kw["age"])
+    tachy  = _fc_tachy_ped(fc, age)
+    si_val = fc / max(1.0, pas)
+
+    # Tri 1 — ACR traumatique ou détresse vitale
+    if gcs <= 8 or spo2 < 88 or si_val >= 1.2:
+        return "1", f"Traumatisme pédiatrique grave — GCS {gcs} / SI {si_val:.2f}", "ATLS 11th Pédiatrie"
+
+    # Tri 2 — Mécanisme grave + instabilité
+    if (det.get("haute_cinetique") or det.get("tc_gcs_13") or
+            tachy or det.get("anticoag")):
+        return "2", "Traumatisme pédiatrique — mécanisme grave / tachycardie", "ATLS 11th Pédiatrie"
+
+    # Tri 3A — Traumatisme significatif
+    if det.get("deformation") or det.get("impotence_totale") or det.get("perte_conscience"):
+        return "3A", "Traumatisme pédiatrique modéré", "FRENCH Tri 3A"
+
+    return "4", "Traumatisme pédiatrique léger", "FRENCH Tri 4"
+
+
+
+
+def _h_trauma_axial(**kw) -> TriageResult:
+    """Traumatisme thorax / abdomen / rachis cervical.
+    Couvre : pneumothorax, hémothorax, lésion rachis cervical, traumatisme abdominal fermé.
+    Source : ATLS 11th / PHTLS 10th — Damage Control.
+    """
+    det, fc, pas, spo2, gcs = kw["det"], kw["fc"], kw["pas"], kw["spo2"], kw["gcs"]
+    si_val = fc / max(1.0, pas)
+
+    # Tri 1 — Détresse vitale / mécanisme pénétrant
+    if det.get("penetrant") or det.get("haute_cinetique"):
+        return "1", "Traumatisme pénétrant / haute cinétique — Déchocage", "ATLS 11th"
+    if spo2 < 90 or det.get("pneumothorax_compressif"):
+        return "1", f"Traumatisme thoracique + SpO2 {spo2:.0f}% / pneumothorax compressif", "ATLS 11th"
+    if gcs <= 8:
+        return "1", f"Traumatisme + GCS {gcs}/15 — Détresse neurologique", "FRENCH Tri 1"
+
+    # Tri 2 — Instabilité hémodynamique
+    if si_val >= 1.0 or pas < 90:
+        return "2", f"Traumatisme axial + choc hémodynamique SI {si_val:.2f}", "ATLS 11th"
+    if det.get("rachis_instable") or det.get("deficit_neuro"):
+        return "2", "Suspicion lésion rachidienne instable / déficit neurologique", "ATLS 11th"
+    if spo2 < 94 or det.get("dyspnee"):
+        return "2", f"Traumatisme thoracique + dyspnée / SpO2 {spo2:.0f}%", "FRENCH Tri 2"
+
+    # Tri 3A — Stabilité relative mais mécanisme significatif
+    return "3A", "Traumatisme axial hémodynamiquement stable — Bilan complet urgent", "FRENCH Tri 3A"
+
+
+def _h_trauma_pelvi(**kw) -> TriageResult:
+    """Traumatisme bassin / hanche / fémur.
+    Risque hémorragique majeur : fracture du bassin = jusqu'à 3-4 L de saignement.
+    Source : ATLS 11th / PHTLS 10th — Pelvic trauma.
+    """
+    det, fc, pas, age, atcd = kw["det"], kw["fc"], kw["pas"], kw["age"], kw["det"].get("atcd",[]) or []
+    si_val = fc / max(1.0, pas)
+
+    # Tri 1 — Choc hémorragique / instabilité pelvienne
+    if si_val >= 1.5 or pas < 70:
+        return "1", f"Fracture bassin + choc hémorragique SI {si_val:.2f}", "ATLS 11th"
+    if det.get("instabilite_pelvienne") or det.get("fracture_ouverte"):
+        return "1", "Fracture bassin instable / ouverte — Risque hémorragique majeur", "ATLS 11th"
+
+    # Tri 2 — Instabilité débutante ou terrain anticoagulé
+    if si_val >= 1.0 or pas < 90:
+        return "2", f"Fracture pelvi-fémorale + choc débutant SI {si_val:.2f}", "FRENCH Tri 2"
+    has_anticoag = any(_norm(a) in ("anticoagulants / aod","anticoagulants","avk","aod") for a in atcd)
+    if has_anticoag:
+        return "2", "Fracture bassin/fémur sous anticoagulants — Risque hémorragique", "Worst-Case Terrain"
+    if det.get("fracture_fémur") or det.get("impotence_totale"):
+        return "2", "Fracture fémur / bassin — Douleur intense + impotence totale", "FRENCH Tri 2"
+
+    return "3A", "Traumatisme pelvi-fémoral — Évaluation urgente", "FRENCH Tri 3A"
+
+
+def _h_grossesse_complication(**kw) -> TriageResult:
+    """Complication grossesse T1/T2 — GEU, Fausse couche, hémorragie.
+    Source : SFMU / SEGO / Protocoles obstétriques Hainaut.
+    """
+    det, fc, pas, age = kw["det"], kw["fc"], kw["pas"], kw["age"]
+    si_val = fc / max(1.0, pas)
+
+    # Tri 1 — Choc hémorragique (GEU rompue, HPP)
+    if si_val >= 1.0 or pas < 90:
+        return "1", f"Complication grossesse + choc SI {si_val:.2f} — GEU rompue ?", "SFMU Tri 1"
+
+    # Tri 2 — Douleur + métrorragie (GEU non rompue, FC)
+    if det.get("douleur_pelvienne") and det.get("metrorragies"):
+        return "2", "Douleur pelvienne + métrorragies — GEU à exclure en urgence", "SFMU Tri 2"
+    if det.get("geu_suspectee") or det.get("beta_hcg_pos"):
+        return "2", "GEU suspectée — Écho pelvi-écho urgente", "SFMU Tri 2"
+    if det.get("metrorragies_abondantes"):
+        return "2", "Métrorragies abondantes T1/T2 — FC en cours ?", "FRENCH Tri 2"
+
+    # Tri 3A — Métrorragies modérées, pas de choc
+    if det.get("metrorragies") or det.get("douleur_pelvienne"):
+        return "3A", "Saignement / douleur T1/T2 — Bilan échographique urgent", "FRENCH Tri 3A"
+
+    return "3B", "Complication grossesse sans urgence vitale immédiate", "FRENCH Tri 3B"
+
+
 _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "arret cardiorespiratoire":                      _h_acr,
     "douleur thoracique / sca":                      _h_thoracique,
@@ -656,6 +914,14 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "traumatisme thorax/abdomen/rachis cervical":    _h_trauma_axial,
     "traumatisme bassin/hanche/femur":               _h_trauma_axial,
     "traumatisme membre / epaule":                   _h_trauma_distal,
+    "traumatisme thorax / abdomen / rachis cervical": _h_trauma_axial,
+    "traumatisme thorax/abdomen/rachis cervical":     _h_trauma_axial,
+    "traumatisme bassin / hanche / femur":            _h_trauma_pelvi,
+    "traumatisme bassin/hanche/femur":                _h_trauma_pelvi,
+    "complication grossesse t1 / t2":                 _h_grossesse_complication,
+    "complication grossesse t1/t2":                   _h_grossesse_complication,
+    "geu":                                            _h_grossesse_complication,
+    "grossesse extra-uterine":                        _h_grossesse_complication,
     "hypoglycemie":                                  _h_hypoglycemie,
     "hyperglycemie / cetoacidose":                   _h_hyperglycemie,
     "hyperglycemie":                                 _h_hyperglycemie,
@@ -671,8 +937,8 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "idee / comportement suicidaire":                _h_psychiatrie,
     "accouchement imminent":                         _h_accouchement,
     "accouchement imminent ou realise":              _h_accouchement,
-    "complication grossesse t1/t2":                  _h_grossesse_t1t2,
-    "probleme de grossesse 1er et 2eme trimestre":   _h_grossesse_t1t2,
+    "complication grossesse t1/t2":                  _h_grossesse_complication,
+    "probleme de grossesse 1er et 2eme trimestre":   _h_grossesse_complication,
     "menorragie / metrorragie":                      _h_metrorragie,
     "meno-metrorragie":                              _h_metrorragie,
     "corps etranger / brulure oculaire":             _h_oeil,
@@ -686,6 +952,13 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "pediatrie - crise epileptique":                 _h_ped_epilepsie,
     "convulsion hyperthermique":                     _h_ped_epilepsie,
     "pediatrie - asthme / bronchospasme":            _h_ped_asthme,
+    "bronchospasme pediatrique":                     _h_ped_asthme,
+    "pediatrie - bronchiolite":                      _h_ped_bronchiolite,
+    "bronchiolite":                                  _h_ped_bronchiolite,
+    "pediatrie - deshydratation":                    _h_ped_deshydratation,
+    "deshydratation nourrisson":                     _h_ped_deshydratation,
+    "pediatrie - douleur abdominale":                _h_ped_douleur_abdominale,
+    "pediatrie - traumatisme":                       _h_ped_trauma,
     "renouvellement ordonnance":                     _h_non_urgent,
     "examen administratif":                          _h_non_urgent,
     "autre motif":                                   _h_non_urgent,
@@ -713,8 +986,12 @@ def _worst_case_terrain(
     # Trauma + anticoagulants → Tri 2 minimum
     is_trauma = any(t in m for t in ("trauma", "traumatisme", "fracture", "brulure", "chute"))
     has_anticoag = any(a in atcd_norm for a in (
-        "anticoagulants/aod", "anticoagulants", "aod", "avk",
-        "antiagrégants plaquettaires", "antiagrégants",
+        "anticoagulants / aod",    # _norm("Anticoagulants/AOD")
+        "anticoagulants",
+        "aod", "avk",
+        "antiagregatnts plaquettaires",
+        "antiagregatnts",
+        "antiagrégants",
     ))
     if is_trauma and has_anticoag:
         return "2", "Traumatisme + anticoagulants — Risque hémorragique majeur", "Worst-Case Terrain"
@@ -747,6 +1024,17 @@ def _worst_case_terrain(
     # Gériatrie ≥ 80 ans + chute/syncope → Tri 3A minimum
     if age >= 80 and any(t in m for t in ("chute", "malaise", "syncope", "fracture")):
         return "3A", "Patient ≥ 80 ans + chute/syncope — Bilan étiologique prioritaire", "Worst-Case Terrain"
+
+    # CFS ≥ 6 (fragile sévère) + tout motif aiguë → upgrade d'un niveau de priorité
+    # Source : Rockwood K, CMAJ 2005 — Fragilité et pronostic aux urgences
+    cfs_score = int(det.get("cfs_score") or 0)
+    if cfs_score >= 7 and age >= 65:
+        return "3A", f"Fragilité sévère CFS {cfs_score} — Majoration Tri 3A minimum", "Rockwood CMAJ 2005"
+
+    # Femme enceinte T3 (> 28 SA) + tout motif cardiovasculaire → Tri 2
+    if any("grossesse" in a for a in atcd_norm):
+        if any(t in m for t in ("douleur thoracique", "tachycardie", "hypotension", "malaise")):
+            return "2", "Grossesse T3 + motif cardiovasculaire — Urgence obstétricale à exclure", "Worst-Case Terrain"
 
     return None
 
@@ -812,11 +1100,25 @@ def french_triage(
         else:
             result = ("3B", f"Évaluation standard — {motif}", "FRENCH Tri 3B")
 
-        # ── Niveau 3 : Ajustement NEWS2 (jamais downgrade) ───────────────
+        # ── Niveau 3 : Ajustement NEWS2 adulte (jamais downgrade) ──────────
         if n2 >= NEWS2_RISQUE_ELEVE:
             result = _more_urgent(result, ("2", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_ELEVE} — Risque élevé", "NEWS2"))
         elif n2 >= NEWS2_RISQUE_MOD:
             result = _more_urgent(result, ("3A", f"NEWS2 {n2} ≥ {NEWS2_RISQUE_MOD} — Risque modéré", "NEWS2"))
+
+        # ── Niveau 3b : PEWS pour pédiatrie < 16 ans (NEWS2 non validé) ──
+        if 0 < age < 16:
+            try:
+                from clinical.news2 import calculer_pews
+                pews_s, _, _ = calculer_pews(fc, fr, spo2, gcs, temp, age)
+                if pews_s >= 7:
+                    result = _more_urgent(result, ("1", f"PEWS {pews_s} ≥ 7 — Appel réanimation pédiatrique IMMÉDIAT", "PEWS Monaghan 2005"))
+                elif pews_s >= 5:
+                    result = _more_urgent(result, ("2", f"PEWS {pews_s} ≥ 5 — Appel médecin pédiatrique urgent", "PEWS Monaghan 2005"))
+                elif pews_s >= 3:
+                    result = _more_urgent(result, ("3A", f"PEWS {pews_s} ≥ 3 — Surveillance rapprochée pédiatrique", "PEWS Monaghan 2005"))
+            except Exception:
+                pass
 
         # ── Niveau 4 : Worst-Case Scenario terrain (jamais downgrade) ────
         terrain = _worst_case_terrain(motif, det, age, fc, pas, temp, gcs)
@@ -826,8 +1128,8 @@ def french_triage(
         return result
 
     except Exception as e:
-        # Failsafe : sur-triage conservateur — mieux Tri M que sous-estimer
-        return "M", f"Erreur moteur triage — Évaluation médicale IMMÉDIATE ({e})", "Sécurité Tri M"
+        # Failsafe : ne jamais laisser planter — triage conservateur Tri 2
+        return "2", f"Erreur moteur triage — Évaluation médicale urgente ({e})", "Sécurité Tri 2"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -839,9 +1141,11 @@ def verifier_coherence(
     gcs: int, temp: float, eva: int,
     motif: str, atcd: list, det: dict,
     n2: int, gl: Optional[float] = None,
+    age: float = 45.0,
+    niv: str = "",
 ) -> Tuple[List[str], List[str]]:
     """
-    Alertes transversales post-triage.
+    Alertes transversales post-triage — Cohérence clinique complète.
     Retourne (alertes_danger, alertes_warning).
     Source : SFMU / BCFI — Critères de vigilance IAO.
     """
@@ -849,54 +1153,130 @@ def verifier_coherence(
     warning: List[str] = []
 
     try:
-        # ── Shock Index ────────────────────────────────────────────────────
+        # ── Délai médecin — Tri M et Tri 1 ────────────────────────────────────
+        if niv in ("M", "1"):
+            danger.append(
+                f"🟣 TRI {niv} — DÉLAI MÉDECIN CIBLE ≤ 5 MINUTES — "
+                f"Si pas de médecin disponible : appel SAMU 100 / 112"
+            )
+
+        # ── Shock Index ────────────────────────────────────────────────────────
         si_val = fc / pas if pas > 0 else 0
         if si_val >= 1.5:
             danger.append(f"🔴 Shock Index {si_val:.2f} ≥ 1.5 — Choc décompensé")
         elif si_val >= 1.0:
             warning.append(f"🟠 Shock Index {si_val:.2f} ≥ 1.0 — Instabilité hémodynamique")
 
-        # ── Triade létale trauma ───────────────────────────────────────────
-        if "trauma" in _norm(motif):
-            if temp < 36.0 and si_val >= 1.0 and det.get("anticoagulants"):
-                danger.append("🔴 Triade létale suspecte : hypothermie + choc + anticoagulants")
+        atcd_norm = {_norm(a) for a in (atcd or [])}
+        m_norm = _norm(motif)
 
-        # ── Hypoglycémie ───────────────────────────────────────────────────
+        # ── Triade létale trauma ───────────────────────────────────────────────
+        if "trauma" in m_norm:
+            if temp < 36.0 and si_val >= 1.0:
+                danger.append("🔴 Triade létale suspecte : hypothermie + choc — Acide tranexamique 1 g IV IMMÉDIAT")
+
+        # ── AOD + TC — Antidote direct + TDM urgent ───────────────────────────
+        has_aod     = any(a in atcd_norm for a in (
+            "anticoagulants / aod", "anticoagulants/aod", "anticoagulants", "aod", "avk",
+        ))
+        has_antiagg = any(a in atcd_norm for a in (
+            "antiagregants plaquettaires", "antiagregatnts plaquettaires",
+            "antiagregatnts plaquettaires",
+        ))
+        if has_aod and "traumatisme cranien" in m_norm:
+            danger.append(
+                "🔴 TC + AOD / AVK — TDM CÉRÉBRAL URGENT même si GCS 15. "
+                "Si dabigatran : Idarucizumab (Praxbind®) 5 g IV. "
+                "Si rivaroxaban/apixaban : Andexanet alfa ou FEIBA. "
+                "Si AVK : PPSB + Vitamine K 10 mg IV"
+            )
+        elif has_aod and si_val >= 1.0:
+            danger.append(
+                "🔴 AOD + choc hémorragique — Antidote selon molécule : "
+                "Dabigatran → Idarucizumab 5 g IV | Xa-inhibiteurs → Andexanet alfa | AVK → PPSB"
+            )
+        elif has_aod:
+            warning.append("🟠 Anticoagulants/AOD — Risque hémorragique amplifié — Vérifier l'antidote disponible")
+
+        # ── Hypoglycémie ───────────────────────────────────────────────────────
         if gl is not None:
             if gl < 54:
-                danger.append(f"🔴 Hypoglycémie sévère {gl:.0f} mg/dl ({gl/18.016:.1f} mmol/l) — Glucose IV IMMÉDIAT")
+                danger.append(f"🔴 Hypoglycémie sévère {gl:.0f} mg/dl ({gl/18.016:.1f} mmol/l) — Glucose 30 % IV IMMÉDIAT")
             elif gl < 70:
                 warning.append(f"🟠 Hypoglycémie modérée {gl:.0f} mg/dl — Correction urgente")
             elif gl > 360:
-                danger.append(f"🔴 Hyperglycémie sévère {gl:.0f} mg/dl — Cétoacidose à exclure")
+                danger.append(f"🔴 Hyperglycémie sévère {gl:.0f} mg/dl — Cétoacidose / coma hyperosm.")
             elif gl > 180:
                 warning.append(f"🟠 Hyperglycémie {gl:.0f} mg/dl — Bilan")
 
-        # ── Douleur non traitée ────────────────────────────────────────────
+        # ── Douleur sévère non contrôlée ──────────────────────────────────────
         if eva >= 8:
-            danger.append(f"🔴 EVA {eva}/10 — Douleur sévère non contrôlée — Antalgie urgente")
+            danger.append(f"🔴 EVA {eva}/10 — Douleur sévère non contrôlée — Antalgie forte requise")
         elif eva >= 5:
-            warning.append(f"🟠 EVA {eva}/10 — Antalgie à initier")
+            warning.append(f"🟠 EVA {eva}/10 — Antalgie à initier (palier selon motif)")
 
-        # ── Sepsis (critères croisés) ──────────────────────────────────────
+        # ── Sepsis adulte — qSOFA croisé ──────────────────────────────────────
         q_criteria = sum([fr >= 22, gcs < 15, pas <= 100])
         if q_criteria >= 2 and temp >= 38.0:
-            danger.append("🔴 qSOFA ≥ 2 + fièvre — SEPSIS SUSPECTÉ — Bundle 1h")
+            danger.append("🔴 qSOFA ≥ 2 + fièvre — SEPSIS SUSPECTÉ — Bundle 1h (lactates, hémocultures, antibiothérapie)")
+        # Sepsis pédiatrique — critères SIRS (IPSCC 2024, Goldstein 2005)
+        if age < 18 and temp >= 38.3 and fc > 150 and fr > 30:
+            danger.append("🔴 SIRS pédiatrique — Sepsis suspecté — Accès vasculaire + remplissage 10 ml/kg")
 
-        # ── Alertes ATCD critiques ─────────────────────────────────────────
-        atcd_norm = {_norm(a) for a in (atcd or [])}
-        if "anticoagulants/aod" in atcd_norm and eva >= 5:
-            warning.append("🟠 Anticoagulants + douleur — Risque hémorragique à évaluer")
-        if "immunodepression" in atcd_norm or "chimiotherapie en cours" in atcd_norm:
+        # ── Immunodépression ──────────────────────────────────────────────────
+        if any(a in atcd_norm for a in ("immunodepression", "chimiotherapie en cours")):
             if temp >= 38.3:
-                danger.append("🔴 Immunodéprimé + fièvre ≥ 38.3°C — Aplasie fébrile à exclure")
+                danger.append("🔴 Immunodéprimé + fièvre ≥ 38.3°C — Aplasie fébrile — NFS + hémocultures URGENTS")
+
+        # ── Grossesse ─────────────────────────────────────────────────────────
         if "grossesse" in atcd_norm:
             if pas > 160:
-                danger.append("🔴 HTA sévère chez femme enceinte — Pré-éclampsie")
+                danger.append(
+                    "🔴 HTA ≥ 160 mmHg chez femme enceinte — Pré-éclampsie sévère — "
+                    "MgSO4 4 g IV en 20 min (anticonvulsivant 1ère ligne) — Avis obstétrical IMMÉDIAT"
+                )
+            elif pas > 140:
+                warning.append("🟠 HTA ≥ 140 mmHg grossesse — Pré-éclampsie à exclure — Protéinurie + bilan")
             if pas < 90:
-                danger.append("🔴 Hypotension chez femme enceinte — Urgence obstétricale")
-        if "beta-bloquants" in atcd_norm and fc > 90:
-            warning.append("🟠 Bêtabloquants : tachycardie relative masquée — FC peut être sous-estimée")
+                danger.append("🔴 Hypotension chez femme enceinte — Urgence obstétricale — Décubitus latéral gauche")
+
+        # ── Bêtabloquants ─────────────────────────────────────────────────────
+        if any(a in atcd_norm for a in ("beta-bloquants", "betabloquants")):
+            if fc > 90:
+                warning.append("🟠 Bêtabloquants : tachycardie relative masquée — Choc peut se présenter avec FC normale")
+            if fc < 50:
+                danger.append("🔴 Bêtabloquants + bradycardie < 50 — Intoxication/surdosage à exclure — Glucagon 3 mg IV antidote")
+
+        # ── Sevrage alcoolique ─────────────────────────────────────────────────
+        if det.get("alcool_chronique") or det.get("sevrage_alcool"):
+            warning.append(
+                "🟠 Sevrage alcoolique potentiel — Thiamine 500 mg IV AVANT tout glucosé — "
+                "Score CIWA-Ar — Benzodiazépine si CIWA ≥ 8"
+            )
+
+        # ── BPCO + O2 ─────────────────────────────────────────────────────────
+        bpco = any(a in atcd_norm for a in ("bpco",))
+        if bpco and det.get("o2_supp"):
+            if det.get("spo2", spo2) > 96:
+                warning.append("🟠 BPCO + SpO2 > 96 % sous O2 — Risque narcose CO2 — Titrer O2 cible 88-92 %")
+
+        # ── Drépanocytose ─────────────────────────────────────────────────────
+        if "drepanocytose" in atcd_norm:
+            if eva >= 6:
+                warning.append("🟠 Drépanocytose + EVA ≥ 6 — Morphine titrée précoce (SFAR — no opioid-free drépanocytose)")
+            if temp >= 38.0:
+                danger.append("🔴 Drépanocytose + fièvre — Crise vaso-occlusive + sepsis possibles — Hémocultures urgentes")
+
+        # ── Delta NEWS2 (aggravation entre réévaluations) ────────────────────
+        n2_prev = det.get("n2_precedent")
+        if n2_prev is not None:
+            delta = n2 - int(n2_prev)
+            if delta >= 3:
+                danger.append(f"🔴 Δ NEWS2 +{delta} — Aggravation rapide — Réévaluation médicale URGENTE")
+            elif delta >= 1:
+                warning.append(f"🟠 Δ NEWS2 +{delta} — Score en hausse — Surveillance renforcée")
+            elif delta <= -2:
+                warning.append(f"🟢 Δ NEWS2 {delta} — Amélioration clinique")
 
     except Exception as e:
         warning.append(f"Erreur vérification cohérence : {e}")

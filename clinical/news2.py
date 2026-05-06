@@ -132,3 +132,151 @@ def n2_meta(score: int, bpco: bool = False) -> dict:
             "risk": "Stable",
             "reco": "Surveillance de routine",
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PÉDIATRIE — PEWS + Valeurs normales par âge
+# NEWS2 est NON VALIDÉ avant 16 ans (RCP 2017).
+# Pour la pédiatrie, utiliser le PEWS (Paediatric Early Warning Score)
+# ou les seuils normaux par âge pour interpréter les constantes.
+#
+# Références :
+#   - Monaghan A, "Detecting and managing deterioration in children", 2005
+#   - Sécurité Sanitaire SPF Santé Publique (Belgique) — Signes vitaux normaux
+#   - PEWS : Parshuram CS et al., Arch Pediatr Adolesc Med 2011
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from typing import Dict
+
+# Valeurs normales pédiatriques par tranche d'âge (en années)
+# Format : (fc_min, fc_max, pas_min, pas_max, fr_min, fr_max, spo2_min)
+# Sources : SPF Santé Publique Belgique / Flemish Paediatric Society /
+#            PEWS Monaghan 2005 / SFP 2020
+_NORMALES_PED: Dict[str, tuple] = {
+    "nourr_0_1m":  (100, 180, 55,  80,  30, 60, 95),   # 0-1 mois  (<1/12 an)
+    "nourr_1_12m": (90,  160, 65,  100, 25, 55, 95),   # 1-12 mois
+    "enf_1_5a":    (75,  140, 75,  110, 20, 40, 95),   # 1-5 ans
+    "enf_5_12a":   (60,  120, 80,  120, 15, 30, 96),   # 5-12 ans
+    "ado_12_16a":  (55,  110, 85,  130, 12, 25, 96),   # 12-16 ans
+}
+
+
+def seuils_normaux_ped(age_ans: float) -> dict:
+    """Retourne les plages normales pour un enfant d'âge donné.
+    Source : SPF Santé Publique Belgique / PEWS Monaghan 2005.
+    """
+    if age_ans < 1/12:      # < 1 mois (< 0.0833 an)
+        fc_min,fc_max,pas_min,pas_max,fr_min,fr_max,spo2 = _NORMALES_PED["nourr_0_1m"]
+        label = "Nouveau-né / nourrisson < 1 mois"
+    elif age_ans < 1:
+        fc_min,fc_max,pas_min,pas_max,fr_min,fr_max,spo2 = _NORMALES_PED["nourr_1_12m"]
+        label = f"Nourrisson {int(age_ans*12)} mois"
+    elif age_ans < 5:
+        fc_min,fc_max,pas_min,pas_max,fr_min,fr_max,spo2 = _NORMALES_PED["enf_1_5a"]
+        label = f"Enfant {age_ans:.0f} an{'s' if age_ans >= 2 else ''}"
+    elif age_ans < 12:
+        fc_min,fc_max,pas_min,pas_max,fr_min,fr_max,spo2 = _NORMALES_PED["enf_5_12a"]
+        label = f"Enfant {age_ans:.0f} ans"
+    else:
+        fc_min,fc_max,pas_min,pas_max,fr_min,fr_max,spo2 = _NORMALES_PED["ado_12_16a"]
+        label = f"Adolescent {age_ans:.0f} ans"
+    return {
+        "label": label,
+        "fc": (fc_min, fc_max),
+        "pas": (pas_min, pas_max),
+        "fr": (fr_min, fr_max),
+        "spo2_min": spo2,
+    }
+
+
+def calculer_pews(
+    fc: float, fr: float, spo2: float, gcs: int,
+    temp: float, age_ans: float, supp_o2: bool = False,
+    vomissements: bool = False, agitation: bool = False,
+) -> Tuple[int, List[str], dict]:
+    """
+    PEWS — Paediatric Early Warning Score.
+    Validé pour les enfants de 0 à 16 ans.
+    Score > 4 = risque élevé de détérioration / appel médical urgent.
+
+    Critères scorés (0-3 par paramètre) :
+      - Comportement (agitation/somnolence)
+      - Cardiovasculaire (FC, TRC)
+      - Respiratoire (FR, SpO2, O2 supp.)
+
+    Source : Monaghan A, Nurs Stand 2005 — adapté Parshuram CS, JAMA 2011.
+    """
+    alertes: List[str] = []
+    s = 0
+    norm = seuils_normaux_ped(age_ans)
+    fc_min, fc_max = norm["fc"]
+    fr_min, fr_max = norm["fr"]
+    spo2_min       = norm["spo2_min"]
+
+    # ── Score comportement / conscience ──────────────────────────────────────
+    if gcs <= 8:
+        s += 3; alertes.append(f"GCS {gcs}/15 — Coma/stupeur")
+    elif gcs <= 12:
+        s += 2; alertes.append(f"GCS {gcs}/15 — Altération modérée")
+    elif gcs < 15 or agitation:
+        s += 1
+
+    # ── Score cardiovasculaire (FC par tranche d'âge) ────────────────────────
+    if fc < fc_min - 30 or fc > fc_max + 50:
+        s += 3; alertes.append(f"FC {fc:.0f} bpm — hors plage critique (normale {fc_min}-{fc_max})")
+    elif fc < fc_min - 15 or fc > fc_max + 30:
+        s += 2; alertes.append(f"FC {fc:.0f} bpm — hors plage modérée (normale {fc_min}-{fc_max})")
+    elif fc < fc_min or fc > fc_max:
+        s += 1
+
+    # ── Score respiratoire (FR + SpO2) ───────────────────────────────────────
+    if fr < fr_min - 10 or fr > fr_max + 20 or spo2 < 85:
+        s += 3; alertes.append(f"FR {fr:.0f}/min ou SpO2 {spo2:.0f}% — détresse respiratoire")
+    elif fr < fr_min - 5 or fr > fr_max + 10 or spo2 < 90:
+        s += 2; alertes.append(f"FR {fr:.0f}/min ou SpO2 {spo2:.0f}% (normale FR {fr_min}-{fr_max})")
+    elif fr < fr_min or fr > fr_max or spo2 < spo2_min or supp_o2:
+        s += 1
+        if supp_o2:
+            alertes.append("O2 supplémentaire administré")
+
+    # ── Vomissements post-opératoires ─────────────────────────────────────────
+    if vomissements:
+        s += 1
+
+    # ── Hyperthermie sévère ───────────────────────────────────────────────────
+    if temp >= 40.0:
+        s += 1; alertes.append(f"Hyperthermie {temp:.1f}°C ≥ 40°C")
+    elif temp <= 35.5:
+        s += 1; alertes.append(f"Hypothermie {temp:.1f}°C")
+
+    # ── Alertes PEWS ──────────────────────────────────────────────────────────
+    if s >= 7:
+        alertes.insert(0, f"PEWS {s} ≥ 7 — APPEL ÉQUIPE RÉANIMATION PÉDIATRIQUE IMMÉDIAT")
+    elif s >= 5:
+        alertes.insert(0, f"PEWS {s} ≥ 5 — APPEL MÉDECIN IMMÉDIAT")
+    elif s >= 3:
+        alertes.insert(0, f"PEWS {s} ≥ 3 — Surveillance rapprochée — réévaluation < 30 min")
+
+    return s, alertes, {
+        "seuils": norm,
+        "fc_anormale":  fc < fc_min or fc > fc_max,
+        "fr_anormale":  fr < fr_min or fr > fr_max,
+        "spo2_anormale": spo2 < spo2_min,
+    }
+
+
+def pews_meta(score: int) -> dict:
+    """Métadonnées PEWS : couleur et recommandation."""
+    if score >= 7:
+        return {"label": f"PEWS {score} — CRITIQUE",   "color": "#7C3AED",
+                "reco": "Appel réanimation pédiatrique immédiat"}
+    elif score >= 5:
+        return {"label": f"PEWS {score} — ÉLEVÉ",      "color": "#EF4444",
+                "reco": "Appel médecin immédiat"}
+    elif score >= 3:
+        return {"label": f"PEWS {score} — MODÉRÉ",     "color": "#F59E0B",
+                "reco": "Surveillance rapprochée — réévaluation < 30 min"}
+    elif score >= 1:
+        return {"label": f"PEWS {score} — BAS",        "color": "#22C55E",
+                "reco": "Surveillance standard"}
+    return {"label": "PEWS 0 — STABLE", "color": "#3B82F6", "reco": "Surveillance de routine"}

@@ -86,10 +86,42 @@ def _use_mg_kg(age: float) -> bool:
 
 def _format_dose(dose_mg: float, poids: float, age: float, unit: str = "mg") -> str:
     """Formate l'affichage de la dose selon l'âge."""
-    if _use_mg_kg(age) and poids > 0:
+    if _use_mg_kg(age):
         dose_per_kg = dose_mg / poids
         return f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} {unit})"
-    return f"{_fmt(dose_mg)} {unit}"
+    else:
+        return f"{_fmt(dose_mg)} {unit}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POIDS IDÉAL THÉORIQUE (PIT) — Formule de Devine 1974
+# Requis pour dosage opioïdes en cas d'obésité (IMC ≥ 35) — SFAR 2021
+# ─────────────────────────────────────────────────────────────────────────────
+
+def poids_ideal_theorique(taille_cm: float, sexe: str = "M") -> float:
+    """Poids Idéal Théorique (Devine 1974).
+    H : 50 + 0,91 × (taille_cm – 152,4)
+    F : 45,5 + 0,91 × (taille_cm – 152,4)
+    """
+    base = 50.0 if sexe.upper() in ("M", "H") else 45.5
+    return _r(max(30.0, base + 0.91 * max(0.0, taille_cm - 152.4)), 1)
+
+
+def poids_dosage_opioides(poids_reel: float, taille_cm: float = 170.0, sexe: str = "M") -> tuple:
+    """Retourne (poids_à_utiliser, note_alerte) pour les opioïdes.
+    Si IMC ≥ 35 : Poids ajusté = PIT + 0,4 × (poids_réel – PIT) (SFAR 2021).
+    Si IMC < 35 : poids réel.
+    Source : SFAR — Analgésie IV chez l'obèse 2021.
+    """
+    if taille_cm <= 100:
+        return poids_reel, ""
+    imc = poids_reel / (taille_cm / 100) ** 2
+    if imc >= 35:
+        pit = poids_ideal_theorique(taille_cm, sexe)
+        pa  = _r(pit + 0.4 * (poids_reel - pit), 1)
+        note = f"Obésité IMC {imc:.0f} — Poids ajusté opioïdes : {pa} kg (PIT {pit} kg)"
+        return pa, note
+    return poids_reel, ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,25 +129,34 @@ def _format_dose(dose_mg: float, poids: float, age: float, unit: str = "mg") -> 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def paracetamol(poids: float, age: float, atcd: list) -> Result:
-    """Paracétamol IV — BCFI Belgique."""
+    """Paracétamol IV — BCFI Belgique.
+
+    Règle BCFI (Perfalgan® IV) :
+      • Poids < 50 kg  → 15 mg/kg (dose poids-dépendante), max 1 g
+      • Poids ≥ 50 kg  → 1 g fixe
+    Fréquence : toutes les 4-6 h, max 4 doses / 24 h (soit 60 mg/kg/j ou 4 g/j).
+    """
     alerts: List[Alert] = []
     if _has(atcd, "Insuffisance hépatique"):
-        _add(alerts, "Insuffisance hépatique : valider la dose cumulative des 24 h", "warning")
+        _add(alerts, "Insuffisance hépatique : dose max = 3 g/24 h — valider avec médecin", "warning")
 
-    if _use_mg_kg(age):
-        dose_mg = PARA_DOSE_KG * poids
-        dose_display = f"{_fmt(PARA_DOSE_KG)} mg/kg ({_fmt(dose_mg)} mg)"
+    # BCFI : pivot poids (pas âge) — un adulte léger < 50 kg = 15 mg/kg
+    if poids < PARA_POIDS_PIVOT_KG:
+        dose_mg      = min(_r(PARA_DOSE_KG * poids, 0), 1000.0)   # 15 mg/kg, plafond 1g
+        dose_display = f"{PARA_DOSE_KG:.0f} mg/kg ({dose_mg:.0f} mg)"
+        note         = f"Poids < {PARA_POIDS_PIVOT_KG:.0f} kg → dose poids-dépendante 15 mg/kg"
     else:
-        dose_mg = PARA_DOSE_FIXE_G * 1000.0
-        dose_display = f"{_fmt(dose_mg)} mg"
+        dose_mg      = PARA_DOSE_FIXE_G * 1000.0                  # 1 g fixe
+        dose_display = f"{dose_mg:.0f} mg"
+        note         = f"Poids ≥ {PARA_POIDS_PIVOT_KG:.0f} kg → 1 g fixe"
 
     return ({
-        "dose_mg": _r(dose_mg, 0),
+        "dose_mg":      _r(dose_mg, 0),
         "dose_display": dose_display,
-        "admin": "IV en 15 min",
-        "note": f"15 mg/kg si âge < 15 ans, sinon 1 g fixe",
-        "ref": "BCFI — Paracétamol IV",
-        "alerts": alerts,
+        "admin":        "IV en 15 min",
+        "note":         note,
+        "ref":          "BCFI — Paracétamol IV (Perfalgan®)",
+        "alerts":       alerts,
     }, None)
 
 
@@ -268,75 +309,177 @@ def diclofenac_im(poids: float, age: float, atcd: list = None) -> Result:
 
 
 def tramadol(poids: float, age: float, atcd: list) -> Result:
-    """Tramadol PO — BCFI / Hainaut."""
-    if age < 1:
-        return None, "Tramadol contre-indiqué avant 1 an"
+    """Tramadol PO/IV — BCFI / EMA 2019.
+    ⚠️ CONTRE-INDIQUÉ < 12 ans (EMA 2019 — risque dépression respiratoire).
+    ⚠️ DÉCONSEILLÉ 12-18 ans en cas d'apnées du sommeil, obésité morbide, BPCO.
+    Source : EMA PRAC 2019 — Restriction pédiatrique tramadol.
+    """
+    # CI absolue EMA 2019 — enfant < 12 ans
+    if age < 12:
+        return None, (
+            f"CONTRE-INDIQUÉ chez l'enfant < 12 ans (EMA 2019) — "
+            f"Risque dépression respiratoire — Utiliser paracétamol + ibuprofène"
+        )
     if _has(atcd, "IMAO (inhibiteurs MAO)"):
-        return None, "IMAO : Tramadol / Tradonal contre-indiqué"
+        return None, "CONTRE-INDICATION ABSOLUE — IMAO : syndrome sérotoninergique potentiellement fatal"
+    if _has(atcd, "Épilepsie"):
+        return None, "CONTRE-INDIQUÉ — Épilepsie : le tramadol abaisse le seuil épileptogène"
+
     alerts = _opioid_alerts(atcd)
-    if age < 15:
-        dose_mg = min(max(poids * 1.5, 25.0), 50.0)
-    else:
-        dose_mg = 50.0
+
+    # Déconseillé 12-18 ans si facteurs de risque respiratoire
+    if age < 18:
+        if _has(atcd, "BPCO", "Asthme", "Obésité morbide (IMC ≥ 40)"):
+            _add(alerts, "12-18 ans + pathologie respiratoire : tramadol déconseillé (EMA 2019)", "warning")
+
+    if _has(atcd, "Antidépresseurs ISRS/IRSNA"):
+        _add(alerts, "ISRS/IRSNA : interaction sérotoninergique — surveiller (syndrome sérotoninergique)", "warning")
+
+    dose_mg = 50.0 if age >= 18 else min(poids * 1.5, 50.0)
     return ({
         "dose_mg": _r(dose_mg, 0),
-        "admin": "PO ou IV lent 100 mg/250 ml NaCl en 30 min",
-        "note": f"Max 400 mg/24 h adulte — attention tolérance digestive",
-        "ref": "BCFI — Tramadol",
+        "admin": "PO ou IV lent 100 mg dans 250 ml NaCl sur 30 min",
+        "note": "Max 400 mg/24 h adulte — Intervalles ≥ 6 h",
+        "ref": "BCFI / EMA 2019 — Tramadol",
         "alerts": alerts,
     }, None)
 
 
 def piritramide(poids: float, age: float, atcd: list) -> Result:
-    """Piritramide IV (Dipidolor) — BCFI / SFAR 2010."""
+    """Piritramide IV (Dipidolor® 7,5 mg/ml) — BCFI / SFAR 2010.
+    ⚠️ CONTRE-INDIQUÉ < 1 an (BCFI — données insuffisantes nourrisson).
+    Réduction de dose obligatoire : âge ≥ 70 ans, IRC, IH.
+    Source : BCFI — Piritramide IV / Dipidolor®.
+    """
+    atcd = atcd or []
+    # CI nourrisson < 1 an (BCFI)
+    if age < 1:
+        return None, (
+            "CONTRE-INDIQUÉ < 1 an (BCFI) — Données insuffisantes chez le nourrisson. "
+            "Utiliser morphine titrée avec monitoring continu."
+        )
+
     alerts = _opioid_alerts(atcd)
-    dose_min = _r(min(PIRI_BOLUS_MIN * poids, PIRI_PLAFOND_LT70 if poids < 70 else PIRI_PLAFOND_GE70), 1)
-    dose_max = _r(min(PIRI_BOLUS_MAX * poids, PIRI_PLAFOND_LT70 if poids < 70 else PIRI_PLAFOND_GE70), 1)
+
+    # Facteurs de réduction : âge ≥ 70 ans, IRC, IH, poids < 50 kg
+    reduction = _has(atcd, "Insuffisance rénale chronique", "Insuffisance hépatique") or age >= 70
+    facteur = 0.5 if reduction else 1.0
+    if reduction:
+        _add(alerts, "Dose réduite 50 % (âge ≥ 70 / IRC / IH) — Titration prudente", "warning")
+
+    plafond = (PIRI_PLAFOND_LT70 if poids < 70 else PIRI_PLAFOND_GE70) * facteur
+    dose_min = _r(min(PIRI_BOLUS_MIN * poids * facteur, plafond), 1)
+    dose_max = _r(min(PIRI_BOLUS_MAX * poids * facteur, plafond), 1)
+
+    # Antidote à portée
+    _add(alerts, "Antidote : Naloxone 0,4 mg IV si FR < 10/min ou sédation excessive", "info")
+
     return ({
         "dose_min": dose_min,
         "dose_max": dose_max,
-        "admin": "IV lent en 2-3 min",
-        "note": f"Titration : bolus {dose_min}-{dose_max} mg — répéter si EVA > 3",
-        "ref": "BCFI / SFAR — Piritramide IV",
+        "facteur_reduction": facteur,
+        "admin": "IV lent 2-3 min — titrer, répéter si EVA > 3 après 15 min",
+        "note": f"Dipidolor® 7,5 mg/ml → {_r(dose_max/7.5,2)} ml",
+        "ref": "BCFI / SFAR — Piritramide IV (Dipidolor®)",
         "alerts": alerts,
     }, None)
 
 
-def morphine(poids: float, age: float, atcd: list) -> Result:
-    """Morphine IV titrée — SFAR / BCFI."""
+def morphine(poids: float, age: float, atcd: list,
+             taille_cm: float = 170.0, sexe: str = "M") -> Result:
+    """Morphine IV titrée — SFAR / BCFI.
+    Adaptation obligatoire : nourrisson < 6 mois, IRC, sujet âgé ≥ 70 ans.
+    Obésité (IMC ≥ 35) : utilise le Poids Ajusté (SFAR 2021).
+    Source : SFAR 2010 / BCFI — Morphine IV.
+    """
+    atcd = atcd or []
     alerts = _opioid_alerts(atcd)
-    plafond = MORPH_PLAFOND_GE100 if poids >= 100 else MORPH_PLAFOND_STD
-    dose_min = _r(MORPH_MIN_KG * poids, 1)
-    dose_max = _r(min(MORPH_MAX_KG * poids, plafond), 1)
+    # Correction poids si obèse
+    poids_eff, pit_note = poids_dosage_opioides(poids, taille_cm, sexe)
+    if pit_note:
+        _add(alerts, pit_note, "warning")
+    poids = poids_eff  # utiliser le poids corrigé pour la suite
+
+    # Nourrisson < 6 mois — seulement en réanimation avec monitoring respiratoire
+    if age < 0.5:
+        _add(alerts,
+             "Nourrisson < 6 mois : morphine uniquement en réanimation avec monitoring "
+             "respiratoire continu (SFAR). Utiliser morphine 0,05 mg/kg MAXIMUM, "
+             "puis 0,025 mg/kg/h PSE avec capnographe.", "danger")
+
+    # Facteur de réduction
+    irc  = _has(atcd, "Insuffisance rénale chronique")
+    aged = age >= 70
+    if irc:
+        _add(alerts, "IRC : accumulation M6G (métabolite actif) — réduire dose et espacer les injections", "warning")
+    if aged:
+        _add(alerts, "Âge ≥ 70 ans : réduire dose initiale de 30-50 %, palier 1 mg/5 min", "warning")
+
+    facteur = 0.5 if (irc or aged) else 1.0
+    plafond = (MORPH_PLAFOND_GE100 if poids >= 100 else MORPH_PLAFOND_STD) * facteur
+    dose_min = _r(MORPH_MIN_KG * poids * facteur, 1)
+    dose_max = _r(min(MORPH_MAX_KG * poids * facteur, plafond), 1)
+    palier   = 1.0 if (irc or aged) else MORPH_PALIER_MG
+
+    _add(alerts, "Antidote : Naloxone 0,4 mg IV si FR < 10/min ou score de sédation ≥ 3", "info")
+
     return ({
         "dose_min": dose_min,
         "dose_max": dose_max,
-        "palier_mg": MORPH_PALIER_MG,
-        "admin": f"IV titration : {MORPH_PALIER_MG} mg/5 min jusqu'à EVA ≤ 3",
+        "palier_mg": palier,
+        "facteur": facteur,
+        "admin": f"IV titration : {palier} mg / {'5 min' if palier >= 2 else '10 min'} jusqu'à EVA ≤ 3",
         "note": f"Dose initiale {dose_min} mg — plafond {dose_max} mg",
-        "ref": "SFAR / BCFI — Morphine titrée",
+        "ref": "SFAR 2010 / BCFI — Morphine titrée",
         "alerts": alerts,
     }, None)
 
 
 def naloxone(poids: float, age: float, dependant: bool = False, atcd: list = None) -> Result:
-    """Naloxone IV — antidote opioïdes — BCFI."""
+    """Naloxone IV/SC/IM (Narcan® 0,4 mg/ml) — Intoxication opioïdes — BCFI.
+    
+    Stratégie : titration douce si dépendant (éviter sevrage brutal),
+    bolus standard si surdosage accidentel.
+    Perfusion PSE continue si opioïde à longue demi-vie (méthadone, fentanyl patch).
+    Source : BCFI / ESA 2021 — Naloxone.
+    """
     atcd = atcd or []
+    alerts: List[Alert] = [
+        ("Demi-vie courte (30-90 min) vs opioïdes longs — surveiller récidive sur 4-12 h", "warning"),
+        ("Si opioïde à longue demi-vie (méthadone, fentanyl patch) : PSE continue obligatoire", "warning"),
+    ]
+
     if dependant:
-        dose = 0.04
-        note = "Patient dépendant : diluer 0,4 mg dans 10 ml NaCl → 0,04 mg/ml — titrer 1 ml/2 min"
+        # Titration douce pour éviter le sevrage brutal (risque OAP, arythmies)
+        dose   = NALOO_DEP_MG  # 0,04 mg par palier
+        note   = (f"Dépendant : diluer 0,4 mg dans 10 ml NaCl 0,9 % → 0,04 mg/ml. "
+                  f"Titrer 0,04 mg IV toutes les 2 min jusqu'à FR > 12/min (objectif : ventilation, pas réveil total)")
+        _add(alerts, "Titration douce obligatoire (dépendant) — objectif ventilation, PAS réveil complet", "danger")
     elif age < 18:
-        dose = _r(NALOO_PED_KG * poids, 2)
-        note = f"Pédiatrique : {dose} mg IV — répéter si besoin"
+        dose = min(_r(NALOO_PED_KG * poids, 2), NALOO_ADULTE_MG)
+        note = f"Pédiatrique : {dose} mg IV — 0,01 mg/kg — répéter toutes les 2-3 min si FR < 12/min"
+        _add(alerts, f"Pédiatrique : dose calculée {dose} mg pour {poids:.0f} kg", "info")
     else:
         dose = NALOO_ADULTE_MG
-        note = "Adulte : 0,4 mg IV — répéter toutes les 2-3 min si nécessaire"
+        note = "Adulte : 0,4 mg IV — répéter toutes les 2-3 min (max 10 mg total si besoin)"
+
+    # Perfusion continue PSE (si opioïde longue demi-vie)
+    # Règle : 2/3 de la dose de reversal efficace / heure (ESA 2021)
+    dose_pse_h = _r(dose * 0.67, 2)
+    vol_pse    = 50.0  # ml NaCl — concentration : dose_pse_h / 50
+    conc_pse   = _r(dose_pse_h / vol_pse, 4) if vol_pse > 0 else 0
+
     return ({
         "dose": dose,
         "admin": note,
-        "note": "Durée d'action courte (30-90 min) : surveiller récidive",
-        "ref": "BCFI — Naloxone (Narcan)",
-        "alerts": [("Demi-vie plus courte que l'opioïde : réévaluation rapprochée", "warning")],
+        "note": "Durée d'action 30-90 min — surveiller récidive",
+        "pse_continue": {
+            "dose_h": dose_pse_h,
+            "dilution": f"Après reversal : {dose_pse_h:.2f} mg/h dans NaCl 0,9 %",
+            "indication": "Si opioïde longue demi-vie (méthadone, fentanyl patch, héroïne retard)",
+        },
+        "ref": "BCFI / ESA 2021 — Naloxone (Narcan® 0,4 mg/ml)",
+        "alerts": alerts,
     }, None)
 
 
@@ -389,21 +532,47 @@ def ceftriaxone(poids: float, age: float, atcd: list = None) -> Result:
 
 
 def litican(poids: float, age: float, atcd: list = None) -> Result:
-    """Litican IM (Tiémonium) — Antispasmodique — Protocole Hainaut."""
+    """Litican® IV/IM — Alizapride — Antiémétique dopaminergique.
+
+    Principe actif : ALIZAPRIDE (benzamide substitué — antagoniste D2).
+    Indications : nausées / vomissements post-opératoires, chimiothérapie,
+                  colique néphrétique, migraine avec vomissements.
+    NE PAS CONFONDRE avec :
+      - Tiémonium (Visceralgine®) — antispasmodique anticholinergique
+      - Phloroglucinol (Spasfon®) — antispasmodique musculotrope
+
+    Contre-indications absolues :
+      - Phéochromocytome (risque de poussée hypertensive)
+      - Association IMAO (risque sérotoninergique)
+      - Enfant < 15 ans (pas d'AMM pédiatrique)
+    Source : BCFI — Alizapride (Litican®) / RCP Litican® 50 mg/2 ml.
+    """
     atcd = atcd or []
     alerts: List[Alert] = []
-    if _has(atcd, "Glaucome"):
-        _add(alerts, "Glaucome : prudence avec l'effet anticholinergique")
-    if _has(atcd, "Adénome prostatique", "Rétention urinaire"):
-        _add(alerts, "Adénome prostatique / rétention urinaire : risque de rétention")
-    dose_mg = LITICAN_DOSE_ADULTE_MG if poids >= LITICAN_POIDS_PIVOT_KG else min(LITICAN_DOSE_KG_ENF * poids, LITICAN_DOSE_MAX_ENF_MG)
+
+    # Contre-indications absolues
+    if _has(atcd, "IMAO (inhibiteurs MAO)"):
+        return None, "CONTRE-INDIQUÉ : IMAO — risque sérotoninergique"
+    if age < 15:
+        return None, "CONTRE-INDIQUÉ : Litican® (alizapride) — pas d'AMM avant 15 ans"
+
+    # Précautions
+    if _has(atcd, "Insuffisance rénale chronique"):
+        _add(alerts, "IRC : réduire la dose — élimination rénale de l'alizapride", "warning")
+    if _has(atcd, "Épilepsie"):
+        _add(alerts, "Épilepsie : les benzamides abaissent le seuil épileptogène", "warning")
+    if _has(atcd, "Parkinson") or _has(atcd, "Antidépresseurs ISRS/IRSNA"):
+        _add(alerts, "Parkinson / ISRS : risque de syndrome extrapyramidal majoré", "warning")
+
+    # Dose — adulte uniquement (pas de calcul mg/kg pour alizapride)
+    dose_mg = 50.0   # Litican® 50 mg/2 ml — dose standard adulte IM ou IV
     return ({
-        "dose_mg": _r(dose_mg, 0),
-        "voie": "IM",
-        "dose_note": f"Max {LITICAN_DOSE_MAX_JOUR:.0f} mg/24 h",
-        "freq": "Répétition selon protocole local",
-        "ref": "BCFI / protocole Hainaut — Tiémonium (Litican)",
-        "alerts": alerts,
+        "dose_mg":   dose_mg,
+        "voie":      "IV lent (2 min) ou IM",
+        "dose_note": "50 mg — répétable 1 fois après 4-6h si besoin — max 200 mg/24h",
+        "freq":      "Toutes les 4-6h selon besoin — max 4 injections/24h",
+        "ref":       "BCFI / RCP — Alizapride (Litican® 50 mg/2 ml)",
+        "alerts":    alerts,
     }, None)
 
 
@@ -423,19 +592,49 @@ def salbutamol(poids: float, age: float, gravite: str = "moderee", atcd: list = 
 
 
 def furosemide(poids: float, age: float, atcd: list = None) -> Result:
-    """Furosémide IV — OAP cardiogénique — BCFI."""
+    """Furosémide IV — OAP cardiogénique / Surcharge volémique — BCFI.
+    
+    Adaptation obligatoire en cas d'IRC :
+    - DFG > 60 : dose standard 40-80 mg
+    - DFG 30-60 : doubler la dose (80-160 mg)  
+    - DFG < 30  : dose jusqu'à 240-320 mg (sinon inefficace — résistance diurétique)
+    Source : BCFI / Kidney Disease Improving Global Outcomes (KDIGO 2020).
+    """
     atcd = atcd or []
-    dose_min = 40.0
-    dose_max = 80.0
     alerts: List[Alert] = []
-    if _has(atcd, "Insuffisance rénale chronique"):
-        dose_max = 120.0
-        _add(alerts, "Insuffisance rénale : dose plus élevée possible selon protocole", "warning")
+
+    irc = _has(atcd, "Insuffisance rénale chronique")
+    ica = _has(atcd, "Insuffisance cardiaque")
+
+    if irc:
+        dose_min = 80.0
+        dose_max = 240.0
+        _add(alerts,
+             "IRC — Résistance diurétique : besoins 3-5× supérieurs (KDIGO 2020). "
+             "Commencer à 80 mg IV — Titrer jusqu'à 240-320 mg si diurèse < 0,5 ml/kg/h. "
+             "Surveiller kaliémie et créatinine (hypokaliémie + azotémie aiguë)", "warning")
+        _add(alerts,
+             "Si IRC avancée (DFG < 15) : furosémide souvent inefficace seul — "
+             "envisager ultrafiltration (Tolvaptan ou consultation néphro)", "info")
+    else:
+        dose_min = 40.0
+        dose_max = 80.0
+        if ica:
+            _add(alerts,
+                 "IC chronique sous diurétiques au long cours : "
+                 "augmenter la dose à 1-2× la dose orale habituelle en IV", "info")
+
+    if age >= 75:
+        _add(alerts, "Sujet âgé ≥ 75 ans : surveiller la déshydratation et l'hypotension orthostatique", "warning")
+
+    _add(alerts, "Surveiller K⁺, Na⁺, créatinine à 2-4 h — Objectif diurèse ≥ 0,5 ml/kg/h", "info")
+
     return ({
         "dose_min": dose_min,
         "dose_max": dose_max,
-        "admin": "IV lent en 2-5 min",
-        "ref": "BCFI — Furosémide IV",
+        "admin": "IV lent en 2-5 min (max 4 mg/min pour éviter ototoxicité)",
+        "note": f"Répéter selon diurèse — {'IRC : titration aggressive nécessaire' if irc else 'Standard : 40-80 mg'}",
+        "ref": "BCFI / KDIGO 2020 — Furosémide IV",
         "alerts": alerts,
     }, None)
 
@@ -519,14 +718,25 @@ def sepsis_bundle_1h(pas: float, lactate: Optional[float], temp: float, fc: floa
     atcd = atcd or []
     choc = pas < 90 or (lactate is not None and lactate >= 4.0)
     remplissage_mlkg = 15 if _has(atcd, "Insuffisance cardiaque") else 30
+    # Critères de choc septique affinés (SSC 2021)
+    choc_lactate_haut  = lactate is not None and lactate >= 4.0
+    choc_lactate_mod   = lactate is not None and 2.0 <= lactate < 4.0
+    choc = pas < 90 or choc_lactate_haut
+    choc_intermediaire = not choc and (choc_lactate_mod or pas < 100)
+
     checklist = [
-        ("Lactate", "Dosage rapide si non fait", "warning"),
-        ("Hémocultures", "Avant antibiothérapie si possible", "info"),
-        ("Antibiothérapie", "Dans l'heure si sepsis suspecté", "danger" if choc else "warning"),
-        ("Remplissage", f"{remplissage_mlkg} ml/kg cristalloïdes", "warning"),
-        ("Vasopresseurs", "Si hypotension persistante après remplissage", "danger" if choc else "info"),
+        ("Lactate",       "Dosage rapide si non fait",                    "warning"),
+        ("Hémocultures",  "Avant antibiothérapie si possible (2 paires)", "info"),
+        ("Antibiothérapie", "Dans l'heure si sepsis suspecté",            "danger" if choc else "warning"),
+        ("Remplissage",   f"{remplissage_mlkg} ml/kg cristalloïdes en 30 min",    "danger" if choc else "warning"),
+        ("Vasopresseurs", "Si PAS < 65 mmHg après remplissage",           "danger" if choc else "info"),
+        ("Contrôle source", "Identifier et contrôler le foyer infectieux", "warning"),
     ]
     alerts: List[Alert] = []
+    if choc_lactate_haut:
+        _add(alerts, f"Lactate {lactate:.1f} mmol/l ≥ 4 — CHOC SEPTIQUE — Vasopresseurs après 30 ml/kg", "danger")
+    elif choc_lactate_mod:
+        _add(alerts, f"Lactate {lactate:.1f} mmol/l entre 2 et 4 — Sepsis sévère — Remplissage et réévaluation", "warning")
     if choc:
         _add(alerts, "Hypotension / lactate élevé : choc septique — Réanimation immédiate", "danger")
     if temp < 36.0 or temp >= 38.3:

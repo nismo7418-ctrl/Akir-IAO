@@ -217,6 +217,28 @@ FRENCH_PROTOCOL: List[dict] = [
         ("2", "SpO2 < 94 %"),
         ("3A", "Modéré"),
     ], aliases=["Pediatrie - Asthme / Bronchospasme"]),
+    _row("Pédiatrie", "Pédiatrie - Bronchiolite", "3A", [
+        ("1", "Apnée / cyanose / SpO2 < 88 %"),
+        ("2", "SpO2 < 92 % / nourrisson < 3 mois / prématuré"),
+        ("3A", "SpO2 92-95 % / tirage modéré"),
+        ("3B", "SpO2 ≥ 95 % / alimentation normale"),
+    ], aliases=["Bronchiolite", "Pediatrie - Bronchiolite"]),
+    _row("Pédiatrie", "Pédiatrie - Déshydratation", "3A", [
+        ("1", "Choc hypovolémique / SI ≥ 1.0"),
+        ("2", "Déshydratation modérée 5-10 % / nourrisson < 3 mois"),
+        ("3A", "Déshydratation légère < 5 %"),
+    ], aliases=["Deshydratation nourrisson", "Pediatrie - Deshydratation"]),
+    _row("Pédiatrie", "Pédiatrie - Douleur abdominale", "3B", [
+        ("2", "Défense / contracture / choc / vomissements bilieux"),
+        ("3A", "Douleur FID / fièvre / appendicite suspecte"),
+        ("3B", "Douleur modérée bien tolérée"),
+    ], aliases=["Pediatrie - Douleur abdominale"]),
+    _row("Pédiatrie", "Pédiatrie - Traumatisme", "3A", [
+        ("1", "GCS ≤ 8 / SpO2 < 88 % / choc"),
+        ("2", "Haute cinétique / tachycardie / perte de conscience"),
+        ("3A", "Déformation / impotence totale"),
+        ("4", "Traumatisme léger"),
+    ], aliases=["Pediatrie - Traumatisme"]),
 
     # ── GYNÉCOLOGIE ───────────────────────────────────────────────────────
     _row("Gynécologie", "Accouchement imminent", "1", aliases=["Accouchement imminent ou réalisé"]),
@@ -406,250 +428,6 @@ def render_discriminants(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DISCRIMINANTS ENRICHIS — Questions interactives par motif
-# Compat. avec process_answers() dans streamlit_app.py
-# Source : SFMU FRENCH V1.1 — Arbres décisionnels
+# DISCRIMINANTS — externalisés dans clinical/discriminants.py (AKIR-IAO v20)
 # ─────────────────────────────────────────────────────────────────────────────
-
-DISCRIMINANTS_ENRICHIS: dict = {
-    "Douleur thoracique / SCA": [
-        {
-            "id": "sca_ecg",
-            "text": "Aspect ECG",
-            "type": "select",
-            "options": [
-                ("normal",             "Normal"),
-                ("anormal_non_typique","Anormal non typique"),
-                ("anormal_typique",    "Anormal typique SCA (sus-ST, Wellens…)"),
-            ],
-            "det_key": "ecg",
-            "mapping": {
-                "normal":              "Normal",
-                "anormal_non_typique": "Anormal non typique",
-                "anormal_typique":     "Anormal typique SCA",
-            },
-        },
-        {
-            "id": "sca_douleur",
-            "text": "Caractère de la douleur",
-            "type": "select",
-            "options": [
-                ("atypique",          "Atypique"),
-                ("coronaire_probable","Coronaire probable"),
-                ("typique",           "Typique (constrictive, irradiante, ≥ 20 min)"),
-            ],
-            "det_key": "douleur",
-            "mapping": {
-                "atypique":          "Atypique",
-                "coronaire_probable":"Coronaire probable",
-                "typique":           "Typique (constrictive, irradiante)",
-            },
-        },
-        {
-            "id": "sca_frcv",
-            "text": "Comorbidité coronaire (diabète, ATCD familial, coronaropathie) ?",
-            "type": "bool",
-            "det_key": "frcv",
-            "true_val": 1, "false_val": 0,
-        },
-    ],
-    "AVC / Déficit neurologique": [
-        {
-            "id": "avc_delai",
-            "text": "Délai début des symptômes < 4,5 h (fenêtre thrombolyse) ?",
-            "type": "bool",
-            "det_key": "delai",
-            "true_val": 2.0, "false_val": 6.0,
-        },
-        {
-            "id": "avc_def_prog",
-            "text": "Déficit neurologique progressif ou aggravation en cours ?",
-            "type": "bool",
-            "det_key": "def_prog",
-        },
-        {
-            "id": "avc_fast",
-            "text": "BE-FAST positif (≥ 1 critère) ?",
-            "type": "bool",
-            "det_key": "fast_positif",
-        },
-    ],
-    "Dyspnée / insuffisance respiratoire": [
-        {
-            "id": "dyspnee_detresse",
-            "text": "FR ≥ 40/min ou SpO2 < 86 % ?",
-            "type": "bool",
-            "det_key": "detresse",
-        },
-        {
-            "id": "dyspnee_parole",
-            "text": "Ne peut pas parler en phrases complètes (dyspnée à la parole) ?",
-            "type": "bool",
-            "det_key": "parole",
-            "true_val": False, "false_val": True,
-        },
-        {
-            "id": "dyspnee_tirage",
-            "text": "Tirage intercostal / orthopnée ?",
-            "type": "bool",
-            "det_key": "tirage",
-        },
-    ],
-    "Hypotension artérielle": [
-        {
-            "id": "hypo_pas70",
-            "text": "PAS ≤ 70 mmHg ?",
-            "type": "bool",
-            "det_key": "hypo_critique",
-        },
-        {
-            "id": "hypo_pas90",
-            "text": "PAS ≤ 90 mmHg ou (PAS ≤ 100 + FC > 100/min) ?",
-            "type": "bool",
-            "det_key": "hypo_severe",
-        },
-    ],
-    "Pédiatrie - Crise épileptique": [
-        {
-            "id": "ped_epi_encours",
-            "text": "Crise EN COURS au moment du triage ?",
-            "type": "bool",
-            "det_key": "en_cours",
-        },
-        {
-            "id": "ped_epi_duree",
-            "text": "Durée de la crise (minutes)",
-            "type": "number",
-            "det_key": "duree_min",
-            "min": 0.0, "max": 120.0, "default": 0.0,
-        },
-        {
-            "id": "ped_epi_focale",
-            "text": "Crise focale (mouvements unilatéraux) ?",
-            "type": "bool",
-            "det_key": "focale",
-        },
-        {
-            "id": "ped_epi_premiere",
-            "text": "Première crise dans la vie de l'enfant ?",
-            "type": "bool",
-            "det_key": "premiere_crise",
-        },
-        {
-            "id": "ped_epi_febrile",
-            "text": "Crise fébrile (température ≥ 38°C) ?",
-            "type": "bool",
-            "det_key": "febrile",
-        },
-        {
-            "id": "ped_epi_recuperee",
-            "text": "Crise récupérée (enfant conscient) ?",
-            "type": "bool",
-            "det_key": "recuperee",
-        },
-    ],
-    "Pédiatrie - Vomissements / Gastro-entérite": [
-        {
-            "id": "ped_gastro_bilieux",
-            "text": "Vomissements bilieux (vert) ?",
-            "type": "bool",
-            "det_key": "bilieux",
-        },
-        {
-            "id": "ped_gastro_deshydrat",
-            "text": "Niveau de déshydratation",
-            "type": "select",
-            "options": [
-                ("aucune",   "Absente"),
-                ("legere",   "Légère (< 5 %)"),
-                ("moderee",  "Modérée (5-10 %)"),
-                ("severe",   "Sévère (> 10 %)"),
-            ],
-            "det_key": None,  # Traitement spécial dans process_answers
-        },
-        {
-            "id": "ped_gastro_pleurs",
-            "text": "Pleurs inconsolables (invagination ?) ?",
-            "type": "bool",
-            "det_key": "pleurs_inconsolables",
-        },
-    ],
-}
-
-
-def process_answers(motif: str, answers: dict) -> dict:
-    """
-    Transforme les réponses aux discriminants enrichis en un dict compatible
-    avec les handlers de triage (SS.det).
-    Source : SFMU FRENCH V1.1.
-    """
-    det_updates: dict = {}
-    questions = DISCRIMINANTS_ENRICHIS.get(motif, [])
-
-    for q in questions:
-        qid    = q["id"]
-        val    = answers.get(qid)
-        dk     = q.get("det_key")
-
-        if val is None:
-            continue
-
-        if q["type"] == "bool":
-            if dk:
-                stored = q.get("true_val", True) if val else q.get("false_val", False)
-                det_updates[dk] = stored
-        elif q["type"] == "select":
-            mapping = q.get("mapping") or {}
-            if dk:
-                det_updates[dk] = mapping.get(val, val)
-            # Cas spécial : déshydratation pédiatrique
-            if qid == "ped_gastro_deshydrat":
-                det_updates["deshydrat_legere"]   = val == "legere"
-                det_updates["deshydrat_moderee"]  = val == "moderee"
-                det_updates["deshydrat_severe"]   = val == "severe"
-        elif q["type"] == "number":
-            if dk:
-                try:
-                    det_updates[dk] = float(val)
-                except (TypeError, ValueError):
-                    pass
-
-    return det_updates
-
-
-def render_discriminants_enrichis(motif: str, key_prefix: str = "disc") -> dict:
-    """
-    Affiche les questions discriminantes enrichies pour un motif donné
-    et retourne les réponses sous forme de dict {qid: valeur}.
-    Utilisable en remplacement ou complément de render_discriminants().
-    """
-    if st is None:
-        return {}
-
-    questions = DISCRIMINANTS_ENRICHIS.get(motif)
-    if not questions:
-        return {}
-
-    answers: dict = {}
-    for q in questions:
-        qid = q["id"]
-        if q["type"] == "bool":
-            answers[qid] = st.checkbox(q["text"], key=f"{key_prefix}_{qid}")
-        elif q["type"] == "select":
-            opts = q["options"]
-            answers[qid] = st.selectbox(
-                q["text"],
-                options=[o[0] for o in opts],
-                format_func=lambda v, opts=opts: next((lbl for k, lbl in opts if k == v), v),
-                key=f"{key_prefix}_{qid}",
-            )
-        elif q["type"] == "number":
-            answers[qid] = st.number_input(
-                q["text"],
-                min_value=q.get("min", 0.0),
-                max_value=q.get("max", 100.0),
-                value=q.get("default", 0.0),
-                step=0.5,
-                key=f"{key_prefix}_{qid}",
-            )
-    return answers
+from clinical.discriminants import DISCRIMINANTS_ENRICHIS  # noqa: F401
