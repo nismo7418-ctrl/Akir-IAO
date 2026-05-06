@@ -13,8 +13,11 @@ from config import LABELS, SECTEURS, DELAIS, TCSS, HBCSS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def H(html: str) -> None:
-    """Injecte du HTML brut — unsafe_allow_html=True."""
-    st.markdown(html, unsafe_allow_html=True)
+    """Injecte un fragment HTML complet."""
+    if hasattr(st, "html"):
+        st.html(html)
+    else:
+        st.markdown(html, unsafe_allow_html=True)
 
 
 def SEC(label: str) -> None:
@@ -25,13 +28,13 @@ def SEC(label: str) -> None:
 
 
 def CARD(title: str, _: str = "") -> None:
-    """Ouvre une carte."""
-    H(f'<div class="card"><div class="card-title">{title}</div>')
+    """Affiche un titre de carte sans laisser de balise HTML ouverte."""
+    H(f'<div class="card-title">{title}</div>')
 
 
 def CARD_END() -> None:
-    """Ferme une carte."""
-    H('</div>')
+    """Compatibilite avec l'ancien appelant CARD/CARD_END."""
+    return None
 
 
 def AL(msg: str, level: str = "info") -> None:
@@ -372,18 +375,6 @@ def SBAR_RENDER(s: dict) -> None:
         mime="text/plain",
         use_container_width=True,
     )
-    # Bouton copie presse-papier via JavaScript (Streamlit components)
+    # Zone native a copier, sans injection JavaScript visible dans l'interface.
     if _col_cp.button("📋 Copier SBAR", use_container_width=True, key="sbar_copy_btn"):
-        escaped = txt.replace('`', r'\`').replace('$', r'\$')
-        st.components.v1.html(f"""
-        <script>
-        navigator.clipboard.writeText(`{escaped}`)
-          .then(() => {{
-            const el = document.getElementById('copy_ok');
-            if(el) el.style.display='block';
-          }}).catch(e => console.error(e));
-        </script>
-        <div id="copy_ok" style="display:none;color:#22C55E;font-size:12px;margin-top:4px;">
-          ✅ Copié dans le presse-papier
-        </div>
-        """, height=40)
+        st.code(txt, language=None)
