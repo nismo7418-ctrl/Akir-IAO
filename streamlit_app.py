@@ -48,6 +48,7 @@ from clinical.pharmaco import (
     protocole_eva, protocole_epilepsie_ped,
     taradyl_im, diclofenac_im,
     clevidipine, meopa, midazolam_iv,
+    poids_ideal_theorique, poids_dosage_opioides,
     midazolam_im, PROTOCOLES_IAO, check_safety, generer_etiquette,
 )
 from clinical.french_v12 import (
@@ -396,6 +397,7 @@ try:
         _c1, _c2 = st.columns(2)
         _age_raw = _c1.number_input("Âge (ans)", 0, 120, int(SS.get("age") or 45), key="pt_age")
         _sex = _c2.selectbox("Sexe", ["Non précisé", "Masculin", "Féminin"], key="pt_sex")
+        _sex_code = "F" if _sex == "Féminin" else "H"
 
         if _age_raw == 0:
             _am = st.number_input("Âge en mois", 0, 11, int(SS.get("age_mois") or 3), key="pt_am")
@@ -419,7 +421,7 @@ try:
             elif imc < 40.0: AL(f"IMC {imc} — Obésité", "warning")
             else:             AL(f"IMC {imc} — Obésité morbide ≥ 40", "danger")
             # Poids idéal théorique (Devine 1974) — important pour dosage opioïdes/BZD
-            _pit = poids_ideal_theorique(taille, SS.get("sexe","H"))
+            _pit = poids_ideal_theorique(taille, _sex_code)
             if _pit and imc >= 30:
                 _pit_diff = poids - _pit
                 H(f'<div style="background:#1E293B;border-radius:6px;padding:6px 12px;margin:4px 0;'
