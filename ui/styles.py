@@ -1,4 +1,4 @@
-# ui/styles.py — Design Médical Professionnel WCAG AA — AKIR-IAO v19.0
+# ui/styles.py — Design Médical Professionnel WCAG AA — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Standard : DPI moderne, palette hospitalière, densité maximale
 
@@ -130,7 +130,7 @@ html, body, [class*="st-"] {
 .tag {
   background: rgba(255,255,255,.14);
   color: rgba(255,255,255,.92);
-  font-size: .56rem;
+  font-size: .72rem;
   padding: 2px 7px;
   border-radius: 20px;
   font-family: 'IBM Plex Mono', monospace;
@@ -150,7 +150,7 @@ html, body, [class*="st-"] {
   margin-bottom: 10px;
 }
 .card-title {
-  font-size: .65rem;
+  font-size: .72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .12em;
@@ -213,7 +213,7 @@ html, body, [class*="st-"] {
 }
 .tri-label { font-size: 1.45rem; font-weight: 900; letter-spacing: -.02em; }
 .tri-just  { font-size: .76rem; margin-top: 6px; opacity: .9; line-height: 1.5; }
-.tri-delay { font-size: .64rem; margin-top: 4px; opacity: .72; font-family:'IBM Plex Mono',monospace; }
+.tri-delay { font-size: .72rem; margin-top: 4px; opacity: .72; font-family:'IBM Plex Mono',monospace; }
 
 /* ══════════════════════════════════════════════════════════════════
    NEWS2 BANNERS
@@ -235,8 +235,19 @@ html, body, [class*="st-"] {
 }
 .n2-m { animation: pulse 1.5s infinite; }
 
+/* Respect prefers-reduced-motion — WCAG 2.3.3 Animation from Interactions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .n2-m, .pharma-urgent { animation: none !important; }
+}
+
 /* ══════════════════════════════════════════════════════════════════
-   VITAUX DASHBOARD — Compact
+   VITAUX DASHBOARD — Compact (disponible pour usage futur)
 ══════════════════════════════════════════════════════════════════ */
 .vitaux-grid {
   display: grid;
@@ -253,7 +264,7 @@ html, body, [class*="st-"] {
   padding: 8px 6px;
   text-align: center;
 }
-.vital-label { font-size: .55rem; color: var(--TS); text-transform: uppercase; letter-spacing: .08em; }
+.vital-label { font-size: .72rem; color: var(--TS); text-transform: uppercase; letter-spacing: .08em; }
 .vital-val   { font-size: 1.2rem; font-weight: 700; font-family:'IBM Plex Mono',monospace; line-height: 1.1; }
 .vital-ok    { color: #16A34A; }
 .vital-warn  { color: #D97706; }
@@ -299,7 +310,7 @@ html, body, [class*="st-"] {
   gap: 14px;
 }
 .gauge-val   { font-size: 2.2rem; font-weight: 900; font-family:'IBM Plex Mono',monospace; line-height:1; }
-.gauge-label { font-size: .66rem; color: var(--TM); }
+.gauge-label { font-size: .72rem; color: var(--TM); }
 
 /* ══════════════════════════════════════════════════════════════════
    BARRE EVA
@@ -356,16 +367,16 @@ html, body, [class*="st-"] {
   border-radius: var(--r2);
   padding: 12px 16px;
   margin-top: 20px;
-  font-size: .65rem;
-  color: #64748B;
+  font-size: .72rem;
+  color: #94A3B8;
   line-height: 1.8;
   font-style: italic;
 }
 .disclaimer-title {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: .58rem;
+  font-size: .72rem;
   font-weight: 600;
-  color: #475569;
+  color: #CBD5E1;
   text-transform: uppercase;
   letter-spacing: .1em;
   margin-bottom: 6px;
@@ -687,5 +698,129 @@ input[type="checkbox"] {
     min-height: 44px !important;
     font-size: .95rem !important;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   STICKY BAR — Barre de statut patient (persistante)
+══════════════════════════════════════════════════════════════════ */
+.sticky-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--BG2);
+  border-radius: var(--r2);
+  border: 1px solid var(--B);
+  margin-bottom: 6px;
+  font-size: .72rem;
+}
+.sticky-badge {
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--B2);
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--TM);
+  background: var(--CARD);
+  white-space: nowrap;
+}
+.badge-age   { background: var(--PP); color: var(--PD); border-color: var(--P20); }
+.badge-atcd  { background: var(--WRN-bg); color: var(--WRN-t); border-color: var(--WRN-b); }
+.badge-triage { font-weight: 800 !important; }
+.badge-chrono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--TM);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--BG2);
+  border: 1px solid var(--B);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TIMER WIDGET — Sidebar chrono
+══════════════════════════════════════════════════════════════════ */
+.timer-widget {
+  text-align: center;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  margin: 6px 0;
+}
+.timer-digits {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1;
+}
+.timer-label {
+  font-size: .72rem;
+  opacity: .6;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RX COMPACT — Pharmacologie doses rapides
+══════════════════════════════════════════════════════════════════ */
+.rx-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--BG2);
+  border-radius: 0 var(--r2) var(--r2) 0;
+  padding: 8px 12px;
+  margin: 4px 0;
+  border-left: 4px solid var(--P);
+}
+.rx-compact.urgent {
+  border-left-color: var(--ERR);
+  background: var(--ERR-bg);
+}
+.rx-compact-dose {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 800;
+  min-width: 70px;
+  text-align: center;
+  color: var(--T);
+}
+.rx-compact.urgent .rx-compact-dose { color: var(--ERR-t); }
+.rx-compact-name   { font-size: .82rem; font-weight: 700; color: var(--T); }
+.rx-compact-detail { font-size: .72rem; color: var(--TM); margin-top: 1px; }
+
+/* TRI HERO — Résultat de triage proéminent */
+.tri-hero {
+  border-radius: var(--r);
+  padding: 20px;
+  margin: 10px 0;
+  text-align: center;
+  box-shadow: var(--s3);
+}
+.tri-hero-level {
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: -.02em;
+}
+.tri-hero-just {
+  font-size: .78rem;
+  margin-top: 6px;
+  opacity: .9;
+  line-height: 1.5;
+}
+.tri-hero-meta {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.tri-meta-chip {
+  font-size: .72rem;
+  opacity: .8;
+  background: rgba(255,255,255,.12);
+  padding: 2px 10px;
+  border-radius: 20px;
 }
 """

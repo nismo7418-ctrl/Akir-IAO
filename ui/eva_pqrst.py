@@ -335,22 +335,68 @@ def PRESCRIPTIONS_ANTICIPEES(
 
 def COURBE_VITAUX(reevs: list) -> None:
     """
-    Courbe temporelle des vitaux lors des réévaluations.
-    Source : Obligation de traçabilité — Circulaire belge 2014.
+    Courbe temporelle des vitaux lors des réévaluations avec code couleur NEWS2.
+    Source : Obligation de traçabilité — Circulaire belge 2014 / RCP NEWS2 2017.
     """
     if not reevs:
         return
-    st.markdown("### 📈 Évolution temporelle des vitaux")
+
+    st.markdown("### 📈 Évolution des constantes vitales")
+
     try:
         df = pd.DataFrame(reevs)
-        if "h" in df.columns:
-            df = df.set_index("h")
-        numeric_cols = [c for c in ["n2", "fc", "pas", "spo2", "fr", "temp"] if c in df.columns]
-        col_labels = {"n2": "NEWS2", "fc": "FC (bpm)", "pas": "PAS (mmHg)", "spo2": "SpO2 (%)", "fr": "FR/min", "temp": "T°C"}
-        df_renamed = df[numeric_cols].rename(columns=col_labels)
-        if len(df_renamed) > 1:
-            st.line_chart(df_renamed)
-        st.dataframe(df.reset_index(), use_container_width=True)
+        heures = df["h"].tolist() if "h" in df.columns else [str(i) for i in range(len(df))]
+
+        # ── Tableau récapitulatif avec couleur NEWS2 ──────────────────────────
+        _NEWS2_COLS = {0:"#22C55E", 1:"#22C55E", 2:"#22C55E", 3:"#22C55E",
+                       4:"#F59E0B", 5:"#F59E0B", 6:"#EF4444",
+                       7:"#7C3AED", 8:"#7C3AED"}
+
+        col_labels = {"h":"Heure","n2":"NEWS2","niv":"Tri","fc":"FC","pas":"PAS",
+                      "spo2":"SpO2 %","fr":"FR/min","temp":"T°C","eva":"EVA"}
+        cols_show   = [c for c in col_labels if c in df.columns]
+        html_rows   = ""
+        for _, row in df[cols_show].iterrows():
+            n2v  = int(row.get("n2", 0) or 0)
+            col  = _NEWS2_COLS.get(min(n2v, 8), "#94A3B8")
+            cells = ""
+            for c in cols_show:
+                v = row.get(c, "")
+                if c == "n2":
+                    cells += f'<td style="font-weight:900;color:{col};">{v}</td>'
+                elif c == "niv":
+                    from config import TCSS
+                    css = TCSS.get(str(v), "")
+                    cells += f'<td><span class="tri-card {css}" style="padding:2px 6px;font-size:.65rem;">{v}</span></td>'
+                else:
+                    cells += f"<td>{v}</td>"
+            html_rows += f"<tr>{cells}</tr>"
+
+        headers = "".join(f"<th>{col_labels.get(c,c)}</th>" for c in cols_show)
+        st.markdown(
+            f'''<div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:.72rem;">
+                <thead><tr style="background:#1E293B;color:#94A3B8;">{headers}</tr></thead>
+                <tbody>{html_rows}</tbody>
+              </table></div>''',
+            unsafe_allow_html=True)
+
+        # ── Graphe NEWS2 dans le temps ─────────────────────────────────────────
+        if len(df) > 1 and "n2" in df.columns:
+            st.markdown("**Tendance NEWS2**")
+            n2_data = {"Heure": heures, "NEWS2": df["n2"].tolist()}
+            st.line_chart(pd.DataFrame(n2_data).set_index("Heure"))
+
+        # ── Graphe FC + SpO2 ──────────────────────────────────────────────────
+        vitaux_cols = [c for c in ["fc","spo2","fr"] if c in df.columns]
+        if len(df) > 1 and vitaux_cols:
+            st.markdown("**FC / SpO2 / FR**")
+            df_vitaux = df[["h"] + vitaux_cols].copy() if "h" in df.columns else df[vitaux_cols].copy()
+            if "h" in df_vitaux.columns:
+                df_vitaux = df_vitaux.set_index("h")
+            df_vitaux.columns = [col_labels.get(c,c) for c in df_vitaux.columns]
+            st.line_chart(df_vitaux)
+
     except Exception as e:
         st.warning(f"Courbe non disponible : {e}")
 

@@ -43,7 +43,7 @@ def AL(msg: str, level: str = "info") -> None:
 def DISC() -> None:
     """Disclaimer juridique et mention auteur — obligatoire sur chaque onglet."""
     H("""<div class="disclaimer">
-      <div class="disclaimer-title">⚖️ Avertissement Légal — AKIR-IAO v19.0</div>
+      <div class="disclaimer-title">⚖️ Avertissement Légal — AKIR-IAO v19.3</div>
       Cette application est un <strong style="color:#94A3B8;">outil d'aide à la décision clinique</strong>
       destiné aux professionnels de santé qualifiés. Elle ne se substitue en aucun cas
       au jugement clinique du praticien ni aux protocoles institutionnels en vigueur.<br>
@@ -362,10 +362,28 @@ def SBAR_RENDER(s: dict) -> None:
 ──────────────────────────────────────────────────────────"""
 
     H(f'<div class="sbar-block">{txt}</div>')
-    st.download_button(
-        "📋 Télécharger la transmission SBAR (.txt)",
+
+    # ── Actions d'export ──────────────────────────────────────────────────
+    _col_dl, _col_cp = st.columns(2)
+    _col_dl.download_button(
+        "📥 Télécharger SBAR (.txt)",
         data=txt,
         file_name=f"SBAR_{s['date'].replace('/','')}_{s['heure'].replace(':','')}_Tri{s['niv']}.txt",
         mime="text/plain",
         use_container_width=True,
     )
+    # Bouton copie presse-papier via JavaScript (Streamlit components)
+    if _col_cp.button("📋 Copier SBAR", use_container_width=True, key="sbar_copy_btn"):
+        escaped = txt.replace('`', r'\`').replace('$', r'\$')
+        st.components.v1.html(f"""
+        <script>
+        navigator.clipboard.writeText(`{escaped}`)
+          .then(() => {{
+            const el = document.getElementById('copy_ok');
+            if(el) el.style.display='block';
+          }}).catch(e => console.error(e));
+        </script>
+        <div id="copy_ok" style="display:none;color:#22C55E;font-size:12px;margin-top:4px;">
+          ✅ Copié dans le presse-papier
+        </div>
+        """, height=40)
