@@ -2262,12 +2262,16 @@ try:
             _rsi_res = calculer_rsi(poids, age, _rsi_hyp, _rsi_cur)
             for nom, ag in _rsi_res["agents"].items():
                 _bg = "#7F1D1D" if "Atropine" not in nom else "#1E3A5F"
+                _ci_html = (
+                    f'<div style="font-size:.72rem;color:#FCA5A5;margin-top:3px;">⚠️ CI : {" | ".join(ag["ci"])}</div>'
+                    if ag["ci"] else ""
+                )
                 H(f'<div style="background:{_bg};color:#fff;border-radius:8px;padding:10px 14px;margin:5px 0;">'
                   f'<div style="display:flex;justify-content:space-between;align-items:center;">'
                   f'<div style="font-weight:700;font-size:.85rem;">{nom}</div>'
                   f'<div style="font-family:monospace;font-size:1.4rem;font-weight:900;">{ag["dose_mg"]} mg</div>'
                   f'</div><div style="font-size:.72rem;opacity:.8;margin-top:3px;">{ag["voie"]} — {ag["note"][:60]}</div>'
-                  f'{"<div style=\'font-size:.72rem;color:#FCA5A5;margin-top:3px;\'>⚠️ CI : " + " | ".join(ag["ci"]) + "</div>" if ag["ci"] else ""}</div>')
+                  f'{_ci_html}</div>')
             st.divider()
             H('<div class="card-title">📋 Ordre d\'exécution RSI</div>')
             for step in _rsi_res["ordre"]:
