@@ -430,4 +430,8 @@ def render_discriminants(
 # ─────────────────────────────────────────────────────────────────────────────
 # DISCRIMINANTS — externalisés dans clinical/discriminants.py (AKIR-IAO v20)
 # ─────────────────────────────────────────────────────────────────────────────
-from clinical.discriminants import DISCRIMINANTS_ENRICHIS  # noqa: F401
+from clinical.discriminants import (  # noqa: F401
+    DISCRIMINANTS_ENRICHIS,
+    process_answers,
+    render_discriminants_enrichis,
+)

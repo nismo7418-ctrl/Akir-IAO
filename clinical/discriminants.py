@@ -7,6 +7,11 @@
 from __future__ import annotations
 from typing import Dict, List, Any
 
+try:
+    import streamlit as st
+except Exception:  # pragma: no cover - tolere les imports hors interface Streamlit
+    st = None
+
 # Type : {motif: [{"id","text","type","det_key","options"?,"auto"?}]}
 DISCRIMINANTS_ENRICHIS: Dict[str, List[Dict[str, Any]]] = {}
 
