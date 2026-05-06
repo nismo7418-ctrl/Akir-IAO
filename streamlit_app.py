@@ -138,7 +138,7 @@ risk_checks = dict(SS.get("risk_checks") or {})
 trt_checks  = dict(SS.get("trt_checks") or {})
 
 # ── CSS additionnel inline UX ─────────────────────────────────────────────────
-st.markdown("""<style>
+H("""<style>
 /* ── Barre sticky de statut patient ─────────────────────────────────── */
 .sticky-bar {
   position: sticky; top: 0; z-index: 100;
@@ -281,7 +281,7 @@ st.markdown("""<style>
   .block-container { padding: .4rem .5rem 4rem !important; }
   button, .stButton > button { min-height: 48px !important; font-weight: 700 !important; }
 }
-</style>""", unsafe_allow_html=True)
+</style>""")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2089,17 +2089,21 @@ try:
                     H(f'<div style="font-size:.75rem;color:#374151;padding:3px 0;">▶ {_det}</div>')
 
                 st.divider()
-                H('<div style="background:#0F172A;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:.75rem;color:#94A3B8;">')
-                H('<div style="color:#38BDF8;font-weight:700;margin-bottom:6px;">N-ACÉTYLCYSTÉINE IV (Fluimucil® Antidot) — Protocole 3 poches</div>')
-                for _ligne in [
+                _nac_lines = [
                     "① 150 mg/kg dans 200 ml G5 % en 1 h",
                     "② 50 mg/kg dans 500 ml G5 % en 4 h",
                     "③ 100 mg/kg dans 1000 ml G5 % en 16 h",
                     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
                     f"Exemple {poids:.0f} kg : ① {int(150*poids)} mg | ② {int(50*poids)} mg | ③ {int(100*poids)} mg",
-                ]:
-                    H(f'<div>{_ligne}</div>')
-                H('</div>')
+                ]
+                _nac_lines_html = "".join(f"<div>{_ligne}</div>" for _ligne in _nac_lines)
+                H(
+                    '<div style="background:#0F172A;border-radius:8px;padding:12px 16px;'
+                    'font-family:monospace;font-size:.75rem;color:#94A3B8;">'
+                    '<div style="color:#38BDF8;font-weight:700;margin-bottom:6px;">'
+                    'N-ACÉTYLCYSTÉINE IV (Fluimucil® Antidot) — Protocole 3 poches</div>'
+                    f'{_nac_lines_html}</div>'
+                )
                 AL("Appel CBP Belgique 070/245.245 pour conseil thérapeutique personnalisé", "info")
 
             # ── SOUS-ONGLET 3 : TRICYCLIQUES ─────────────────────────────────
@@ -2421,18 +2425,22 @@ try:
                 key=WK("def_t"))
             _j = joules_defibrillateur(poids, age, _def_type)
             if "erreur" not in _j:
-                H(f'<div style="background:#0F172A;border-radius:10px;padding:16px;margin:8px 0;">'
-                  f'<div style="color:#94A3B8;font-size:.72rem;margin-bottom:8px;">{_j["type"]}</div>')
+                _joules_rows = ""
                 for label, key in [("1er choc","choc_1"),("2e choc / suivants","choc_2")]:
                     if key in _j:
-                        H(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1E293B;">'
-                          f'<span style="color:#64748B;font-size:.72rem;">{label}</span>'
-                          f'<span style="color:#F59E0B;font-family:monospace;font-weight:900;font-size:1.1rem;">{_j[key]}</span></div>')
+                        _joules_rows += (
+                            '<div style="display:flex;justify-content:space-between;padding:6px 0;'
+                            'border-bottom:1px solid #1E293B;">'
+                            f'<span style="color:#64748B;font-size:.72rem;">{label}</span>'
+                            f'<span style="color:#F59E0B;font-family:monospace;font-weight:900;font-size:1.1rem;">{_j[key]}</span></div>'
+                        )
+                H(
+                    '<div style="background:#0F172A;border-radius:10px;padding:16px;margin:8px 0;">'
+                    f'<div style="color:#94A3B8;font-size:.72rem;margin-bottom:8px;">{_j["type"]}</div>'
+                    f'{_joules_rows}</div>'
+                )
                 if "note" in _j:
-                    H(f'</div>')
                     AL(_j["note"], "info")
-                else:
-                    H('</div>')
             st.caption(_j.get("source","ERC 2021"))
 
         # ── OT[7] HÉMORRAGIE DIGESTIVE ───────────────────────────────────────
