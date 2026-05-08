@@ -1,4 +1,4 @@
-# config.py — Constantes cliniques AKIR-IAO v19.0
+# config.py — Constantes cliniques AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
 # Toutes les "magic numbers" cliniques sont nommées ici.
 # Modifier une dose = modifier uniquement ce fichier.

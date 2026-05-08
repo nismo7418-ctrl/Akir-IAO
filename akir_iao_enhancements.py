@@ -68,16 +68,80 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 from __future__ import annotations
+import difflib
+import unicodedata
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from functools import lru_cache
 
 SS = st.session_state
 
 
 def _ek(base: str) -> str:
-    """Clé widget unique par session — évite les conflits multi-tabs."""
+    """Clé widget unique par session — évite les conflits multi-onglets."""
     return f"{SS.get('sid','s')}__{base}"
+
+
+# ── Fuzzy search optimisé ─────────────────────────────────────────────────────
+
+def _normalize(text: str) -> str:
+    """Normalise : minuscules, sans accents, sans ponctuation."""
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    ascii_ = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return " ".join(ascii_.split())
+
+
+@lru_cache(maxsize=256)
+def _tokenize(text: str) -> frozenset[str]:
+    """Retourne l'ensemble des tokens (mots) d'un texte normalisé."""
+    return frozenset(_normalize(text).split())
+
+
+def _fuzzy_score_fast(query: str, med: dict) -> float:
+    """
+    Score de pertinence pour la recherche de médicaments.
+
+    Stratégie (pas de SequenceMatcher global — trop de faux positifs) :
+    1. Sous-chaîne exacte dans le nom normalisé → 1.0
+    2. Sous-chaîne exacte dans l'indication → 0.9
+    3. Préfixe ≥ 3 car sur un token du nom ou de l'indication → 0.85
+    4. Jaccard pondéré sur les tokens (nom ×2, indication ×1) → score continu
+    """
+    q_norm   = _normalize(query)
+    nom_norm = _normalize(med["nom"])
+    ind_norm = _normalize(med["ind"])
+
+    if q_norm in nom_norm:
+        return 1.0
+    if q_norm in ind_norm:
+        return 0.9
+    if len(q_norm) >= 3:
+        for tok in (_tokenize(nom_norm) | _tokenize(ind_norm)):
+            if tok.startswith(q_norm):
+                return 0.85
+
+    q_tokens   = _tokenize(q_norm)
+    nom_tokens = _tokenize(nom_norm)
+    ind_tokens = _tokenize(ind_norm)
+
+    nom_inter = len(q_tokens & nom_tokens)
+    ind_inter = len(q_tokens & ind_tokens)
+    denom     = len(q_tokens | nom_tokens | ind_tokens)
+    if denom > 0:
+        return (nom_inter * 2 + ind_inter) / (denom + len(q_tokens))
+    return 0.0
+
+
+def _search_medicaments(query: str, catalogue: list[dict], threshold: float = 0.35) -> list[dict]:
+    """
+    Filtre et trie un catalogue de médicaments par pertinence.
+    Retourne les résultats au-dessus du seuil, triés du meilleur au moins bon.
+    """
+    if not query or not query.strip():
+        return catalogue
+    scored = ((m, _fuzzy_score_fast(query, m)) for m in catalogue)
+    return [m for m, s in sorted(scored, key=lambda x: -x[1]) if s >= threshold]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -841,13 +905,8 @@ def section_fiches_medicaments() -> None:
 
         search = st.text_input(
             "Rechercher", key=_ek("hs_search"),
-            placeholder="ex : atropine, nicardipine…")
-        filtered = (
-            [m for m in MEDICAMENTS_HS
-             if search.lower() in m["nom"].lower()
-             or search.lower() in m["ind"].lower()]
-            if search else MEDICAMENTS_HS
-        )
+            placeholder="ex. : atropine, nicardipine…")
+        filtered = _search_medicaments(search, MEDICAMENTS_HS)
         if not filtered:
             st.info("Aucun résultat — essayer un autre terme")
 
