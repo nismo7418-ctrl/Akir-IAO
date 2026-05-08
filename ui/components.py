@@ -374,6 +374,7 @@ def SBAR_RENDER(s: dict, key_suffix: str = "") -> None:
         file_name=f"SBAR_{s['date'].replace('/','')}_{s['heure'].replace(':','')}_Tri{s['niv']}.txt",
         mime="text/plain",
         use_container_width=True,
+        key=f"sbar_dl_btn{key_suffix}",
     )
     # Zone native a copier, sans injection JavaScript visible dans l'interface.
     if _col_cp.button("📋 Copier SBAR", use_container_width=True, key=f"sbar_copy_btn{key_suffix}"):
