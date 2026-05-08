@@ -1,11 +1,13 @@
-# persistence/registry.py — Registre patients anonymisé — AKIR-IAO v19.0
+# persistence/registry.py — Registre patients anonymisé — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # RGPD : Aucun nom/prénom stocké — UUID de session uniquement
 
-import json, os, uuid
+import json, os, uuid, logging, shutil, tempfile
 from datetime import datetime
 from config import REGISTRE_CAP
 from persistence.audit import audit_log
+
+_log = logging.getLogger(__name__)
 
 RF = "akir_reg.json"
 
@@ -15,17 +17,30 @@ def _load() -> list:
         try:
             with open(RF, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            _log.error("Registre corrompu ou illisible (%s) — registre traité comme vide", e)
             return []
     return []
 
 
 def _save(data: list) -> None:
+    dir_path = os.path.dirname(os.path.abspath(RF))
+    tmp_path = None
     try:
-        with open(RF, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=dir_path,
+            delete=False, suffix='.tmp'
+        ) as tmp:
+            json.dump(data, tmp, ensure_ascii=False, indent=2)
+            tmp_path = tmp.name
+        shutil.move(tmp_path, RF)
+    except Exception as e:
+        _log.error("Échec sauvegarde registre : %s", e)
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def enregistrer_patient(d: dict) -> str:

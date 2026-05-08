@@ -1,10 +1,12 @@
 import hashlib
-# persistence/audit.py — Journal d'audit anonymisé RGPD — AKIR-IAO v19.0
+# persistence/audit.py — Journal d'audit anonymisé RGPD — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # RGPD : Aucun nom/prénom — Identifiant de session uniquement
 
-import json, os
+import json, os, logging
 from datetime import datetime
+
+_log = logging.getLogger(__name__)
 
 AUDIT_FILE = "akir_audit.log"
 
@@ -14,14 +16,16 @@ _LAST_HASH_FILE = "akir_audit_last_hash"
 def _read_last_hash() -> str:
     try:
         if os.path.exists(_LAST_HASH_FILE):
-            return open(_LAST_HASH_FILE).read().strip()
+            with open(_LAST_HASH_FILE, 'r', encoding='utf-8') as f:
+                return f.read().strip()
     except Exception:
         pass
     return "0" * 64
 
 def _write_last_hash(h: str) -> None:
     try:
-        open(_LAST_HASH_FILE, 'w').write(h)
+        with open(_LAST_HASH_FILE, 'w', encoding='utf-8') as f:
+            f.write(h)
     except Exception:
         pass
 
@@ -43,8 +47,8 @@ def audit_log(uid: str, action: str, operateur: str, details: dict = None) -> No
         with open(AUDIT_FILE, "a", encoding="utf-8") as f:
             f.write(contenu + "|" + new_hash + "\n")
         _write_last_hash(new_hash)
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.error("audit_log échec — uid=%s action=%s : %s", uid, action, _e)
 
 
 def audit_verifier_integrite() -> dict:

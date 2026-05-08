@@ -1,1 +1,1 @@
-"""Persistence package — AKIR-IAO v19.0."""
+"""Persistence package — AKIR-IAO v20."""
