@@ -1,4 +1,4 @@
-# ui/eva_pqrst.py — Évaluation douleur et questions discriminantes — AKIR-IAO v19.0
+# ui/eva_pqrst.py — Évaluation douleur et questions discriminantes — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Source : Circulaire belge réévaluation douleur 2014, protocoles SFMU
 

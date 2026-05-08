@@ -827,4 +827,228 @@ input[type="checkbox"] {
   padding: 2px 10px;
   border-radius: 20px;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   GRAND ÉCRAN — FHD+ (≥ 1440px), QHD (≥ 1920px), 4K (≥ 2560px)
+   Objectif : exploiter l'espace horizontal, réduire le scroll,
+   adapter les tailles de police pour une lecture à ~80 cm (écran 32").
+   DPI cible : 140-160 ppp (4K @ 150 % Windows scaling).
+══════════════════════════════════════════════════════════════════ */
+
+/* ── FHD+ 1440p — station de travail standard ───────────────────────────── */
+@media (min-width: 1440px) {
+  .block-container {
+    max-width: 1340px !important;
+    padding: .75rem 2rem 4rem !important;
+  }
+
+  /* Grille vitaux : 4 colonnes au lieu de 3 */
+  .vitaux-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  /* Police générale légèrement agrandie */
+  .stMarkdown p,
+  [data-testid="stText"] p { font-size: .88rem !important; }
+
+  /* Onglets plus lisibles */
+  .stTabs [data-baseweb="tab"] {
+    font-size: .78rem !important;
+    padding: 8px 16px !important;
+  }
+
+  /* Boutons plus hauts pour cibles de clic faciles */
+  .stButton > button {
+    min-height: 46px !important;
+    font-size: .86rem !important;
+  }
+
+  /* Labels champs */
+  .stTextInput label, .stNumberInput label,
+  .stSelectbox label, .stSlider label,
+  .stCheckbox label, [data-testid="stCheckbox"] p {
+    font-size: .88rem !important;
+  }
+}
+
+/* ── QHD 1920p (FHD natif ou 1440p 125 %) — écrans 24"-27" ─────────────── */
+@media (min-width: 1920px) {
+  .block-container {
+    max-width: 1680px !important;
+    padding: 1rem 2.5rem 4rem !important;
+  }
+
+  /* En-tête plus imposant */
+  .app-hdr { padding: 18px 24px !important; margin-bottom: 14px !important; }
+  .app-hdr-title { font-size: 1.2rem !important; }
+  .app-hdr-sub   { font-size: .76rem !important; }
+  .tag           { font-size: .78rem !important; padding: 3px 10px !important; }
+
+  /* Cartes */
+  .card { padding: 16px 20px !important; margin-bottom: 12px !important; }
+  .card-title { font-size: .82rem !important; margin-bottom: 12px !important; }
+
+  /* Texte courant */
+  .stMarkdown p,
+  [data-testid="stText"] p { font-size: .92rem !important; }
+  .al { font-size: .84rem !important; padding: 9px 14px !important; }
+
+  /* Alertes / niveaux triage */
+  .tri-hero-level { font-size: 2rem !important; }
+  .tri-hero-just  { font-size: .88rem !important; }
+  .tri-hero-meta  { gap: 14px !important; }
+  .tri-meta-chip  { font-size: .78rem !important; padding: 3px 12px !important; }
+
+  /* Gauges et timers */
+  .gauge-val    { font-size: 2.6rem !important; }
+  .timer-digits { font-size: 2.4rem !important; }
+
+  /* Inputs + labels */
+  .stTextInput label, .stNumberInput label,
+  .stSelectbox label, .stSlider label,
+  .stCheckbox label, [data-testid="stCheckbox"] p {
+    font-size: .92rem !important;
+  }
+  .stNumberInput input,
+  .stTextInput  input { font-size: .96rem !important; min-height: 42px !important; }
+  [data-baseweb="select"] > div {
+    font-size: .92rem !important; min-height: 42px !important;
+  }
+
+  /* Onglets */
+  .stTabs [data-baseweb="tab"] {
+    font-size: .82rem !important;
+    padding: 10px 18px !important;
+  }
+
+  /* Métriques */
+  [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
+  [data-testid="stMetricLabel"] p { font-size: .74rem !important; }
+
+  /* Boutons */
+  .stButton > button {
+    min-height: 48px !important;
+    font-size: .92rem !important;
+    padding: 10px 20px !important;
+  }
+
+  /* SBAR */
+  .sbar-block { font-size: .76rem !important; line-height: 2 !important; }
+
+  /* RX compact */
+  .rx-compact-dose { font-size: 1.3rem !important; min-width: 80px !important; }
+  .rx-compact-name { font-size: .92rem !important; }
+
+  /* Grille vitaux 4 colonnes */
+  .vitaux-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 10px !important;
+  }
+  .vital-val { font-size: 1.45rem !important; }
+}
+
+/* ── 4K UHD / QHD 32" (≥ 2560px) — plein usage surface ────────────────── */
+@media (min-width: 2560px) {
+  .block-container {
+    max-width: 2400px !important;
+    padding: 1.25rem 3.5rem 5rem !important;
+  }
+
+  /* Colonnes Streamlit : gap plus généreux */
+  [data-testid="column"] { gap: 2.5rem !important; }
+
+  /* Polices agrandies pour lecture à distance */
+  html, body, [class*="st-"] { font-size: 17px !important; }
+
+  .stMarkdown p,
+  [data-testid="stText"] p { font-size: 1rem !important; }
+  .al { font-size: .9rem !important; padding: 10px 16px !important; }
+
+  /* En-tête */
+  .app-hdr-title { font-size: 1.35rem !important; }
+  .app-hdr-sub   { font-size: .82rem !important; }
+
+  /* Titres de cartes */
+  .card-title {
+    font-size: .88rem !important;
+    margin-bottom: 14px !important;
+  }
+
+  /* Triage hero */
+  .tri-hero       { padding: 28px !important; }
+  .tri-hero-level { font-size: 2.4rem !important; }
+  .tri-hero-just  { font-size: .96rem !important; }
+  .tri-meta-chip  { font-size: .84rem !important; }
+
+  /* Gauges + timers */
+  .gauge-val    { font-size: 3.2rem !important; }
+  .gauge-label  { font-size: .84rem !important; }
+  .timer-digits { font-size: 3rem !important; }
+  .vital-val    { font-size: 1.75rem !important; }
+  .vital-label  { font-size: .8rem !important; }
+
+  /* Onglets */
+  .stTabs [data-baseweb="tab"] {
+    font-size: .9rem !important;
+    padding: 12px 22px !important;
+  }
+
+  /* Inputs */
+  .stTextInput label, .stNumberInput label,
+  .stSelectbox label, .stSlider label,
+  .stCheckbox label, [data-testid="stCheckbox"] p {
+    font-size: 1rem !important;
+  }
+  .stNumberInput input,
+  .stTextInput  input {
+    font-size: 1.05rem !important;
+    min-height: 48px !important;
+    padding: 8px 14px !important;
+  }
+  [data-baseweb="select"] > div {
+    font-size: 1rem !important;
+    min-height: 48px !important;
+  }
+
+  /* Métriques */
+  [data-testid="stMetricValue"] { font-size: 2rem !important; }
+  [data-testid="stMetricLabel"] p { font-size: .82rem !important; }
+
+  /* Boutons */
+  .stButton > button {
+    min-height: 54px !important;
+    font-size: 1rem !important;
+    padding: 12px 24px !important;
+    border-radius: 12px !important;
+  }
+
+  /* RX compact */
+  .rx-compact-dose { font-size: 1.5rem !important; }
+  .rx-compact-name { font-size: 1rem !important; }
+  .rx-compact-detail { font-size: .84rem !important; }
+
+  /* EVA bar */
+  .eva-cell { height: 34px !important; font-size: .82rem !important; }
+
+  /* SBAR */
+  .sbar-block { font-size: .82rem !important; padding: 18px 24px !important; }
+
+  /* Grille vitaux 6 colonnes sur 4K */
+  .vitaux-grid {
+    grid-template-columns: repeat(6, 1fr) !important;
+    gap: 12px !important;
+  }
+  .vital-box { padding: 12px 10px !important; }
+
+  /* Slider thumb plus large */
+  [data-baseweb="slider"] [role="slider"] {
+    width: 28px !important; height: 28px !important;
+  }
+
+  /* Checkboxes plus grandes */
+  [data-baseweb="checkbox"] > label > div:first-child {
+    width: 22px !important; height: 22px !important; min-width: 22px !important;
+  }
+}
 """

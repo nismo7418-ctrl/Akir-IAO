@@ -1,4 +1,4 @@
-# persistence/audit.py — Journal d'audit anonymisé RGPD — AKIR-IAO v19.0
+# ui/audit.py — Journal d'audit anonymisé RGPD — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # RGPD : Aucun nom/prénom — Identifiant de session uniquement
 

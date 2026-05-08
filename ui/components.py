@@ -1,4 +1,4 @@
-# ui/components.py — Composants UI — AKIR-IAO v19.0
+# ui/components.py — Composants UI — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Design : Médical — Contrastes WCAG AAA — Mobile-friendly (44px min boutons)
 
@@ -33,7 +33,7 @@ def CARD(title: str, _: str = "") -> None:
 
 
 def CARD_END() -> None:
-    """Compatibilite avec l'ancien appelant CARD/CARD_END."""
+    """Compatibilité avec l'ancien appelant CARD/CARD_END."""
     return None
 
 
@@ -54,7 +54,7 @@ def DISC() -> None:
       et les protocoles <strong style="color:#94A3B8;">BCFI Belgique</strong>.
       Localisation : Urgences — Province de Hainaut, Wallonie, Belgique.<br>
       <strong style="color:#64748B;">Aucune donnée nominative n'est stockée (RGPD).</strong><br>
-      <span style="color:#475569;">Développeur exclusif : Ismail Ibn-Daifa — v19.0 — 2025</span><br>
+      <span style="color:#475569;">Développeur exclusif : Ismail Ibn-Daifa — v20 — 2025</span><br>
       <em style="font-size:0.8em;">Pour assistance : ismail.ibn-daifa@outlook.com</em>
     </div>""")
 
@@ -322,10 +322,10 @@ def build_sbar(
     }
 
 
-def SBAR_RENDER(s: dict) -> None:
+def SBAR_RENDER(s: dict, key_suffix: str = "") -> None:
     """Affiche la transmission SBAR formatée."""
     txt = f"""╔══════════════════════════════════════════════════════════╗
-║  TRANSMISSION SBAR — AKIR-IAO v19.0                     ║
+║  TRANSMISSION SBAR — AKIR-IAO v20                       ║
 ║  Service des Urgences — Hainaut, Wallonie, Belgique      ║
 ║  {s['date']} — {s['heure']}                                        ║
 ╚══════════════════════════════════════════════════════════╝
@@ -376,5 +376,5 @@ def SBAR_RENDER(s: dict) -> None:
         use_container_width=True,
     )
     # Zone native a copier, sans injection JavaScript visible dans l'interface.
-    if _col_cp.button("📋 Copier SBAR", use_container_width=True, key="sbar_copy_btn"):
+    if _col_cp.button("📋 Copier SBAR", use_container_width=True, key=f"sbar_copy_btn{key_suffix}"):
         st.code(txt, language=None)

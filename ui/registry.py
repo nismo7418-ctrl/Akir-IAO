@@ -1,4 +1,4 @@
-# persistence/registry.py — Registre patients anonymisé — AKIR-IAO v19.0
+# ui/registry.py — Registre patients anonymisé — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # RGPD : Aucun nom/prénom stocké — UUID de session uniquement
 
