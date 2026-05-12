@@ -1,0 +1,1999 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "date_creation": "2026-05-11",
+    "sources": [
+      {
+        "id": "IMG1",
+        "type": "protocole_dilutions",
+        "titre": "Dilutions standardisées des intraveineuses continues",
+        "origine": "Hôpital francophone (Belgique probable — présence de Négaban/temocilline)"
+      },
+      {
+        "id": "PDF1",
+        "type": "table_compatibilites",
+        "titre": "Compatibilités des médicaments injectables administrés en Y",
+        "origine": "Pharmacie des HUG (Hôpitaux Universitaires de Genève, Suisse)",
+        "reference_interne": "HUG_CompatAdm_DCI.xlsx",
+        "derniere_revision": "10.08.2018"
+      }
+    ],
+    "avertissement": "Ces données sont issues de documents hospitaliers. Toute utilisation clinique doit être validée par un pharmacien. Les données de compatibilité sont valables par paires (deux médicaments). Contacter l'assistance pharmaceutique pour toute association de plus de deux médicaments.",
+    "unites_concentrations": {
+      "note": "Attention aux conversions : 1 mg/ml = 1000 mcg/ml = 1000 µg/ml. Les UI/ml ne sont PAS convertibles en mg/ml sans facteur de conversion spécifique à la molécule.",
+      "abreviations": {
+        "UI": "Unités Internationales",
+        "mcg": "microgrammes (= µg)",
+        "mEq": "milliéquivalents"
+      }
+    }
+  },
+
+  "dilutions": [
+    {
+      "id": "DIL001",
+      "nom_source": "Actrapid",
+      "DCI": "insuline humaine ordinaire",
+      "classe_therapeutique": "antidiabétique / insuline rapide",
+      "conservation": "réfrigérateur (2–8°C)",
+      "dilution": {
+        "description_source": "50 UI + 49,5 ml NaCl 0,9%",
+        "volume_medicament_ml": 0.5,
+        "volume_diluant_ml": 49.5,
+        "volume_total_ml": 50.0,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "UI/ml"
+        },
+        "mode": "seringue électrique / PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "insuline humaine ordinaire",
+        "noms_commerciaux_be": ["Actrapid HM (NovoNordisk)", "Humulin R (Lilly)"],
+        "presentation_ampoule_be": "100 UI/ml — flacon 10 ml (1000 UI)",
+        "calcul_dilution": "0,5 ml (50 UI) + 49,5 ml NaCl 0,9% = 50 ml à 1 UI/ml",
+        "validation_dosage": "conforme",
+        "remarque": "Toujours utiliser une seringue d'insuline graduée en UI pour le prélèvement."
+      }
+    },
+    {
+      "id": "DIL002",
+      "nom_source": "Adrénaline",
+      "DCI": "épinéphrine",
+      "classe_therapeutique": "catécholamine / vasopresseur",
+      "conservation": "réfrigérateur (2–8°C) — protéger de la lumière",
+      "dilution": {
+        "description_source": "PURE",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml"
+        },
+        "mode": "PSE — non diluée"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "épinéphrine",
+        "noms_commerciaux_be": [
+          "Adrénaline Aguettant 1 mg/ml",
+          "Epinephrine B.Braun 1 mg/ml",
+          "Adrénaline Sterop 1 mg/ml"
+        ],
+        "presentation_ampoule_be": "1 mg/ml — ampoules de 1 ml",
+        "validation_dosage": "conforme",
+        "remarque": "Administration PURE en seringue de 1 mg/ml. Attention : ampoules 0,1 mg/ml (1/10 000) pour arrêt cardiaque à NE PAS confondre."
+      }
+    },
+    {
+      "id": "DIL003",
+      "nom_source": "Catapressan",
+      "DCI": "clonidine",
+      "classe_therapeutique": "antihypertenseur / agoniste alpha-2 central",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "4 A° de 150 mcg + 36 ml NaCl",
+        "volume_medicament_ml": 4,
+        "volume_diluant_ml": 36,
+        "volume_total_ml": 40,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 15,
+          "unite": "mcg/ml",
+          "note_discordance": "Le tableau source indique 150 mcg/ml. Calcul réel : 4 × 150 mcg = 600 mcg / 40 ml = 15 mcg/ml. La valeur 150 mcg/ml correspond à la concentration de l'ampoule, non à la seringue finale."
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Discordance entre la concentration affichée (150 mcg/ml) et la concentration calculée (15 mcg/ml). Vérifier l'interprétation du tableau d'origine.",
+      "adaptation_belge": {
+        "DCI": "clonidine",
+        "noms_commerciaux_be": ["Catapressan (Boehringer Ingelheim)"],
+        "presentation_ampoule_be": "Catapressan 150 mcg/ml — ampoules 1 ml (= 150 mcg/ampoule)",
+        "validation_dosage": "à vérifier — concentration finale calculée = 15 mcg/ml",
+        "remarque": "Confirmer la concentration finale souhaitée avec le protocole local belge (SIAMU/USI) avant implémentation."
+      }
+    },
+    {
+      "id": "DIL004",
+      "nom_source": "Cédocard",
+      "DCI": "isosorbide dinitrate",
+      "classe_therapeutique": "dérivé nitré / vasodilatateur",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "PURE",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml"
+        },
+        "mode": "PSE — non dilué. Utiliser tubulure non adsorbante (polyéthylène)."
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "isosorbide dinitrate",
+        "noms_commerciaux_be": ["Cédocard 1 mg/ml injectable (Servier)", "Isoket 1 mg/ml (UCB Pharma)"],
+        "presentation_ampoule_be": "1 mg/ml — ampoules 10 ml ou 50 ml",
+        "validation_dosage": "conforme",
+        "remarque": "Ne jamais utiliser en tubulure PVC (adsorption). Utiliser set en polyéthylène."
+      }
+    },
+    {
+      "id": "DIL005",
+      "nom_source": "Cordarone",
+      "DCI": "amiodarone",
+      "classe_therapeutique": "antiarythmique classe III",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "3 A° de 150 mg + 15 ml glucosé 5%",
+        "volume_medicament_ml": 9,
+        "volume_diluant_ml": 15,
+        "volume_total_ml": 24,
+        "diluant": "glucosé 5% OBLIGATOIRE (incompatible NaCl 0,9%)",
+        "concentration_finale": {
+          "valeur": 18.8,
+          "unite": "mg/ml",
+          "calcul": "3 × 150 mg = 450 mg / 24 ml = 18,75 mg/ml ≈ 18,8 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "amiodarone",
+        "noms_commerciaux_be": ["Cordarone (Sanofi)", "Amiodarone Mylan", "Amiodarone Teva"],
+        "presentation_ampoule_be": "150 mg / 3 ml (= 50 mg/ml) — ampoules de 3 ml",
+        "validation_dosage": "conforme",
+        "remarque": "Dilution EXCLUSIVEMENT dans glucosé 5%. Utiliser tubulure en verre ou polyéthylène (adsorption PVC possible). Concentration > 2 mg/ml par voie centrale uniquement."
+      }
+    },
+    {
+      "id": "DIL006",
+      "nom_source": "Corotrope",
+      "DCI": "milrinone",
+      "classe_therapeutique": "inotrope positif / inhibiteur phosphodiestérase III",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° de 10 mg + 40 ml NaCl 0,9%",
+        "volume_medicament_ml": 10,
+        "volume_diluant_ml": 40,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 0.2,
+          "unite": "mg/ml",
+          "calcul": "10 mg / 50 ml = 0,2 mg/ml = 200 mcg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "milrinone",
+        "noms_commerciaux_be": ["Corotrope (Sanofi)", "Milrinone Pharmacyclics"],
+        "presentation_ampoule_be": "10 mg / 10 ml (1 mg/ml) — ampoules de 10 ml",
+        "validation_dosage": "conforme",
+        "remarque": null
+      }
+    },
+    {
+      "id": "DIL007",
+      "nom_source": "Corvaton",
+      "DCI": "molsidomine",
+      "classe_therapeutique": "vasodilatateur nitrique",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "2 A° de 20 mg + 20 ml",
+        "volume_medicament_ml": 20,
+        "volume_diluant_ml": 20,
+        "volume_total_ml": 40,
+        "diluant": "non précisé (NaCl 0,9% probable)",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml",
+          "calcul": "2 × 20 mg = 40 mg / 40 ml = 1 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Diluant non précisé dans le tableau source. À confirmer avec le protocole local.",
+      "adaptation_belge": {
+        "DCI": "molsidomine",
+        "noms_commerciaux_be": ["Corvaton (Sanofi)"],
+        "presentation_ampoule_be": "4 mg/2 ml ou 20 mg/10 ml — selon conditionnement hospitalier",
+        "validation_dosage": "à confirmer selon conditionnement disponible",
+        "remarque": "Usage intraveineux continu limité à certains protocoles de soins intensifs. Vérifier disponibilité en pharmacie hospitalière belge."
+      }
+    },
+    {
+      "id": "DIL008",
+      "nom_source": "Dépakine",
+      "DCI": "valproate de sodium",
+      "classe_therapeutique": "antiépileptique / anticonvulsivant",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "2 A° de 400 mg + 32 ml NaCl 0,9%",
+        "volume_medicament_ml": 8,
+        "volume_diluant_ml": 32,
+        "volume_total_ml": 40,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 20,
+          "unite": "mg/ml",
+          "calcul": "2 × 400 mg = 800 mg / 40 ml = 20 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "valproate de sodium",
+        "noms_commerciaux_be": ["Dépakine (Sanofi)", "Valproate Fresenius Kabi"],
+        "presentation_ampoule_be": "400 mg / 4 ml (100 mg/ml) — ampoules de 4 ml avec solvant",
+        "validation_dosage": "conforme",
+        "remarque": "Reconstituer d'abord avec le solvant fourni puis diluer dans NaCl 0,9%."
+      }
+    },
+    {
+      "id": "DIL009",
+      "nom_source": "Dexdor",
+      "DCI": "dexmédétomidine",
+      "classe_therapeutique": "sédatif / agoniste alpha-2 central",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° de 400 mcg + 46 ml NaCl 0,9%",
+        "volume_medicament_ml": 4,
+        "volume_diluant_ml": 46,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 8,
+          "unite": "mcg/ml",
+          "calcul": "400 mcg / 50 ml = 8 mcg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "dexmédétomidine",
+        "noms_commerciaux_be": ["Dexdor 200 mcg/2 ml (Orion Pharma)"],
+        "presentation_ampoule_be": "200 mcg / 2 ml (100 mcg/ml) — ampoule 2 ml. Pour 400 mcg : 2 ampoules (4 ml) + 46 ml NaCl",
+        "validation_dosage": "conforme — préciser 2 ampoules pour atteindre 400 mcg",
+        "remarque": "Concentration standard : 4 mcg/ml ou 8 mcg/ml selon protocole. Dose max 1,4 mcg/kg/h."
+      }
+    },
+    {
+      "id": "DIL010",
+      "nom_source": "Dobutrex",
+      "DCI": "dobutamine",
+      "classe_therapeutique": "catécholamine / inotrope positif",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° de 250 mg + 30 ml NaCl 0,9%",
+        "volume_medicament_ml": 20,
+        "volume_diluant_ml": 30,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9% ou glucosé 5%",
+        "concentration_finale": {
+          "valeur": 5,
+          "unite": "mg/ml",
+          "calcul": "250 mg / 50 ml = 5 mg/ml = 5000 mcg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "dobutamine",
+        "noms_commerciaux_be": ["Dobutrex 250 mg (Lilly)", "Dobutamine Aguettant", "Dobutamine B.Braun"],
+        "presentation_ampoule_be": "250 mg / 20 ml (12,5 mg/ml) — flacon 20 ml",
+        "validation_dosage": "conforme",
+        "remarque": "Dose en mcg/kg/min. Formule débit PSE (ml/h) = dose(mcg/kg/min) × poids(kg) × 60 / 5000"
+      }
+    },
+    {
+      "id": "DIL011",
+      "nom_source": "Dormicum",
+      "DCI": "midazolam",
+      "classe_therapeutique": "benzodiazépine / sédatif",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "3 A° de 15 mg + glucosé 5%",
+        "volume_medicament_ml": 9,
+        "volume_diluant_ml": 36,
+        "volume_total_ml": 45,
+        "diluant": "glucosé 5%",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml",
+          "calcul": "3 × 15 mg = 45 mg / 45 ml = 1 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": "Volume diluant corrigé manuellement à 36 ml (calcul : 9 ml médicament + 36 ml glucosé 5% = 45 ml total → 1 mg/ml conforme)",
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "midazolam",
+        "noms_commerciaux_be": [
+          "Dormicum 15 mg/3 ml (Roche)",
+          "Midazolam Mylan 5 mg/ml",
+          "Midazolam Teva 5 mg/ml",
+          "Midazolam Sandoz 5 mg/ml"
+        ],
+        "presentation_ampoule_be": "15 mg/3 ml (5 mg/ml) — ampoules 3 ml",
+        "validation_dosage": "conforme après correction manuscrite",
+        "remarque": "Compatibilité en Y : concentration max 2,5 mg/ml avec nutrition parentérale (cf. tableau HUG). Médicament à tableau (stupéfiants en BE)."
+      }
+    },
+    {
+      "id": "DIL012",
+      "nom_source": "Euphillin",
+      "DCI": "aminophylline",
+      "classe_therapeutique": "bronchodilatateur / xanthine",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "2 A° de 200 mg + 20 ml",
+        "volume_medicament_ml": 20,
+        "volume_diluant_ml": 20,
+        "volume_total_ml": 40,
+        "diluant": "non précisé (NaCl 0,9% ou glucosé 5%)",
+        "concentration_finale": {
+          "valeur": 10,
+          "unite": "mg/ml",
+          "calcul": "2 × 200 mg = 400 mg / 40 ml = 10 mg/ml",
+          "note_discordance": "Le tableau source affiche 100 mg/ml ce qui semble une erreur : concentration létale si correcte. Calcul réel = 10 mg/ml."
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Discordance majeure : concentration affichée 100 mg/ml vs calculée 10 mg/ml. Vérification OBLIGATOIRE avant utilisation clinique.",
+      "adaptation_belge": {
+        "DCI": "aminophylline",
+        "noms_commerciaux_be": ["Aminophylline (Biomed)", "Euphylong (Napp — oral seulement)"],
+        "presentation_ampoule_be": "240 mg/10 ml (24 mg/ml) — ampoule 10 ml. Attention : ampoule 200 mg disponible aussi.",
+        "validation_dosage": "NON CONFORME — à vérifier. Concentration calculée 10 mg/ml semblerait correcte.",
+        "remarque": "Index thérapeutique étroit. Monitoring des taux plasmatiques requis. Diluer toujours avant administration IV."
+      }
+    },
+    {
+      "id": "DIL013",
+      "nom_source": "Glazidim",
+      "DCI": "ceftazidime",
+      "classe_therapeutique": "antibiotique / céphalosporine 3G",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "2 g + 48 ml NaCl 0,9%",
+        "volume_medicament_ml": 2,
+        "volume_diluant_ml": 48,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 40,
+          "unite": "mg/ml",
+          "calcul": "2000 mg / 50 ml = 40 mg/ml"
+        },
+        "mode": "perfusion continue"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "ceftazidime",
+        "noms_commerciaux_be": ["Glazidim (GSK)", "Ceftazidime Fresenius Kabi", "Ceftazidime Mylan"],
+        "presentation_ampoule_be": "Poudre 1 g ou 2 g pour injection",
+        "validation_dosage": "conforme",
+        "remarque": "Perfusion continue possible. Reconstituer avec le solvant approprié avant dilution dans NaCl 0,9%."
+      }
+    },
+    {
+      "id": "DIL014",
+      "nom_source": "Héparine",
+      "DCI": "héparine sodique",
+      "classe_therapeutique": "anticoagulant",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "10 000 UI (2 ml) + 48 ml NaCl 0,9%",
+        "volume_medicament_ml": 2,
+        "volume_diluant_ml": 48,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 200,
+          "unite": "UI/ml",
+          "calcul": "10 000 UI / 50 ml = 200 UI/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "héparine sodique",
+        "noms_commerciaux_be": [
+          "Héparine Leo 5000 UI/ml",
+          "Héparine Braun 5000 UI/ml",
+          "Héparine Viatris 5000 UI/ml"
+        ],
+        "presentation_ampoule_be": "5000 UI/ml — flacons 1 ml, 2 ml, 5 ml. Pour 10 000 UI : 2 ml de la solution 5000 UI/ml",
+        "validation_dosage": "conforme",
+        "remarque": "Surveillance biologique (TCA ou anti-Xa) obligatoire. Incompatible avec de nombreux médicaments — voir tableau de compatibilité."
+      }
+    },
+    {
+      "id": "DIL015",
+      "nom_source": "Isuprel",
+      "DCI": "isoprénaline",
+      "classe_therapeutique": "sympathomimétique bêta non sélectif / chronotrope",
+      "conservation": "réfrigérateur (2–8°C)",
+      "dilution": {
+        "description_source": "8 A° de 0,2 mg + 32 ml NaCl 0,9%",
+        "volume_medicament_ml": 8,
+        "volume_diluant_ml": 32,
+        "volume_total_ml": 40,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 40,
+          "unite": "mcg/ml",
+          "calcul": "8 × 0,2 mg = 1,6 mg = 1600 mcg / 40 ml = 40 mcg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Isuprel (isoprénaline IV) peut ne plus être disponible en Belgique ou avoir un statut ATU/usage exceptionnel. Vérifier disponibilité auprès de la pharmacie hospitalière belge.",
+      "adaptation_belge": {
+        "DCI": "isoprénaline",
+        "noms_commerciaux_be": ["Isuprel (Sanofi) — disponibilité à confirmer en Belgique"],
+        "presentation_ampoule_be": "0,2 mg/ml — ampoule 1 ml (200 mcg/ml). À vérifier disponibilité.",
+        "validation_dosage": "à confirmer selon disponibilité",
+        "remarque": "Utilisation de plus en plus rare en USI. Considérer alternatives (atropine, pace-maker) si non disponible."
+      }
+    },
+    {
+      "id": "DIL016",
+      "nom_source": "K Cl",
+      "DCI": "chlorure de potassium",
+      "classe_therapeutique": "électrolyte / supplémentation potassique",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "40 mEq / 40 ml (PUR)",
+        "volume_medicament_ml": 40,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": 40,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mEq/ml",
+          "note": "1 mEq/ml = 74,5 mg/ml. Administration PUR en PSE par voie centrale UNIQUEMENT."
+        },
+        "mode": "PSE — voie centrale EXCLUSIVE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Administration PUR de KCl est EXTRÊMEMENT DANGEREUSE si administrée IV directe. Protocole de sécurité SIAMU/SPF Santé obligatoire en Belgique.",
+      "adaptation_belge": {
+        "DCI": "chlorure de potassium",
+        "noms_commerciaux_be": [
+          "KCl B.Braun 7,46% (1 mEq/ml)",
+          "KCl Fresenius 7,45%",
+          "Potassium Chlorure Baxter"
+        ],
+        "presentation_ampoule_be": "7,45% = 1 mEq/ml — ampoules 10 ml, 20 ml ou 40 mEq/40 ml",
+        "validation_dosage": "conforme — VOIE CENTRALE UNIQUEMENT",
+        "remarque": "DANGER VITAL si administration IV directe ou voie périphérique. Vitesse max recommandée en Belgique : 20 mEq/h en général, 40 mEq/h en USI avec monitoring continu."
+      }
+    },
+    {
+      "id": "DIL017",
+      "nom_source": "Ketanest",
+      "DCI": "kétamine",
+      "classe_therapeutique": "anesthésique / analgésique dissociatif",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "2 A° de 250 mg + 30 ml NaCl 0,9%",
+        "volume_medicament_ml": 20,
+        "volume_diluant_ml": 30,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 10,
+          "unite": "mg/ml",
+          "calcul": "2 × 250 mg = 500 mg / 50 ml = 10 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "kétamine",
+        "noms_commerciaux_be": ["Ketalar (Pfizer)", "Kétamine Panpharma", "Kétamine Mylan"],
+        "presentation_ampoule_be": "500 mg/10 ml (50 mg/ml) ou 250 mg/5 ml (50 mg/ml)",
+        "validation_dosage": "conforme — 2 × 250 mg = 500 mg / 50 ml = 10 mg/ml",
+        "remarque": "Stupéfiant en Belgique (tableau I). Associer benzodiazépine pour prévenir effets psychodysleptiques. Protéger de la lumière."
+      }
+    },
+    {
+      "id": "DIL018",
+      "nom_source": "Lasix (macro)",
+      "DCI": "furosémide",
+      "classe_therapeutique": "diurétique de l'anse",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "PUR",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 10,
+          "unite": "mg/ml",
+          "note": "Concentration de l'ampoule commerciale"
+        },
+        "mode": "PSE — non dilué (macrodosage)"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "furosémide",
+        "noms_commerciaux_be": ["Lasix (Sanofi)", "Furosémide B.Braun 10 mg/ml", "Furosémide Mylan"],
+        "presentation_ampoule_be": "10 mg/ml — ampoules 2 ml (20 mg), 5 ml (50 mg), 25 ml (250 mg)",
+        "validation_dosage": "conforme",
+        "remarque": "Ne pas dépasser 4 mg/min en IV (ototoxicité). pH alcalin — incompatible avec de nombreux médicaments acides."
+      }
+    },
+    {
+      "id": "DIL019",
+      "nom_source": "Levophed",
+      "DCI": "noradrénaline (norépinéphrine)",
+      "classe_therapeutique": "catécholamine / vasopresseur",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "2 A° de 4 mg + 32 ml glucosé 5%",
+        "volume_medicament_ml": 8,
+        "volume_diluant_ml": 32,
+        "volume_total_ml": 40,
+        "diluant": "glucosé 5% (préféré) — NaCl 0,9% aussi possible",
+        "concentration_finale": {
+          "valeur": 0.2,
+          "unite": "mg/ml",
+          "en_mcg_ml": 200,
+          "calcul": "2 × 4 mg = 8 mg / 40 ml = 0,2 mg/ml = 200 mcg/ml"
+        },
+        "mode": "PSE — voie centrale recommandée"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "noradrénaline (norépinéphrine)",
+        "noms_commerciaux_be": [
+          "Levophed 4 mg/4 ml (Pfizer/Hospira)",
+          "Noradrénaline Aguettant 4 mg/4 ml",
+          "Noradrénaline B.Braun 1 mg/ml"
+        ],
+        "presentation_ampoule_be": "4 mg/4 ml (1 mg/ml) — ampoule 4 ml. Standard belge.",
+        "validation_dosage": "conforme",
+        "remarque": "Formule débit PSE (ml/h) = dose(mcg/kg/min) × poids(kg) × 60 / 200. Voie centrale RECOMMANDÉE (risque nécrose locale)."
+      }
+    },
+    {
+      "id": "DIL020",
+      "nom_source": "Meronem",
+      "DCI": "méropénème",
+      "classe_therapeutique": "antibiotique / carbapénème",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 g + 45 ml NaCl 0,9%",
+        "volume_medicament_ml": 5,
+        "volume_diluant_ml": 40,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 20,
+          "unite": "mg/ml",
+          "calcul": "1000 mg / 50 ml = 20 mg/ml"
+        },
+        "mode": "perfusion sur 3h (PK/PD optimisé)"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "méropénème",
+        "noms_commerciaux_be": ["Meronem (AstraZeneca)", "Méropénème Fresenius Kabi", "Méropénème Mylan"],
+        "presentation_ampoule_be": "Poudre 500 mg ou 1 g pour injection/perfusion",
+        "validation_dosage": "conforme",
+        "remarque": "Perfusion prolongée (3h) recommandée pour optimiser l'exposition PK/PD (T > CMI). Reconstituer avec eau stérile avant dilution."
+      }
+    },
+    {
+      "id": "DIL021",
+      "nom_source": "Morphine",
+      "DCI": "morphine sulfate",
+      "classe_therapeutique": "opioïde / analgésique",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "5 A° de 10 mg + 45 ml NaCl 0,9%",
+        "volume_medicament_ml": 5,
+        "volume_diluant_ml": 45,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml",
+          "calcul": "5 × 10 mg = 50 mg / 50 ml = 1 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "morphine sulfate",
+        "noms_commerciaux_be": [
+          "Morphine Sterop 10 mg/ml (référence belge classique)",
+          "Morphine Sandoz 10 mg/ml",
+          "Morphine Mylan 10 mg/ml"
+        ],
+        "presentation_ampoule_be": "10 mg/ml — ampoules 1 ml (= 10 mg/ampoule). Aussi 20 mg/ml en Belgique.",
+        "validation_dosage": "conforme",
+        "remarque": "Stupéfiant (tableau I). Ampoules à 10 mg/ml = 1 ml par ampoule. Pour 50 mg : 5 ampoules de 1 ml + 45 ml NaCl. Morphine Sterop est la présentation historique belge."
+      }
+    },
+    {
+      "id": "DIL022",
+      "nom_source": "Négaban",
+      "DCI": "temocilline",
+      "classe_therapeutique": "antibiotique / pénicilline 6-alpha méthoxypénicilline",
+      "conservation": "réfrigérateur (2–8°C) après reconstitution",
+      "dilution": {
+        "description_source": "2 g + 48 ml glucosé 5%",
+        "volume_medicament_ml": 4,
+        "volume_diluant_ml": 44,
+        "volume_total_ml": 50,
+        "diluant": "glucosé 5% (selon source) — NaCl 0,9% aussi compatible",
+        "concentration_finale": {
+          "valeur": 40,
+          "unite": "mg/ml",
+          "calcul": "2000 mg / 50 ml = 40 mg/ml"
+        },
+        "mode": "perfusion continue"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Temocilline (Négaban) est un antibiotique typiquement belge (Eumedica). Vérifier la disponibilité en dehors de la Belgique (non commercialisé en Suisse).",
+      "adaptation_belge": {
+        "DCI": "temocilline",
+        "noms_commerciaux_be": ["Négaban 1g ou 2g (Eumedica — SPÉCIALITÉ BELGE)"],
+        "presentation_ampoule_be": "Poudre 1 g ou 2 g pour solution injectable — produit EXCLUSIVEMENT belge (et UK)",
+        "validation_dosage": "conforme au protocole belge",
+        "remarque": "SPÉCIALITÉ BELGE. Antibiotique à spectre étroit (BGN, ESBL). Non disponible en Suisse — tableau source peut être d'origine belge. Dose habituelle : 2g/12h ou perfusion continue 4g/24h."
+      }
+    },
+    {
+      "id": "DIL023",
+      "nom_source": "Nimbex",
+      "DCI": "cisatracurium",
+      "classe_therapeutique": "curare non dépolarisant / bloquant neuromusculaire",
+      "conservation": "réfrigérateur (2–8°C)",
+      "dilution": {
+        "description_source": "PUR",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 2,
+          "unite": "mg/ml",
+          "note": "Concentration de l'ampoule commerciale Nimbex 2 mg/ml"
+        },
+        "mode": "PSE — non dilué"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "cisatracurium",
+        "noms_commerciaux_be": ["Nimbex 2 mg/ml (GSK)", "Nimbex 5 mg/ml (GSK — pour bolus)"],
+        "presentation_ampoule_be": "2 mg/ml — ampoule 5 ml (10 mg) ou 10 ml (20 mg)",
+        "validation_dosage": "conforme",
+        "remarque": "Curare à tableau. Conserver au réfrigérateur. Peut être utilisé en PUR à 2 mg/ml ou dilué à 0,1 mg/ml pour ajustement fin."
+      }
+    },
+    {
+      "id": "DIL024",
+      "nom_source": "Pantomed",
+      "DCI": "pantoprazole",
+      "classe_therapeutique": "inhibiteur de la pompe à protons",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "2 A° de 40 mg + 40 ml NaCl 0,9%",
+        "volume_medicament_ml": 20,
+        "volume_diluant_ml": 20,
+        "volume_total_ml": 40,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 2,
+          "unite": "mg/ml",
+          "calcul": "2 × 40 mg = 80 mg / 40 ml = 2 mg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Volume de reconstitution poudre non précisé. Pantomed est une poudre lyophilisée. Chaque flacon 40 mg est généralement reconstitué avec 10 ml d'eau stérile (4 mg/ml). 2 flacons × 10 ml = 20 ml puis + 20 ml NaCl = 40 ml total.",
+      "adaptation_belge": {
+        "DCI": "pantoprazole",
+        "noms_commerciaux_be": ["Pantomed (Takeda)", "Pantoprazole EG", "Pantoprazole Teva", "Pantoprazole Sandoz"],
+        "presentation_ampoule_be": "Poudre lyophilisée 40 mg/flacon — reconstituer avec 10 ml eau PPIW → 4 mg/ml, puis diluer",
+        "validation_dosage": "conforme — calculer volumes de reconstitution",
+        "remarque": "Stable 12h à température ambiante après reconstitution dans NaCl 0,9%."
+      }
+    },
+    {
+      "id": "DIL025",
+      "nom_source": "Reverpleg",
+      "DCI": "vasopressine (probable)",
+      "classe_therapeutique": "hormone antidiurétique / vasopresseur",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° + 48 ml NaCl 0,9%",
+        "volume_medicament_ml": 2,
+        "volume_diluant_ml": 48,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 0.8,
+          "unite": "UI/ml",
+          "calcul": "40 UI / 50 ml = 0,8 UI/ml (après correction manuscrite)"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": "Concentration corrigée manuellement : 0,8 UI/ml (40 UI + 48 ml = 50 ml total). La valeur imprimée (20 UI/ml) correspond à la concentration de l'ampoule, non à la seringue finale.",
+      "check_protocol": true,
+      "flag_check_protocol_raison": "Identification incertaine : 'Reverpleg' peut désigner vasopressine (ADH), un produit de cardioplégie ou autre. Vérifier le nom exact dans le formulaire pharmaceutique hospitalier d'origine.",
+      "adaptation_belge": {
+        "DCI": "vasopressine (à confirmer)",
+        "noms_commerciaux_be": [
+          "Vasopressine Aguettant 20 UI/ml",
+          "Pitressin (Pfizer) — disponibilité variable"
+        ],
+        "presentation_ampoule_be": "20 UI/ml — ampoule 1 ml ou 2 ml (= 20 UI ou 40 UI)",
+        "validation_dosage": "conforme si ampoule 40 UI/2 ml + 48 ml NaCl = 50 ml → 0,8 UI/ml",
+        "remarque": "IDENTIFICATION À CONFIRMER. Si vasopressine : dose standard choc septique 0,01–0,04 UI/min. Si cardioplégie : protocole chirurgie cardiaque spécifique."
+      }
+    },
+    {
+      "id": "DIL026",
+      "nom_source": "Rydène",
+      "DCI": "nicardipine",
+      "classe_therapeutique": "inhibiteur calcique / antihypertenseur",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "PUR",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 1,
+          "unite": "mg/ml",
+          "note": "Concentration ampoule commerciale Rydène 1 mg/ml"
+        },
+        "mode": "PSE — non dilué"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "nicardipine",
+        "noms_commerciaux_be": ["Rydène 1 mg/ml (Pierre Fabre Médicament)"],
+        "presentation_ampoule_be": "1 mg/ml — ampoules 10 ml (10 mg)",
+        "validation_dosage": "conforme",
+        "remarque": "Administration PUR en PSE. Dose : 3–15 mg/h. Protéger de la lumière. Attention nombreuses incompatibilités en Y (voir tableau HUG)."
+      }
+    },
+    {
+      "id": "DIL027",
+      "nom_source": "Somatostatine",
+      "DCI": "somatostatine",
+      "classe_therapeutique": "hormone peptidique / hémostatique digestif",
+      "conservation": "réfrigérateur après reconstitution",
+      "dilution": {
+        "description_source": "1 A° de 3 mg + 23 ml NaCl 0,9%",
+        "volume_medicament_ml": 1,
+        "volume_diluant_ml": 23,
+        "volume_total_ml": 24,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 0.125,
+          "unite": "mg/ml",
+          "en_mcg_ml": 125,
+          "calcul": "3 mg / 24 ml = 0,125 mg/ml. Affichage source : 3 mg/24 ml"
+        },
+        "mode": "PSE (débit : 250 mcg/h = 2 ml/h)"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "somatostatine",
+        "noms_commerciaux_be": ["Stilamin 3 mg (Merck Serono)", "Somatostatine Eumedica"],
+        "presentation_ampoule_be": "Poudre lyophilisée 3 mg/flacon — reconstituer avec 1 ml eau PPIW, puis diluer dans NaCl 0,9%",
+        "validation_dosage": "conforme",
+        "remarque": "Indication principale : hémorragie digestive par varices. Dose de charge : 250 mcg bolus. Entretien : 250 mcg/h."
+      }
+    },
+    {
+      "id": "DIL028",
+      "nom_source": "Sufenta",
+      "DCI": "sufentanil",
+      "classe_therapeutique": "opioïde puissant / analgésique",
+      "conservation": "température ambiante — protéger de la lumière",
+      "dilution": {
+        "description_source": "PURE",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 5,
+          "unite": "mcg/ml",
+          "note": "Concentration ampoule Sufenta 5 mcg/ml"
+        },
+        "mode": "PSE — non dilué"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "sufentanil",
+        "noms_commerciaux_be": ["Sufenta 5 mcg/ml (Janssen)", "Sufentanil Hameln 5 mcg/ml"],
+        "presentation_ampoule_be": "5 mcg/ml — ampoule 10 ml (= 50 mcg) ou 5 ml (= 25 mcg)",
+        "validation_dosage": "conforme",
+        "remarque": "Stupéfiant tableau I. 5–15× plus puissant que le fentanyl. Dose sédation-analgésie USI : 0,2–0,5 mcg/kg/h. Surveillance respiratoire continue."
+      }
+    },
+    {
+      "id": "DIL029",
+      "nom_source": "Tazocin",
+      "DCI": "pipéracilline / tazobactam",
+      "classe_therapeutique": "antibiotique / pénicilline + inhibiteur bêta-lactamase",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "4 g + 45 ml NaCl 0,9%",
+        "volume_medicament_ml": 5,
+        "volume_diluant_ml": 40,
+        "volume_total_ml": 50,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 80,
+          "unite": "mg/ml",
+          "note": "4 g pipéracilline + 0,5 g tazobactam = 4,5 g total / 50 ml = 90 mg/ml. Exprimé en pipéracilline seule : 80 mg/ml",
+          "calcul": "4000 mg pip / 50 ml = 80 mg/ml"
+        },
+        "mode": "perfusion sur 3h (PK/PD optimisé)"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "pipéracilline / tazobactam",
+        "noms_commerciaux_be": ["Tazocin (Pfizer)", "Pipéracilline/Tazobactam Fresenius Kabi", "Piperacilline-Tazobactam EG"],
+        "presentation_ampoule_be": "Poudre 4 g/0,5 g pour solution perfusion",
+        "validation_dosage": "conforme",
+        "remarque": "Perfusion prolongée (3–4h) ou continue recommandée en USI pour optimiser T > CMI. Dose habituelle : 4,5 g/6h ou 18 g/24h en perfusion continue."
+      }
+    },
+    {
+      "id": "DIL030",
+      "nom_source": "Vancocin",
+      "DCI": "vancomycine",
+      "classe_therapeutique": "antibiotique / glycopeptide",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° 500 mg + 10 ml H2O + 40 ml NaCl 0,9%",
+        "volume_medicament_ml": 10,
+        "volume_diluant_ml": 40,
+        "volume_total_ml": 50,
+        "diluant": "Eau PPIW pour reconstitution, puis NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 10,
+          "unite": "mg/ml",
+          "calcul": "500 mg / 50 ml = 10 mg/ml"
+        },
+        "mode": "perfusion sur 60–90 min minimum (éviter 'red man syndrome')"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "vancomycine",
+        "noms_commerciaux_be": [
+          "Vancocin (Flynn Pharma)",
+          "Vancomycine EG",
+          "Vancomycine Fresenius Kabi",
+          "Vancomycine Mylan"
+        ],
+        "presentation_ampoule_be": "Poudre 500 mg ou 1 g pour solution perfusion",
+        "validation_dosage": "conforme — max recommandé 5 mg/ml en périphérique, 10 mg/ml en central",
+        "remarque": "Monitoring trough ou AUC/CMI obligatoire. Perfuser en 60 min minimum (500 mg) pour éviter red man syndrome. Incompatible avec de nombreux médicaments — voir tableau HUG."
+      }
+    },
+    {
+      "id": "DIL031",
+      "nom_source": "Ventolin",
+      "DCI": "salbutamol",
+      "classe_therapeutique": "bronchodilatateur / bêta-2 agoniste",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "1 A° de 5 mg + 35 ml NaCl 0,9%",
+        "volume_medicament_ml": 5,
+        "volume_diluant_ml": 35,
+        "volume_total_ml": 40,
+        "diluant": "NaCl 0,9%",
+        "concentration_finale": {
+          "valeur": 125,
+          "unite": "mcg/ml",
+          "calcul": "5 mg = 5000 mcg / 40 ml = 125 mcg/ml"
+        },
+        "mode": "PSE"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "salbutamol",
+        "noms_commerciaux_be": ["Ventolin 5 mg/5 ml injectable (GSK)", "Salbutamol B.Braun 1 mg/ml"],
+        "presentation_ampoule_be": "5 mg/5 ml (1 mg/ml) — ampoule 5 ml",
+        "validation_dosage": "conforme",
+        "remarque": "Usage IV en USI (bronchospasme sévère, hyperkaliémie). Surveillance K+, FC, glycémie."
+      }
+    },
+    {
+      "id": "DIL032",
+      "nom_source": "Xylocaine 2%",
+      "DCI": "lidocaïne",
+      "classe_therapeutique": "anesthésique local / antiarythmique classe Ib",
+      "conservation": "température ambiante",
+      "dilution": {
+        "description_source": "PURE",
+        "volume_medicament_ml": null,
+        "volume_diluant_ml": 0,
+        "volume_total_ml": null,
+        "diluant": "aucun",
+        "concentration_finale": {
+          "valeur": 20,
+          "unite": "mg/ml",
+          "note": "Xylocaïne 2% = 20 mg/ml"
+        },
+        "mode": "PSE — non dilué"
+      },
+      "correction_manuscrite": null,
+      "check_protocol": false,
+      "adaptation_belge": {
+        "DCI": "lidocaïne",
+        "noms_commerciaux_be": ["Xylocaïne 2% (AstraZeneca)", "Lidocaïne B.Braun 20 mg/ml", "Lidocaïne Mylan 20 mg/ml"],
+        "presentation_ampoule_be": "20 mg/ml (2%) — ampoule 5 ml ou 10 ml. Aussi disponible sans vasoconstricteur.",
+        "validation_dosage": "conforme",
+        "remarque": "Usage antiarythmique IV USI. Dose de charge : 1–1,5 mg/kg IV. Entretien : 1–4 mg/min. Toxicité SNC et cardiaque à surveiller."
+      }
+    }
+  ],
+
+  "compatibilites_y": [
+    {
+      "note_generale": "Données extraites du tableau HUG (Hôpitaux Universitaires de Genève) — Source: HUG_CompatAdm_DCI.xlsx, révision 10.08.2018. Compatibilité valable par paires uniquement. Références : a=ASHP Handbook 2017, b=King JC Guide 2017, c=Trissel 1996, d=SmPC/fabricant, e=CHUV QC lab, f=HUG QC lab, g=Micromedex 2017, h=B.Braun pour Nutriflex, i=Moore 2012."
+    },
+    {
+      "id": "COMP001",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "amikacine",
+      "DCI_B": "amikacine",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP002",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "amiodarone",
+      "DCI_B": "amiodarone",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP003",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "atracurium",
+      "DCI_B": "atracurium",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP004",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "fentanyl",
+      "DCI_B": "fentanyl",
+      "statut": "C",
+      "reference": "b",
+      "precision": null
+    },
+    {
+      "id": "COMP005",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP006",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP007",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP008",
+      "substance_A": "épinéphrine",
+      "DCI_A": "epinephrine",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible physico-chimique"
+    },
+    {
+      "id": "COMP009",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — précipitation"
+    },
+    {
+      "id": "COMP010",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C*",
+      "reference": "a",
+      "precision": "Compatible si concentration amiodarone entre 0,6 et 9,75 mg/ml. Si > 9,75 mg/ml : incompatible."
+    },
+    {
+      "id": "COMP011",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "e",
+      "precision": "Incompatible — précipitation (pH différents)"
+    },
+    {
+      "id": "COMP012",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP013",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP014",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP015",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "dopamine",
+      "DCI_B": "dopamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP016",
+      "substance_A": "amiodarone",
+      "DCI_A": "amiodarone",
+      "substance_B": "insuline rapide",
+      "DCI_B": "insulin regular",
+      "statut": "I",
+      "reference": "b",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP017",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP018",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "c",
+      "precision": "Incompatible — précipitation"
+    },
+    {
+      "id": "COMP019",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "fentanyl",
+      "DCI_B": "fentanyl",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP020",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP021",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP022",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP023",
+      "substance_A": "dobutamine",
+      "DCI_A": "dobutamine",
+      "substance_B": "dopamine",
+      "DCI_B": "dopamine",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP024",
+      "substance_A": "dopamine",
+      "DCI_A": "dopamine",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP025",
+      "substance_A": "dopamine",
+      "DCI_A": "dopamine",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — pH incompatibles"
+    },
+    {
+      "id": "COMP026",
+      "substance_A": "dopamine",
+      "DCI_A": "dopamine",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP027",
+      "substance_A": "dopamine",
+      "DCI_A": "dopamine",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP028",
+      "substance_A": "dopamine",
+      "DCI_A": "dopamine",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP029",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP030",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "C",
+      "reference": "b",
+      "precision": null
+    },
+    {
+      "id": "COMP031",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP032",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP033",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "vancomycine",
+      "DCI_B": "vancomycin",
+      "statut": "C",
+      "reference": "b",
+      "precision": null
+    },
+    {
+      "id": "COMP034",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP035",
+      "substance_A": "fentanyl",
+      "DCI_A": "fentanyl",
+      "substance_B": "propofol",
+      "DCI_B": "propofol",
+      "statut": "C",
+      "reference": "b",
+      "precision": null
+    },
+    {
+      "id": "COMP036",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "vancomycine",
+      "DCI_B": "vancomycin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — précipitation"
+    },
+    {
+      "id": "COMP037",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP038",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "gentamicine",
+      "DCI_B": "gentamicin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — inactivation de la gentamicine"
+    },
+    {
+      "id": "COMP039",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "amikacine",
+      "DCI_B": "amikacin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP040",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP041",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP042",
+      "substance_A": "héparine sodique",
+      "DCI_A": "heparin sodium",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP043",
+      "substance_A": "insuline rapide",
+      "DCI_A": "insulin regular",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "I",
+      "reference": "c",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP044",
+      "substance_A": "insuline rapide",
+      "DCI_A": "insulin regular",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — à vérifier selon concentration"
+    },
+    {
+      "id": "COMP045",
+      "substance_A": "insuline rapide",
+      "DCI_A": "insulin regular",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP046",
+      "substance_A": "insuline rapide",
+      "DCI_A": "insulin regular",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "I",
+      "reference": "c",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP047",
+      "substance_A": "midazolam",
+      "DCI_A": "midazolam",
+      "substance_B": "morphine",
+      "DCI_B": "morphine",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP048",
+      "substance_A": "midazolam",
+      "DCI_A": "midazolam",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP049",
+      "substance_A": "midazolam",
+      "DCI_A": "midazolam",
+      "substance_B": "vancomycine",
+      "DCI_B": "vancomycin",
+      "statut": "C",
+      "reference": "c",
+      "precision": null
+    },
+    {
+      "id": "COMP050",
+      "substance_A": "midazolam",
+      "DCI_A": "midazolam",
+      "substance_B": "nutrition parentérale",
+      "DCI_B": "parenteral nutrition",
+      "statut": "C*",
+      "reference": "b",
+      "precision": "Compatible si concentration midazolam ≤ 2,5 mg/ml. Si > 2,5 mg/ml : INCOMPATIBLE avec nutrition parentérale."
+    },
+    {
+      "id": "COMP051",
+      "substance_A": "midazolam",
+      "DCI_A": "midazolam",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible — précipitation"
+    },
+    {
+      "id": "COMP052",
+      "substance_A": "milrinone",
+      "DCI_A": "milrinone",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP053",
+      "substance_A": "milrinone",
+      "DCI_A": "milrinone",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP054",
+      "substance_A": "milrinone",
+      "DCI_A": "milrinone",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible — précipitation immédiate"
+    },
+    {
+      "id": "COMP055",
+      "substance_A": "milrinone",
+      "DCI_A": "milrinone",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP056",
+      "substance_A": "morphine",
+      "DCI_A": "morphine",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP057",
+      "substance_A": "morphine",
+      "DCI_A": "morphine",
+      "substance_B": "vancomycine",
+      "DCI_B": "vancomycin",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP058",
+      "substance_A": "morphine",
+      "DCI_A": "morphine",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP059",
+      "substance_A": "morphine",
+      "DCI_A": "morphine",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP060",
+      "substance_A": "nicardipine",
+      "DCI_A": "nicardipine",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP061",
+      "substance_A": "nicardipine",
+      "DCI_A": "nicardipine",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible — précipitation"
+    },
+    {
+      "id": "COMP062",
+      "substance_A": "nicardipine",
+      "DCI_A": "nicardipine",
+      "substance_B": "dopamine",
+      "DCI_B": "dopamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP063",
+      "substance_A": "nicardipine",
+      "DCI_A": "nicardipine",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP064",
+      "substance_A": "nicardipine",
+      "DCI_A": "nicardipine",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP065",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "pipéracilline/tazobactam",
+      "DCI_B": "piperacillin/tazobactam",
+      "statut": "I",
+      "reference": "d",
+      "precision": "Incompatible — précipitation. Ne pas coadministrer en Y."
+    },
+    {
+      "id": "COMP066",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP067",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP068",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP069",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "céfazoline",
+      "DCI_B": "cefazolin",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP070",
+      "substance_A": "vancomycine",
+      "DCI_A": "vancomycin",
+      "substance_B": "méropénème",
+      "DCI_B": "meropenem",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP071",
+      "substance_A": "dexmédétomidine",
+      "DCI_A": "dexmedetomidine",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP072",
+      "substance_A": "dexmédétomidine",
+      "DCI_A": "dexmedetomidine",
+      "substance_B": "fentanyl",
+      "DCI_B": "fentanyl",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP073",
+      "substance_A": "dexmédétomidine",
+      "DCI_A": "dexmedetomidine",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP074",
+      "substance_A": "dexmédétomidine",
+      "DCI_A": "dexmedetomidine",
+      "substance_B": "noradrénaline",
+      "DCI_B": "norepinephrine",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP075",
+      "substance_A": "dexmédétomidine",
+      "DCI_A": "dexmedetomidine",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP076",
+      "substance_A": "furosémide",
+      "DCI_A": "furosemide",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP077",
+      "substance_A": "furosémide",
+      "DCI_A": "furosemide",
+      "substance_B": "gentamicine",
+      "DCI_B": "gentamicin",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP078",
+      "substance_A": "furosémide",
+      "DCI_A": "furosemide",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP079",
+      "substance_A": "potassium chlorure",
+      "DCI_A": "potassium chloride",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP080",
+      "substance_A": "potassium chlorure",
+      "DCI_A": "potassium chloride",
+      "substance_B": "méropénème",
+      "DCI_B": "meropenem",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP081",
+      "substance_A": "noradrénaline",
+      "DCI_A": "norepinephrine",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "C",
+      "reference": "g",
+      "precision": "Compatibilité reportée via classe catécholamine — confirmer avec assistance pharmaceutique"
+    },
+    {
+      "id": "COMP082",
+      "substance_A": "noradrénaline",
+      "DCI_A": "norepinephrine",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP083",
+      "substance_A": "noradrénaline",
+      "DCI_A": "norepinephrine",
+      "substance_B": "héparine sodique",
+      "DCI_B": "heparin sodium",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP084",
+      "substance_A": "cisatracurium",
+      "DCI_A": "cisatracurium",
+      "substance_B": "fentanyl",
+      "DCI_B": "fentanyl",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP085",
+      "substance_A": "cisatracurium",
+      "DCI_A": "cisatracurium",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP086",
+      "substance_A": "cisatracurium",
+      "DCI_A": "cisatracurium",
+      "substance_B": "propofol",
+      "DCI_B": "propofol",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    },
+    {
+      "id": "COMP087",
+      "substance_A": "sufentanil",
+      "DCI_A": "sufentanil",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "C",
+      "reference": "g",
+      "precision": "Compatibilité généralement acceptée en pratique USI"
+    },
+    {
+      "id": "COMP088",
+      "substance_A": "méropénème",
+      "DCI_A": "meropenem",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP089",
+      "substance_A": "méropénème",
+      "DCI_A": "meropenem",
+      "substance_B": "ciprofloxacine",
+      "DCI_B": "ciprofloxacin",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP090",
+      "substance_A": "ciprofloxacine",
+      "DCI_A": "ciprofloxacin",
+      "substance_B": "pipéracilline/tazobactam",
+      "DCI_B": "piperacillin/tazobactam",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP091",
+      "substance_A": "fluconazole",
+      "DCI_A": "fluconazole",
+      "substance_B": "furosémide",
+      "DCI_B": "furosemide",
+      "statut": "I",
+      "reference": "a",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP092",
+      "substance_A": "fluconazole",
+      "DCI_A": "fluconazole",
+      "substance_B": "vancomycine",
+      "DCI_B": "vancomycin",
+      "statut": "C",
+      "reference": "a",
+      "precision": null
+    },
+    {
+      "id": "COMP093",
+      "substance_A": "pantoprazole",
+      "DCI_A": "pantoprazole",
+      "substance_B": "midazolam",
+      "DCI_B": "midazolam",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible — pH alcalin du pantoprazole (pH 9–11)"
+    },
+    {
+      "id": "COMP094",
+      "substance_A": "pantoprazole",
+      "DCI_A": "pantoprazole",
+      "substance_B": "dobutamine",
+      "DCI_B": "dobutamine",
+      "statut": "I",
+      "reference": "g",
+      "precision": "Incompatible"
+    },
+    {
+      "id": "COMP095",
+      "substance_A": "pantoprazole",
+      "DCI_A": "pantoprazole",
+      "substance_B": "potassium chlorure",
+      "DCI_B": "potassium chloride",
+      "statut": "C",
+      "reference": "g",
+      "precision": null
+    }
+  ],
+
+  "lookup_noms_commerciaux_be": {
+    "description": "Table de correspondance Nom commercial (source) → DCI → Marché belge",
+    "entries": [
+      {"nom_source": "Actrapid", "DCI": "insuline humaine ordinaire", "noms_be": ["Actrapid HM"]},
+      {"nom_source": "Adrénaline", "DCI": "épinéphrine", "noms_be": ["Adrénaline Sterop", "Adrénaline Aguettant", "Epinephrine B.Braun"]},
+      {"nom_source": "Catapressan", "DCI": "clonidine", "noms_be": ["Catapressan"]},
+      {"nom_source": "Cédocard", "DCI": "isosorbide dinitrate", "noms_be": ["Cédocard", "Isoket"]},
+      {"nom_source": "Cordarone", "DCI": "amiodarone", "noms_be": ["Cordarone", "Amiodarone Mylan", "Amiodarone Teva"]},
+      {"nom_source": "Corotrope", "DCI": "milrinone", "noms_be": ["Corotrope"]},
+      {"nom_source": "Corvaton", "DCI": "molsidomine", "noms_be": ["Corvaton"]},
+      {"nom_source": "Dépakine", "DCI": "valproate de sodium", "noms_be": ["Dépakine", "Valproate Fresenius Kabi"]},
+      {"nom_source": "Dexdor", "DCI": "dexmédétomidine", "noms_be": ["Dexdor"]},
+      {"nom_source": "Dobutrex", "DCI": "dobutamine", "noms_be": ["Dobutrex", "Dobutamine Aguettant", "Dobutamine B.Braun"]},
+      {"nom_source": "Dormicum", "DCI": "midazolam", "noms_be": ["Dormicum", "Midazolam Mylan", "Midazolam Teva", "Midazolam Sandoz"]},
+      {"nom_source": "Euphillin", "DCI": "aminophylline", "noms_be": ["Aminophylline Biomed"]},
+      {"nom_source": "Glazidim", "DCI": "ceftazidime", "noms_be": ["Glazidim", "Ceftazidime Fresenius Kabi", "Ceftazidime Mylan"]},
+      {"nom_source": "Héparine", "DCI": "héparine sodique", "noms_be": ["Héparine Leo", "Héparine Braun", "Héparine Viatris"]},
+      {"nom_source": "Isuprel", "DCI": "isoprénaline", "noms_be": ["Isuprel — disponibilité à confirmer"]},
+      {"nom_source": "K Cl", "DCI": "chlorure de potassium", "noms_be": ["KCl B.Braun 7,46%", "KCl Fresenius"]},
+      {"nom_source": "Ketanest", "DCI": "kétamine", "noms_be": ["Ketalar", "Kétamine Panpharma", "Kétamine Mylan"]},
+      {"nom_source": "Lasix", "DCI": "furosémide", "noms_be": ["Lasix", "Furosémide B.Braun", "Furosémide Mylan"]},
+      {"nom_source": "Levophed", "DCI": "noradrénaline", "noms_be": ["Levophed", "Noradrénaline Aguettant", "Noradrénaline B.Braun"]},
+      {"nom_source": "Meronem", "DCI": "méropénème", "noms_be": ["Meronem", "Méropénème Fresenius Kabi", "Méropénème Mylan"]},
+      {"nom_source": "Morphine", "DCI": "morphine sulfate", "noms_be": ["Morphine Sterop", "Morphine Sandoz", "Morphine Mylan"]},
+      {"nom_source": "Négaban", "DCI": "temocilline", "noms_be": ["Négaban — SPÉCIALITÉ BELGE (Eumedica)"]},
+      {"nom_source": "Nimbex", "DCI": "cisatracurium", "noms_be": ["Nimbex"]},
+      {"nom_source": "Pantomed", "DCI": "pantoprazole", "noms_be": ["Pantomed", "Pantoprazole EG", "Pantoprazole Teva"]},
+      {"nom_source": "Reverpleg", "DCI": "vasopressine (probable)", "noms_be": ["Vasopressine Aguettant", "Pitressin — à confirmer"]},
+      {"nom_source": "Rydène", "DCI": "nicardipine", "noms_be": ["Rydène"]},
+      {"nom_source": "Somatostatine", "DCI": "somatostatine", "noms_be": ["Stilamin", "Somatostatine Eumedica"]},
+      {"nom_source": "Sufenta", "DCI": "sufentanil", "noms_be": ["Sufenta", "Sufentanil Hameln"]},
+      {"nom_source": "Tazocin", "DCI": "pipéracilline/tazobactam", "noms_be": ["Tazocin", "Pipéracilline/Tazobactam Fresenius Kabi"]},
+      {"nom_source": "Vancocin", "DCI": "vancomycine", "noms_be": ["Vancocin", "Vancomycine EG", "Vancomycine Fresenius Kabi"]},
+      {"nom_source": "Ventolin", "DCI": "salbutamol", "noms_be": ["Ventolin injectable", "Salbutamol B.Braun"]},
+      {"nom_source": "Xylocaine 2%", "DCI": "lidocaïne", "noms_be": ["Xylocaïne 2%", "Lidocaïne B.Braun 20 mg/ml", "Lidocaïne Mylan"]}
+    ]
+  }
+}
