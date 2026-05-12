@@ -1,4 +1,4 @@
-# clinical/scores.py — Scores cliniques validés — AKIR-IAO v19.0
+# clinical/scores.py — Scores cliniques validés — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Chaque fonction retourne un dict standardisé :
 #   {score_val, interpretation, recommendation, citations_medicales}

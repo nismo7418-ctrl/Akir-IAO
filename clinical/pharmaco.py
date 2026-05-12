@@ -1,10 +1,14 @@
-# clinical/pharmaco.py — Protocoles pharmacologiques — AKIR-IAO v19.0
+# clinical/pharmaco.py — Protocoles pharmacologiques — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Référence : BCFI Belgique, protocoles locaux Hainaut
 
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
+import logging
+from datetime import datetime as _dt
 from clinical.utils import norm
+
+_log = logging.getLogger(__name__)
 from config import (
     CLEV_DEBIT_INIT_MG_H, CLEV_DEBIT_MAX_MG_H, CLEV_PALIER_S,
     MEOPA_DEBIT_L_MIN, MEOPA_DUREE_MAX_MIN,
@@ -87,6 +91,8 @@ def _use_mg_kg(age: float) -> bool:
 def _format_dose(dose_mg: float, poids: float, age: float, unit: str = "mg") -> str:
     """Formate l'affichage de la dose selon l'âge."""
     if _use_mg_kg(age):
+        if poids <= 0:
+            return f"? mg/kg ({_fmt(dose_mg)} {unit}) — poids invalide"
         dose_per_kg = dose_mg / poids
         return f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} {unit})"
     else:
@@ -249,8 +255,10 @@ def taradyl_im(poids: float, age: float, atcd: list = None) -> Result:
     dose_mg = 15.0 if (age >= 65 or poids < 50) else 30.0
 
     if _use_mg_kg(age):
-        dose_per_kg = dose_mg / poids
-        dose_display = f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} mg)"
+        dose_display = (
+            f"{_fmt(dose_mg / poids)} mg/kg ({_fmt(dose_mg)} mg)"
+            if poids > 0 else f"? mg/kg ({_fmt(dose_mg)} mg) — poids invalide"
+        )
     else:
         dose_display = f"{_fmt(dose_mg)} mg"
 
@@ -293,8 +301,10 @@ def diclofenac_im(poids: float, age: float, atcd: list = None) -> Result:
 
     dose_mg = 75.0
     if _use_mg_kg(age):
-        dose_per_kg = dose_mg / poids
-        dose_display = f"{_fmt(dose_per_kg)} mg/kg ({_fmt(dose_mg)} mg)"
+        dose_display = (
+            f"{_fmt(dose_mg / poids)} mg/kg ({_fmt(dose_mg)} mg)"
+            if poids > 0 else f"? mg/kg ({_fmt(dose_mg)} mg) — poids invalide"
+        )
     else:
         dose_display = f"{_fmt(dose_mg)} mg"
 
@@ -716,7 +726,6 @@ def neutralisation_aod(molecule: str, atcd: list = None) -> dict:
 def sepsis_bundle_1h(pas: float, lactate: Optional[float], temp: float, fc: float, poids: float, atcd: list = None) -> dict:
     """Bundle Sepsis 1h — SSC 2021."""
     atcd = atcd or []
-    choc = pas < 90 or (lactate is not None and lactate >= 4.0)
     remplissage_mlkg = 15 if _has(atcd, "Insuffisance cardiaque") else 30
     # Critères de choc septique affinés (SSC 2021)
     choc_lactate_haut  = lactate is not None and lactate >= 4.0
@@ -743,7 +752,7 @@ def sepsis_bundle_1h(pas: float, lactate: Optional[float], temp: float, fc: floa
         _add(alerts, "Température anormale compatible avec sepsis", "warning")
     if fc >= 120:
         _add(alerts, "Tachycardie majeure : surveillance rapprochée", "warning")
-    return {"choc_septique": choc, "checklist": checklist, "alerts": alerts}
+    return {"choc_septique": choc, "choc_intermediaire": choc_intermediaire, "checklist": checklist, "alerts": alerts}
 
 
 def ketamine_intranasale(poids: float, age: float, atcd: list = None) -> Result:
@@ -1086,8 +1095,8 @@ def check_safety(medicament: str, patient: dict, vitals: dict) -> List[dict]:
             try:
                 if check["condition"](patient, vitals):
                     alerts.append({"message": check["message"], "niveau": check["niveau"]})
-            except Exception:
-                pass
+            except Exception as _e:
+                _log.warning("check_safety rule failed [%s]: %s", check.get("medicament"), _e)
     return alerts
 
 
@@ -1110,7 +1119,7 @@ def generer_etiquette(
     autonomie = round(vol_total / debit_mlh, 1) if debit_mlh > 0 else 0
     dose_mg_h = round(concentration * debit_mlh, 2)
     dose_ug_kg_min = round(dose_mg_h * 1000 / 60 / max(1, poids), 2)
-    now = __import__("datetime").datetime.now().strftime("%d/%m/%Y %H:%M")
+    now = _dt.now().strftime("%d/%m/%Y %H:%M")
 
     return (
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

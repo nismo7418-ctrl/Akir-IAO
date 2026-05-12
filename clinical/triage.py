@@ -1,26 +1,422 @@
-# clinical/triage.py — Moteur de triage FRENCH V1.1 — AKIR-IAO v19.0
+# clinical/triage.py — Moteur de triage FRENCH V1.1 — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Référence : SFMU — Classification FRENCH Triage V1.1, 2018
 # Hiérarchie : NEWS2 absolu → Priorités cliniques → Handler motif → Ajustement NEWS2
 
 from __future__ import annotations
+import json
+import logging
+import os
+import re
 import unicodedata
-from typing import Callable, Dict, Optional, Tuple, List
+import functools
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple, List
 from config import (
     NEWS2_TRI_M, NEWS2_RISQUE_ELEVE, NEWS2_RISQUE_MOD,
-    GLYC, AVC_DELAI_THROMBOLYSE_H,
+    GLYC, AVC_DELAI_THROMBOLYSE_H, ATCD,
 )
 
-TriageResult = Tuple[str, str, str]
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass
+class TriageResult:
+    """Résultat structuré du moteur de triage FRENCH V1.1."""
+    niveau: str          # "M", "1", "2", "3A", "3B", "4", "5"
+    justification: str   # Message explicatif clinique
+    critere: str         # Source du critère ("FRENCH Tri M", etc.)
+
+    def __iter__(self):
+        return iter((self.niveau, self.justification, self.critere))
+
+    def __getitem__(self, idx):
+        return (self.niveau, self.justification, self.critere)[idx]
+
+
 Handler = Callable[..., TriageResult]
 
 
+@functools.lru_cache(maxsize=512)
 def _norm(value: str) -> str:
     """Normalise une chaîne pour comparaison insensible aux accents."""
     value = str(value or "").replace("≤", "<=").replace("≥", ">=").replace("/", " / ")
     value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     return " ".join(value.casefold().split())
+
+
+def anonymize_voice_text(text_input: str) -> str:
+    """Supprime les noms/prénoms évidents avant tout traitement NLP externe."""
+    text = str(text_input or "").strip()
+    if not text:
+        return ""
+
+    patterns = [
+        (r"\b(nom|prénom|prenom)\s*[:=]\s*[\wÀ-ÿ' -]{2,50}", r"\1: [IDENTITE]"),
+        (r"\b(s'appelle|se nomme|appel[ée]?)\s+[\wÀ-ÿ' -]{2,50}", r"\1 [IDENTITE]"),
+        (
+            r"\b(monsieur|madame|mme|mr|m\.)\s+"
+            r"(?!de\b|d['’]\b|âg[ée]\b|age\b|présente\b|presente\b|vient\b|pour\b|avec\b|a\b)"
+            r"[A-Za-zÀ-ÿ'-]{2,}(?:\s+[A-Za-zÀ-ÿ'-]{2,}){0,2}",
+            r"\1 [IDENTITE]",
+        ),
+    ]
+    for pattern, repl in patterns:
+        text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+    return " ".join(text.split())
+
+
+_ATCD_ALIASES: dict[str, tuple[str, ...]] = {
+    "HTA": ("hta", "hypertension", "hypertendu"),
+    "Diabète type 1": ("diabete type 1", "diabete t1", "dt1", "insuline depuis enfant"),
+    "Diabète type 2": ("diabete", "diabete type 2", "diabete t2", "dt2"),
+    "Coronaropathie / SCA antérieur": (
+        "stent", "pontage", "coronarien", "coronaropathie", "infarctus",
+        "idm", "angioplastie", "sca anterieur", "syndrome coronarien",
+    ),
+    "Insuffisance cardiaque": ("insuffisance cardiaque", "ic connue", "cardiaque connu"),
+    "BPCO": ("bpco", "copd", "emphyseme", "bronchite chronique"),
+    "Asthme": ("asthme", "asthmatique"),
+    "Insuffisance rénale chronique": ("irc", "insuffisance renale", "dialyse", "rein chronique"),
+    "Insuffisance hépatique": ("cirrhose", "insuffisance hepatique", "hepatopathie"),
+    "Épilepsie": ("epilepsie", "epileptique", "crises connues"),
+    "AVC / AIT antérieur": ("ancien avc", "atcd avc", "avc ancien", "ait", "accident vasculaire ancien"),
+    "Fibrillation atriale": ("fa", "fibrillation atriale", "fibrillation auriculaire"),
+    "Anticoagulants/AOD": (
+        "anticoagulant", "aod", "avk", "sintrom", "warfarine", "coumadine",
+        "eliquis", "xarelto", "pradaxa", "lixiana",
+    ),
+    "Antiagrégants plaquettaires": ("antiagregant", "aspirine", "clopidogrel", "plavix", "ticagrelor"),
+    "Bêta-bloquants": ("betabloquant", "beta bloquant", "bisoprolol", "atenolol", "metoprolol"),
+    "Corticoïdes au long cours": ("corticoide", "prednisone", "medrol", "solumedrol"),
+    "IMAO (inhibiteurs MAO)": ("imao", "inhibiteur mao"),
+    "Immunodépression": ("immunodeprime", "greffe", "immunosuppresseur", "vih"),
+    "Chimiothérapie en cours": ("chimiotherapie", "chimio"),
+    "Grossesse": ("grossesse", "enceinte", "semaines amenorrhee"),
+    "Ulcère gastro-duodénal": ("ulcere", "ulcere gastrique", "ulcere duodenal"),
+    "Drépanocytose": ("drepanocytose", "drepanocytaire"),
+    "Troubles psychiatriques": ("psychiatrique", "bipolaire", "schizophrenie", "depression"),
+    "Démence": ("demence", "alzheimer", "trouble cognitif"),
+    "Obésité morbide (IMC ≥ 40)": ("obesite morbide", "imc 40", "imc superieur a 40"),
+}
+
+
+_MOTIF_ALIASES: list[tuple[tuple[str, ...], str, str]] = [
+    (("arret", "acr", "massage cardiaque"), "Cardiovasculaire", "Arrêt cardiorespiratoire"),
+    (("douleur thoracique", "oppression", "retrosternal", "sternal", "sca", "infarctus"),
+     "Cardiovasculaire", "Douleur thoracique / SCA"),
+    (("palpitation", "tachycardie"), "Cardiovasculaire", "Palpitations"),
+    (("bradycardie",), "Cardiovasculaire", "Bradycardie / bradyarythmie"),
+    (("hypotension", "malaise hypotensif"), "Cardiovasculaire", "Hypotension artérielle"),
+    (("hypertension", "hta severe"), "Cardiovasculaire", "Hypertension artérielle"),
+    (("oap", "orthopnee", "omi", "oedeme aigu du poumon", "œdeme aigu du poumon"),
+     "Respiratoire", "Dyspnée / insuffisance cardiaque"),
+    (("dyspnee", "desaturation", "detresse respiratoire", "respiratoire"), "Respiratoire", "Dyspnée / insuffisance respiratoire"),
+    (("asthme", "bronchospasme", "bpco"), "Respiratoire", "Asthme ou aggravation BPCO"),
+    (("douleur abdominale", "abdomen", "abdominal"), "Digestif", "Douleur abdominale"),
+    (("vomissement", "diarrhee", "gastro"), "Digestif", "Vomissements / Diarrhée"),
+    (("colique nephretique", "lombaire", "flanc"), "Digestif", "Colique néphrétique / Douleur lombaire"),
+    (("avc", "deficit", "hemiplegie", "aphasie", "face bras parole", "be fast", "stroke"),
+     "Neurologique", "AVC / Déficit neurologique"),
+    (("traumatisme cranien", "tc", "choc tete"), "Neurologique", "Traumatisme crânien"),
+    (("coma", "confusion", "alteration conscience"), "Neurologique", "Altération de conscience / Coma"),
+    (("cephalee", "migraine", "mal de tete"), "Neurologique", "Céphalée"),
+    (("convulsion", "crise epileptique", "eme"), "Neurologique", "Convulsions / EME"),
+    (("chute", "trauma", "fracture", "entorse", "plaie"), "Traumatologie", "Traumatisme membre / épaule"),
+    (("hanche", "femur", "bassin"), "Traumatologie", "Traumatisme bassin/hanche/fémur"),
+    (("hemorragie", "saignement actif"), "Traumatologie", "Hémorragie active"),
+    (("brulure", "brûlure"), "Traumatologie", "Brûlure"),
+    (("fievre", "hyperthermie", "sepsis"), "Infectieux", "Fièvre"),
+    (("purpura", "petechie", "pétéchie"), "Infectieux", "Pétéchie / Purpura"),
+    (("hypoglycemie", "hypo"), "Métabolique", "Hypoglycémie"),
+    (("hyperglycemie", "acidocetose"), "Métabolique", "Hyperglycémie"),
+    (("suicide", "suicidaire"), "Psychiatrie", "Idée / comportement suicidaire"),
+    (("intoxication", "overdose", "medicaments pris"), "Intoxication", "Intoxication médicamenteuse"),
+]
+
+
+def _empty_voice_payload(text_anonymized: str = "", source: str = "fallback") -> dict:
+    return {
+        "age": None,
+        "age_mois": None,
+        "sexe": "",
+        "categorie": "",
+        "motif": "",
+        "pqrst": {
+            "provoque_par": "",
+            "qualite": "",
+            "region": "",
+            "severite": None,
+            "temps": "",
+        },
+        "atcd": [],
+        "allergies": "",
+        "constantes": {},
+        "texte_anonymise": text_anonymized,
+        "source": source,
+        "warnings": [],
+    }
+
+
+def _int_or_none(value: Any, lo: int | None = None, hi: int | None = None) -> int | None:
+    try:
+        num = int(float(str(value).replace(",", ".")))
+    except (TypeError, ValueError):
+        return None
+    if lo is not None and num < lo:
+        return None
+    if hi is not None and num > hi:
+        return None
+    return num
+
+
+def _voice_motif_from_text(text: str) -> tuple[str, str]:
+    ntext = _norm(text)
+    for terms, category, motif in _MOTIF_ALIASES:
+        if any(_norm(term) in ntext for term in terms):
+            return category, motif
+    return "", ""
+
+
+def _voice_atcd_from_text(text: str, candidates: list[str] | None = None) -> list[str]:
+    joined = " ".join([text or "", " ".join(candidates or [])])
+    ntext = _norm(joined)
+    found: set[str] = set()
+    for label in ATCD:
+        if _norm(label) in ntext:
+            found.add(label)
+    for label, aliases in _ATCD_ALIASES.items():
+        if label in ATCD and any(_norm(alias) in ntext for alias in aliases):
+            found.add(label)
+    return [label for label in ATCD if label in found]
+
+
+def _short_after(text: str, pattern: str, max_words: int = 8) -> str:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    tail = re.sub(r"[.;,]\s.*$", "", match.group(1).strip())
+    return " ".join(tail.split()[:max_words])
+
+
+def _fallback_voice_parse(text_anonymized: str) -> dict:
+    payload = _empty_voice_payload(text_anonymized, source="fallback")
+    ntext = _norm(text_anonymized)
+
+    age_match = re.search(r"\b(\d{1,3})\s*ans?\b", ntext)
+    age_mois_match = re.search(r"\b(\d{1,2})\s*mois\b", ntext)
+    age = _int_or_none(age_match.group(1) if age_match else None, 0, 120)
+    age_mois = _int_or_none(age_mois_match.group(1) if age_mois_match else None, 0, 23)
+    payload["age"] = age
+    payload["age_mois"] = age_mois
+
+    if any(k in ntext for k in ("homme", "monsieur", " mr ", " masculin")):
+        payload["sexe"] = "Masculin"
+    elif any(k in ntext for k in ("femme", "madame", " mme ", " feminin", "enceinte")):
+        payload["sexe"] = "Féminin"
+
+    category, motif = _voice_motif_from_text(text_anonymized)
+    payload["categorie"] = category
+    payload["motif"] = motif
+    payload["atcd"] = _voice_atcd_from_text(text_anonymized)
+
+    sev = None
+    for pattern in (
+        r"\b(?:eva|douleur)\s*(?:a|à|de|:)?\s*(\d{1,2})\s*(?:/|sur)\s*10\b",
+        r"\b(\d{1,2})\s*(?:/|sur)\s*10\b",
+    ):
+        match = re.search(pattern, ntext)
+        if match:
+            sev = _int_or_none(match.group(1), 0, 10)
+            break
+    payload["pqrst"]["severite"] = sev
+
+    qualities = [
+        "oppression", "constrictive", "brulure", "brûlure", "pulsatile",
+        "coup de poignard", "dechirure", "décharge", "colique",
+    ]
+    payload["pqrst"]["qualite"] = next((q for q in qualities if _norm(q) in ntext), "")
+    payload["pqrst"]["region"] = _short_after(
+        text_anonymized,
+        r"(?:douleur|gene|gêne|oppression)\s+(?:au|a la|à la|dans le|du|de la)\s+([^.;,]+)",
+    )
+    payload["pqrst"]["provoque_par"] = _short_after(
+        text_anonymized,
+        r"(?:provoqu[ée]e?\s+par|déclench[ée]e?\s+par|a l'effort|à l'effort|apres|après)\s+([^.;,]+)",
+    )
+    payload["pqrst"]["temps"] = _short_after(
+        text_anonymized,
+        r"(?:depuis|debut|début|a commenc[ée]|à commencé)\s+([^.;,]+)",
+    )
+
+    allergy = _short_after(text_anonymized, r"(?:allergie|allergique)\s+(?:a|à|aux?)?\s*([^.;,]+)", 6)
+    payload["allergies"] = allergy
+    return payload
+
+
+def _normalise_voice_payload(data: dict, text_anonymized: str, source: str, warnings: list[str]) -> dict:
+    payload = _empty_voice_payload(text_anonymized, source=source)
+    if not isinstance(data, dict):
+        payload["warnings"] = warnings + ["Extraction NLP non structurée."]
+        return payload
+
+    demo = data.get("demographie") if isinstance(data.get("demographie"), dict) else {}
+    payload["age"] = _int_or_none(data.get("age", demo.get("age")), 0, 120)
+    payload["age_mois"] = _int_or_none(data.get("age_mois", demo.get("age_mois")), 0, 23)
+
+    sexe_raw = _norm(data.get("sexe", demo.get("sexe", "")))
+    if sexe_raw in ("m", "masculin", "homme"):
+        payload["sexe"] = "Masculin"
+    elif sexe_raw in ("f", "feminin", "femme"):
+        payload["sexe"] = "Féminin"
+
+    pqrst = data.get("pqrst") if isinstance(data.get("pqrst"), dict) else {}
+    payload["pqrst"] = {
+        "provoque_par": str(pqrst.get("provoque_par") or pqrst.get("p") or "").strip(),
+        "qualite": str(pqrst.get("qualite") or pqrst.get("q") or "").strip(),
+        "region": str(pqrst.get("region") or pqrst.get("r") or "").strip(),
+        "severite": _int_or_none(pqrst.get("severite") or pqrst.get("s"), 0, 10),
+        "temps": str(pqrst.get("temps") or pqrst.get("t") or "").strip(),
+    }
+
+    motif_raw = str(data.get("motif") or "").strip()
+    category, motif = _voice_motif_from_text(" ".join([motif_raw, text_anonymized]))
+    payload["categorie"] = str(data.get("categorie") or category or "").strip()
+    payload["motif"] = motif_raw if motif_raw in {m for _, _, m in _MOTIF_ALIASES} else motif
+
+    atcd_raw = data.get("atcd") or []
+    if isinstance(atcd_raw, str):
+        atcd_raw = [atcd_raw]
+    payload["atcd"] = _voice_atcd_from_text(text_anonymized, [str(a) for a in atcd_raw])
+    payload["allergies"] = str(data.get("allergies") or "").strip()
+    payload["constantes"] = data.get("constantes") if isinstance(data.get("constantes"), dict) else {}
+    payload["warnings"] = warnings
+    return payload
+
+
+def _merge_voice_payload(primary: dict, fallback: dict) -> dict:
+    merged = dict(primary)
+    for key in ("age", "age_mois", "sexe", "categorie", "motif", "allergies"):
+        if not merged.get(key):
+            merged[key] = fallback.get(key)
+    merged["atcd"] = [label for label in ATCD if label in set(primary.get("atcd", []) + fallback.get("atcd", []))]
+    merged["pqrst"] = dict(primary.get("pqrst") or {})
+    for key, value in (fallback.get("pqrst") or {}).items():
+        if not merged["pqrst"].get(key):
+            merged["pqrst"][key] = value
+    merged["constantes"] = {**(fallback.get("constantes") or {}), **(primary.get("constantes") or {})}
+    merged["warnings"] = list(dict.fromkeys((primary.get("warnings") or []) + (fallback.get("warnings") or [])))
+    return merged
+
+
+def _call_gpt55_voice_extract(text_anonymized: str) -> tuple[dict | None, str | None]:
+    if not os.getenv("OPENAI_API_KEY"):
+        return None, "Mode local activé."
+    try:
+        from openai import OpenAI
+    except Exception:
+        _LOG.info("Package openai absent: extraction vocale locale.")
+        return None, "Mode local activé."
+
+    schema_hint = {
+        "age": None,
+        "age_mois": None,
+        "sexe": "",
+        "categorie": "",
+        "motif": "",
+        "pqrst": {
+            "provoque_par": "",
+            "qualite": "",
+            "region": "",
+            "severite": None,
+            "temps": "",
+        },
+        "atcd": [],
+        "allergies": "",
+        "constantes": {},
+    }
+    system_prompt = (
+        "Tu es un extracteur JSON strict pour une infirmière d'accueil et d'orientation aux urgences en Belgique. "
+        "Le texte est déjà anonymisé: ne réintroduis jamais de nom/prénom. "
+        "N'invente jamais: si une valeur est incertaine ou absente, laisse null, chaîne vide ou liste vide. "
+        "Mappe le jargon: OMI = oedèmes des membres inférieurs, OAP = oedème aigu du poumon, "
+        "SCA = syndrome coronarien aigu, BPCO = bronchopneumopathie chronique obstructive, "
+        "stent/pontage/IDM = Coronaropathie / SCA antérieur. "
+        "Retourne uniquement un JSON valide avec cette forme: "
+        f"{json.dumps(schema_hint, ensure_ascii=False)}"
+    )
+    few_shots = [
+        {
+            "role": "user",
+            "content": "Homme 67 ans, oppression rétro-sternale depuis 45 minutes, EVA 8/10, ATCD stent et diabète, sous Eliquis.",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps({
+                "age": 67, "age_mois": None, "sexe": "Masculin",
+                "categorie": "Cardiovasculaire", "motif": "Douleur thoracique / SCA",
+                "pqrst": {"provoque_par": "", "qualite": "oppression", "region": "rétro-sternale", "severite": 8, "temps": "depuis 45 minutes"},
+                "atcd": ["Coronaropathie / SCA antérieur", "Diabète type 2", "Anticoagulants/AOD"],
+                "allergies": "", "constantes": {},
+            }, ensure_ascii=False),
+        },
+        {
+            "role": "user",
+            "content": "Femme 82 ans, dyspnée avec OMI et orthopnée depuis hier, connue insuffisance cardiaque et BPCO.",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps({
+                "age": 82, "age_mois": None, "sexe": "Féminin",
+                "categorie": "Respiratoire", "motif": "Dyspnée / insuffisance cardiaque",
+                "pqrst": {"provoque_par": "", "qualite": "dyspnée", "region": "", "severite": None, "temps": "depuis hier"},
+                "atcd": ["Insuffisance cardiaque", "BPCO"],
+                "allergies": "", "constantes": {},
+            }, ensure_ascii=False),
+        },
+    ]
+    try:
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model=os.getenv("AKIR_OPENAI_MODEL", "gpt-5.5"),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                *few_shots,
+                {"role": "user", "content": text_anonymized},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        content = response.choices[0].message.content or "{}"
+        return json.loads(content), None
+    except Exception as exc:
+        _LOG.exception("Extraction vocale OpenAI indisponible: %s", exc)
+        return None, "Mode local activé."
+
+
+def process_voice_triage(text_input: str, *, use_gpt: bool | None = None) -> dict:
+    """Extrait un JSON de triage depuis une dictée clinique anonymisée.
+
+    Le texte est anonymisé avant tout appel externe. GPT-5.5 est utilisé si
+    disponible; sinon un parseur local assure le pré-remplissage minimal.
+    """
+    text_anonymized = anonymize_voice_text(text_input)
+    fallback = _fallback_voice_parse(text_anonymized)
+    warnings: list[str] = []
+
+    model_data = None
+    if use_gpt is not False and text_anonymized:
+        model_data, warning = _call_gpt55_voice_extract(text_anonymized)
+        if warning:
+            warnings.append(warning)
+
+    if model_data:
+        primary = _normalise_voice_payload(model_data, text_anonymized, "gpt-5.5", warnings)
+        return _merge_voice_payload(primary, fallback)
+
+    fallback["warnings"] = warnings
+    return fallback
 
 
 def _more_urgent(r1: TriageResult, r2: TriageResult) -> TriageResult:
@@ -287,16 +683,6 @@ def _h_hemorragie(**kw) -> TriageResult:
     if det.get("active"):
         return "2", "Hémorragie active — Contrôle hémorragique urgent", "FRENCH Tri 2"
     return "3A", "Hémorragie contrôlée — Évaluation", "FRENCH Tri 3A"
-
-
-def _h_trauma_axial(**kw) -> TriageResult:
-    """Traumatisme thorax/abdomen/rachis cervical ou bassin."""
-    det, pas, fc, spo2 = kw["det"], kw["pas"], kw["fc"], kw["spo2"]
-    if pas < 90 or fc > 130 or spo2 < 94:
-        return "1", "Traumatisme axial avec instabilité — Déchocage", "FRENCH Tri 1"
-    if det.get("haute_energie") or det.get("sangle"):
-        return "2", "Traumatisme haute énergie — Bilan corps entier", "FRENCH Tri 2"
-    return "3A", "Traumatisme axial — Évaluation lésionnelle", "FRENCH Tri 3A"
 
 
 def _h_trauma_distal(**kw) -> TriageResult:
@@ -761,7 +1147,7 @@ def _h_ped_douleur_abdominale(**kw) -> TriageResult:
     if det.get("pleurs_inconsolables") and age < 2:
         return "2", "Pleurs inconsolables + douleur — IIA suspecte", "FRENCH Pédiatrie Tri 2"
 
-    # Tri 3A — Douleur signficative
+    # Tri 3A — Douleur significative
     if det.get("douleur_fosse_iliaque_droite") or det.get("appendicite_suspectee"):
         return "3A", "Douleur FID — Appendicite à exclure", "FRENCH Tri 3A"
     if temp >= 38.5:
@@ -911,15 +1297,13 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "rectorragie / melena":                          _h_hemorragie,
     "fievre":                                        _h_fievre,
     "hemorragie active":                             _h_hemorragie,
-    "traumatisme thorax/abdomen/rachis cervical":    _h_trauma_axial,
-    "traumatisme bassin/hanche/femur":               _h_trauma_axial,
-    "traumatisme membre / epaule":                   _h_trauma_distal,
     "traumatisme thorax / abdomen / rachis cervical": _h_trauma_axial,
-    "traumatisme thorax/abdomen/rachis cervical":     _h_trauma_axial,
-    "traumatisme bassin / hanche / femur":            _h_trauma_pelvi,
-    "traumatisme bassin/hanche/femur":                _h_trauma_pelvi,
-    "complication grossesse t1 / t2":                 _h_grossesse_complication,
-    "complication grossesse t1/t2":                   _h_grossesse_complication,
+    "traumatisme thorax/abdomen/rachis cervical":    _h_trauma_axial,
+    "traumatisme membre / epaule":                   _h_trauma_distal,
+    "traumatisme bassin / hanche / femur":           _h_trauma_pelvi,
+    "traumatisme bassin/hanche/femur":               _h_trauma_pelvi,
+    "complication grossesse t1 / t2":                _h_grossesse_complication,
+    "complication grossesse t1/t2":                  _h_grossesse_complication,
     "geu":                                            _h_grossesse_complication,
     "grossesse extra-uterine":                        _h_grossesse_complication,
     "hypoglycemie":                                  _h_hypoglycemie,
@@ -937,7 +1321,6 @@ _TRIAGE_DISPATCH: Dict[str, Handler] = {
     "idee / comportement suicidaire":                _h_psychiatrie,
     "accouchement imminent":                         _h_accouchement,
     "accouchement imminent ou realise":              _h_accouchement,
-    "complication grossesse t1/t2":                  _h_grossesse_complication,
     "probleme de grossesse 1er et 2eme trimestre":   _h_grossesse_complication,
     "menorragie / metrorragie":                      _h_metrorragie,
     "meno-metrorragie":                              _h_metrorragie,
@@ -1025,7 +1408,7 @@ def _worst_case_terrain(
     if age >= 80 and any(t in m for t in ("chute", "malaise", "syncope", "fracture")):
         return "3A", "Patient ≥ 80 ans + chute/syncope — Bilan étiologique prioritaire", "Worst-Case Terrain"
 
-    # CFS ≥ 6 (fragile sévère) + tout motif aiguë → upgrade d'un niveau de priorité
+    # CFS ≥ 6 (fragile sévère) + tout motif aigu → upgrade d'un niveau de priorité
     # Source : Rockwood K, CMAJ 2005 — Fragilité et pronostic aux urgences
     cfs_score = int(det.get("cfs_score") or 0)
     if cfs_score >= 7 and age >= 65:
@@ -1079,15 +1462,18 @@ def french_triage(
     n2   = int(n2     or 0)
     det  = det or {}
 
+    def _wrap(t: tuple) -> TriageResult:
+        return t if isinstance(t, TriageResult) else TriageResult(t[0], t[1], t[2])
+
     try:
         # ── Niveau 0 : NEWS2 ≥ 9 → Tri M absolu ──────────────────────────
         if n2 >= NEWS2_TRI_M:
-            return "M", f"NEWS2 {n2} ≥ {NEWS2_TRI_M} — Engagement vital immédiat", "NEWS2 Tri M"
+            return TriageResult("M", f"NEWS2 {n2} ≥ {NEWS2_TRI_M} — Engagement vital immédiat", "NEWS2 Tri M")
 
         # ── Niveau 1 : Priorités absolues verrouillées ────────────────────
         priorite = _check_priorites_absolues(det, gcs, pas, spo2, fr)
         if priorite:
-            return priorite
+            return _wrap(priorite)
 
         # ── Niveau 2 : Arbre de décision motif ───────────────────────────
         handler = _MOTIF_INDEX.get(_norm(motif))
@@ -1125,11 +1511,11 @@ def french_triage(
         if terrain:
             result = _more_urgent(result, terrain)
 
-        return result
+        return _wrap(result)
 
     except Exception as e:
         # Failsafe : ne jamais laisser planter — triage conservateur Tri 2
-        return "2", f"Erreur moteur triage — Évaluation médicale urgente ({e})", "Sécurité Tri 2"
+        return TriageResult("2", f"Erreur moteur triage — Évaluation médicale urgente ({e})", "Sécurité Tri 2")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

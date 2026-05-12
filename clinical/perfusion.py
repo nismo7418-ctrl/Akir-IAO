@@ -1,4 +1,4 @@
-# clinical/perfusion.py — Calculs de perfusions IV — AKIR-IAO v19.1
+# clinical/perfusion.py — Calculs de perfusions IV — AKIR-IAO v20
 # Développeur : Ismail Ibn-Daifa — Hainaut, Wallonie, Belgique
 # Références : BCFI Belgique, SFAR, protocoles Hainaut
 #

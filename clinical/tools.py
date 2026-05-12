@@ -183,7 +183,7 @@ def calculer_recharge_volemique(poids: float, age: float = 45,
     bolus_list = []
     for i in range(1, max_bolus + 1):
         total = bolus1_ml * i
-        total_kg = round(total / poids, 1)
+        total_kg = round(total / poids, 1) if poids > 0 else 0.0
         bolus_list.append({"num": i, "ml": bolus1_ml, "total_ml": total,
                            "total_ml_kg": total_kg})
 
@@ -374,17 +374,25 @@ def calculer_dfge(creatinine_umol_l: float, age: float,
     Unité de créatinine : µmol/L (diviser par 88,4 pour mg/dL).
     Source : Inker LA et al., NEJM 2021.
     """
-    creat_mg_dl = creatinine_umol_l / 88.4
-    kappa  = 0.7 if sexe == "F" else 0.9
-    alpha  = -0.241 if sexe == "F" else -0.302
-    multi  = 1.012 if sexe == "F" else 1.0
+    if creatinine_umol_l <= 0:
+        return {"erreur": "Créatinine invalide (≤ 0 µmol/L)", "dfge": None}
+    if age <= 0:
+        return {"erreur": "Âge invalide", "dfge": None}
 
-    ratio = creat_mg_dl / kappa
-    if ratio < 1:
-        dfge = 142 * (ratio ** alpha) * (0.9938 ** age) * multi
-    else:
-        dfge = 142 * (ratio ** -1.200) * (0.9938 ** age) * multi
-    dfge = round(dfge, 1)
+    try:
+        creat_mg_dl = creatinine_umol_l / 88.4
+        kappa  = 0.7 if sexe == "F" else 0.9
+        alpha  = -0.241 if sexe == "F" else -0.302
+        multi  = 1.012 if sexe == "F" else 1.0
+
+        ratio = creat_mg_dl / kappa
+        if ratio < 1:
+            dfge = 142 * (ratio ** alpha) * (0.9938 ** age) * multi
+        else:
+            dfge = 142 * (ratio ** -1.200) * (0.9938 ** age) * multi
+        dfge = round(dfge, 1)
+    except (ZeroDivisionError, ValueError, OverflowError) as e:
+        return {"erreur": f"Erreur calcul DFGe : {e}", "dfge": None}
 
     # Classification KDIGO 2022
     if dfge >= 90:
