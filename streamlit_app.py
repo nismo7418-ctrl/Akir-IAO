@@ -73,6 +73,8 @@ from clinical.tools import (
 )
 from persistence.registry import enregistrer_patient, charger_registre
 from akir_iao_enhancements import (
+    inject_mobile_first_css,
+    sync_clinical_context,
     gcs_visual_scale, borg_visual_scale, cam_icu_visual,
     section_dilutions_hainaut, calculateur_noradrenaline,
     section_fiches_medicaments,
@@ -85,7 +87,11 @@ from ui.components import (
     RX, RX_LOCK, GLYC_WIDGET, BPCO_WIDGET, SI_WIDGET,
     SBAR_RENDER, DISC, build_sbar, EVA_BAR,
 )
-from ui.triage_tab import render as render_triage
+from ui.triage_tab import (
+    apply_new_triage_reset_to_session,
+    apply_voice_triage_to_session,
+    render as render_triage,
+)
 from ui.pharmacie_tab import render as render_pharmacie
 from ui.scores_tab import render as render_scores
 
@@ -133,11 +139,15 @@ def _calc_news2(fr, spo2, o2, temp, pas, fc, gcs, bpco):
     return n2
 
 def _n2() -> int:
+    sync_clinical_context(SS)
     n2 = _calc_news2(
         SS.v_fr, SS.v_spo2, SS.o2,
         SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
     SS.v_news2 = n2
     return n2
+
+apply_new_triage_reset_to_session(SS, WK)
+apply_voice_triage_to_session(SS, WK)
 
 # Variables patient depuis SS
 age         = float(SS.get("age") or 45)
@@ -149,6 +159,7 @@ o2          = bool(SS.get("o2") or False)
 atcd_checks = dict(SS.get("atcd_checks") or {})
 risk_checks = dict(SS.get("risk_checks") or {})
 trt_checks  = dict(SS.get("trt_checks") or {})
+smart_context = sync_clinical_context(SS)
 
 # ── CSS additionnel inline UX ─────────────────────────────────────────────────
 H("""<style>
@@ -297,6 +308,8 @@ H("""<style>
 
 </style>""")
 
+inject_mobile_first_css()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR — Minimaliste (PC) : chrono + reset
@@ -342,6 +355,7 @@ with st.sidebar:
 # BARRE DE STATUT PATIENT — visible sur tous les onglets
 # ─────────────────────────────────────────────────────────────────────────────
 def _sticky_bar():
+    _smart = sync_clinical_context(SS)
     _age_txt   = f"{int(age)} ans" if age >= 1 else f"{int(age*12)} mois"
     _atcd_n    = len(atcd)
     _niv_txt   = f"TRI {SS.niv}" if SS.niv else "Non trié"
@@ -356,6 +370,9 @@ def _sticky_bar():
       {"<span class='sticky-badge badge-atcd'>⚕️ " + str(_atcd_n) + " ATCD</span>" if _atcd_n else ""}
       {"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 " + alg + "</span>" if alg else ""}
       <span class="sticky-badge badge-triage {_niv_css}" style="font-size:.72rem;">{_niv_txt}</span>
+      {"<span class='sticky-badge' style='color:#92400E;border-color:#F59E0B;background:#FFFBEB;'>⚠️ vitaux/tri</span>" if _smart.get("triage_incoherence") else ""}
+      {"<span class='sticky-badge' style='color:#1D4ED8;border-color:#93C5FD;background:#EFF6FF;'>ECG</span>" if _smart.get("ecg_hint") else ""}
+      {"<span class='sticky-badge' style='color:#3730A3;border-color:#A5B4FC;background:#EEF2FF;'>NIHSS</span>" if _smart.get("focus_score") == "nihss" else ""}
       {("<span class='sticky-badge' style='color:#38BDF8;border-color:#7DD3FC;background:#EFF6FF;font-size:.72rem;'>" + str(len(SS.reevs)) + " réév.</span>") if SS.reevs else ""}
       {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>" if SS.v_news2 >= 5 else ""}
       {"<span class='badge-chrono'>" + _timer_txt + "</span>" if _timer_txt else ""}
