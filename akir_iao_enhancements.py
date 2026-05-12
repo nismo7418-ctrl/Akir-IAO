@@ -931,3 +931,140 @@ def section_fiches_medicaments() -> None:
             "⚠️ Aide-mémoire IAO — usage interne. "
             "Vérifier via bcfi.be ou CBP 070/245.245. "
             "Tout acte thérapeutique requiert un ordre médical.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. CSS MOBILE-FIRST — injection complémentaire
+# ══════════════════════════════════════════════════════════════════════════════
+
+def inject_mobile_first_css() -> None:
+    """Injecte les classes CSS complémentaires pour mobile et alertes intelligentes."""
+    st.markdown("""<style>
+    @media (max-width: 768px) {
+      [data-testid="stHorizontalBlock"] > div { min-width: 100% !important; }
+      .smart-tab-note { font-size: .72rem !important; }
+    }
+    .smart-incoherence-alert {
+      background: #FEF2F2; border-left: 4px solid #EF4444;
+      border-radius: 0 8px 8px 0; padding: 8px 12px; margin: 4px 0;
+      font-size: .78rem; color: #991B1B; font-weight: 600;
+    }
+    .smart-tab-note {
+      font-size: .75rem; color: #64748B; font-style: italic; margin-top: 2px;
+    }
+    </style>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. CONTEXTE CLINIQUE — agrégation session state
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CARDIAC_KEYWORDS = (
+    "thoracique", "sca", "coronar", "angor", "stent", "pontage", "idm",
+    "palpitation", "fibrillation", "tachycardie", "arythmie", "ecg",
+)
+_STROKE_KEYWORDS = (
+    "avc", "ait", "stroke", "paralysie", "aphasie", "hemipl", "diplopie",
+    "nihss", "thrombolyse", "fast",
+)
+
+
+def sync_clinical_context(ss) -> dict:
+    """Agrège les données de session en un contexte clinique normalisé.
+
+    Retourne un dict utilisé par render_smart_alerts / render_next_steps.
+    Clés : bpco_forced, triage_incoherence, ecg_hint, focus_score,
+           alerte_hemorragique, alerte_sepsis, news2, niv, motif.
+    """
+    atcd  = list(ss.get("atcd") or [])
+    motif = str(ss.get("motif") or "").lower()
+    niv   = ss.get("niv")
+    news2 = int(ss.get("v_news2") or 0)
+
+    # Enrichissement depuis semantic_engine si une dictée Claude a été analysée
+    _sem_flags: dict = {}
+    _voice_last = ss.get("voice_triage_last") or {}
+    if isinstance(_voice_last, dict) and isinstance(_voice_last.get("_semantic"), dict):
+        _sem_flags = _voice_last["_semantic"].get("flags_systeme") or {}
+        for _a in (_voice_last["_semantic"].get("atcd_matching") or []):
+            if _a not in atcd:
+                atcd.append(_a)
+
+    bpco_forced = (
+        bool(ss.get("v_bpco"))
+        or any("bpco" in str(a).lower() for a in atcd)
+        or bool(_sem_flags.get("news2_target_o2"))
+    )
+    ecg_hint = any(kw in motif for kw in _CARDIAC_KEYWORDS)
+
+    focus_score = None
+    if any(kw in motif for kw in _STROKE_KEYWORDS):
+        focus_score = "nihss"
+
+    _LOW_TRI = {"4B", "4A", "4", "5"}
+    triage_incoherence = bool(niv) and str(niv) in _LOW_TRI and news2 >= 5
+
+    ss["v_bpco"] = bpco_forced
+
+    return {
+        "bpco_forced":        bpco_forced,
+        "triage_incoherence": triage_incoherence,
+        "ecg_hint":           ecg_hint,
+        "focus_score":        focus_score,
+        "news2":              news2,
+        "niv":                niv,
+        "motif":              motif,
+        "alerte_hemorragique": bool(_sem_flags.get("alerte_hemorragique")),
+        "alerte_sepsis":      bool(_sem_flags.get("alerte_sepsis")),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 9. ALERTES INTELLIGENTES — affichage contextuel
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_smart_alerts(ctx: dict, *, show_incoherence: bool = False) -> None:
+    """Affiche les alertes cliniques contextuelles dérivées du contexte agrégé."""
+    if ctx.get("bpco_forced"):
+        st.info("🫁 BPCO confirmé — Cible SpO₂ : **88–92 %** (éviter hyperoxie)")
+    if ctx.get("alerte_hemorragique"):
+        st.warning("💊 Anticoagulant/AOD détecté — Évaluer risque hémorragique avant tout geste")
+    if ctx.get("alerte_sepsis"):
+        st.warning("🌡️ Critères infectieux — Évaluer protocole sepsis (lactate, hémocultures, ATB ≤ 1h)")
+    if ctx.get("ecg_hint"):
+        st.info("🫀 Motif cardiaque — ECG 12 dérivations recommandé dans les 10 min")
+    if ctx.get("focus_score") == "nihss":
+        st.info("🧠 Suspicion AVC — NIHSS + heure début des symptômes + imagerie urgente")
+    if show_incoherence and ctx.get("triage_incoherence"):
+        st.markdown(
+            "<div class='smart-incoherence-alert'>"
+            "⚠️ Incohérence triage : NEWS2 ≥ 5 avec niveau P4/P5 — Réévaluation recommandée"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 10. PROCHAINES ÉTAPES — guide post-triage
+# ══════════════════════════════════════════════════════════════════════════════
+
+_NEXT_STEPS: dict[str, list[str]] = {
+    "M":  ["🚨 Déchocage immédiat", "Appel médecin senior MAINTENANT", "Préparer chariot arrêt"],
+    "1":  ["Boxe de déchocage dans les 5 min", "Moniteur / O₂ / VVP", "Médecin prévenu"],
+    "2":  ["Boxe dans les 15 min", "Constantes complètes + ECG si motif cardio", "Médecin informé"],
+    "3A": ["Salle d'attente semi-allongée", "Réévaluation NEWS2 dans 30 min"],
+    "3B": ["Salle d'attente", "Réévaluation dans 60 min si aggravation"],
+    "4":  ["Salle d'attente standard", "Retriage si aggravation ou délai > 2h"],
+    "5":  ["File d'attente non urgente", "Orienter vers médecine générale si disponible"],
+}
+
+
+def render_next_steps(ss, key: str) -> None:
+    """Affiche les prochaines étapes cliniques selon le niveau de triage en session."""
+    niv = str(ss.get("niv") or "")
+    steps = _NEXT_STEPS.get(niv) or _NEXT_STEPS.get(niv.replace("A", "").replace("B", ""))
+    if not steps:
+        return
+    with st.expander("📋 Prochaines étapes recommandées", expanded=(niv in {"M", "1", "2"})):
+        for step in steps:
+            st.markdown(f"- {step}")
