@@ -18,6 +18,7 @@ from clinical.scores import (
     evaluer_tricycliques_ecg, calculer_toxic2,
     TOXIDROMES, PSS_CRITERES,
 )
+from akir_iao_enhancements import sync_clinical_context
 from ui.components import H, AL, CARD, CARD_END
 
 
@@ -30,6 +31,46 @@ def _wk(base: str, scope: str | None = None) -> str:
     return "__".join(p.replace(" ", "_") for p in parts if p)
 
 
+def _render_nihss_rapide(WK) -> None:
+    CARD("NIHSS rapide — Déficit neurologique AVC (5 items)", "")
+    st.caption("Schiemanck SK et al., Cerebrovasc Dis 2006 | r = 0,89 avec NIHSS complet")
+    AL("Score ≥ 1 + délai < 4,5h → évaluer thrombolyse — Code Stroke immédiat", "warning")
+    _nh1, _nh2 = st.columns(2)
+    _ni_cons = _nh1.select_slider(
+        "Conscience (0-3)",
+        options=[0,1,2,3],
+        format_func=lambda x:{0:"0–Normal",1:"1–Somnolent",2:"2–Stuporeux",3:"3–Coma"}[x],
+        key=WK("ni_cons"))
+    _ni_reg  = _nh2.checkbox("Déviation conjuguée du regard", key=WK("ni_reg"))
+    _ni_fac  = _nh1.select_slider(
+        "Paralysie faciale (0-3)",
+        options=[0,1,2,3],
+        format_func=lambda x:{0:"0–Normal",1:"1–Légère",2:"2–Partielle",3:"3–Complète"}[x],
+        key=WK("ni_fac"))
+    _ni_mot  = _nh2.select_slider(
+        "Moteur bras (0-4)",
+        options=[0,1,2,3,4],
+        format_func=lambda x:{0:"0–Normal",1:"1–Dérive",2:"2–↓Gravité",3:"3–Aucun mvt",4:"4–Plégie"}[x],
+        key=WK("ni_mot"))
+    _ni_lan  = _nh1.select_slider(
+        "Langage (0-3)",
+        options=[0,1,2,3],
+        format_func=lambda x:{0:"0–Normal",1:"1–Aphasie légère",2:"2–Aphasie sévère",3:"3–Muet"}[x],
+        key=WK("ni_lan"))
+    _ni_res = calculer_nihss_rapide(
+        int(_ni_cons), bool(_ni_reg), int(_ni_fac), int(_ni_mot), int(_ni_lan))
+    _ni_v = _ni_res.get("score_val") or 0
+    _ni_col = "#EF4444" if _ni_v >= 16 else "#F59E0B" if _ni_v >= 5 else "#22C55E"
+    H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;display:flex;'
+      f'align-items:center;gap:16px;margin:8px 0;">'
+      f'<div style="text-align:center;min-width:80px;">'
+      f'<div style="font-size:.72rem;color:#64748B;">NIHSS</div>'
+      f'<div style="font-size:2.2rem;font-weight:900;color:{_ni_col};">{_ni_v}/18</div></div>'
+      f'<div style="font-size:.78rem;color:#94A3B8;flex:1;">{_ni_res.get("interpretation","")}</div></div>')
+    AL(_ni_res.get("recommendation",""), "danger" if _ni_v >= 16 else "warning" if _ni_v >= 5 else "info")
+    CARD_END()
+
+
 def render() -> None:
     SS = st.session_state
     WK = _wk
@@ -38,7 +79,21 @@ def render() -> None:
     poids  = float(SS.get("poids") or 70)
     taille = float(SS.get("taille") or 170)
 
-    _SC = st.tabs(["Cardio / Neuro", "Infectio / Respi", "Imagerie", "Neuro Spéc.", "Pédia / Sevrage", "☠️ Toxicologie"])
+    _smart = sync_clinical_context(SS)
+    _nihss_priority = _smart.get("focus_score") == "nihss"
+    if _nihss_priority:
+        H('<div class="smart-tab-note">🧠 Déficit focal/AVC détecté — NIHSS rapide affiché en priorité.</div>')
+        _render_nihss_rapide(WK)
+        st.divider()
+    elif age >= 18:
+        H('<div class="smart-tab-note muted">▫️ Patient adulte — les outils pédiatriques sont mis en retrait.</div>')
+
+    _labels = ["Cardio / Neuro", "Infectio / Respi", "Imagerie", "Neuro Spéc.", "Pédia / Sevrage", "☠️ Toxicologie"]
+    if _nihss_priority:
+        _labels[3] = "🧠 NIHSS / Neuro"
+    if age >= 18:
+        _labels[4] = "▫️ Pédia"
+    _SC = st.tabs(_labels)
 
     # ── SC[0] CARDIO / NEURO ─────────────────────────────────────────────────
     with _SC[0]:
@@ -242,43 +297,10 @@ def render() -> None:
         AL(_gr_res.get("recommendation",""), "danger" if _gv >= 140 else "warning" if _gv >= 109 else "info")
         CARD_END()
 
-        CARD("NIHSS rapide — Déficit neurologique AVC (5 items)", "")
-        st.caption("Schiemanck SK et al., Cerebrovasc Dis 2006 | r = 0,89 avec NIHSS complet")
-        AL("Score ≥ 1 + délai < 4,5h → évaluer thrombolyse — Code Stroke immédiat", "warning")
-        _nh1, _nh2 = st.columns(2)
-        _ni_cons = _nh1.select_slider(
-            "Conscience (0-3)",
-            options=[0,1,2,3],
-            format_func=lambda x:{0:"0–Normal",1:"1–Somnolent",2:"2–Stuporeux",3:"3–Coma"}[x],
-            key=WK("ni_cons"))
-        _ni_reg  = _nh2.checkbox("Déviation conjuguée du regard", key=WK("ni_reg"))
-        _ni_fac  = _nh1.select_slider(
-            "Paralysie faciale (0-3)",
-            options=[0,1,2,3],
-            format_func=lambda x:{0:"0–Normal",1:"1–Légère",2:"2–Partielle",3:"3–Complète"}[x],
-            key=WK("ni_fac"))
-        _ni_mot  = _nh2.select_slider(
-            "Moteur bras (0-4)",
-            options=[0,1,2,3,4],
-            format_func=lambda x:{0:"0–Normal",1:"1–Dérive",2:"2–↓Gravité",3:"3–Aucun mvt",4:"4–Plégie"}[x],
-            key=WK("ni_mot"))
-        _ni_lan  = _nh1.select_slider(
-            "Langage (0-3)",
-            options=[0,1,2,3],
-            format_func=lambda x:{0:"0–Normal",1:"1–Aphasie légère",2:"2–Aphasie sévère",3:"3–Muet"}[x],
-            key=WK("ni_lan"))
-        _ni_res = calculer_nihss_rapide(
-            int(_ni_cons), bool(_ni_reg), int(_ni_fac), int(_ni_mot), int(_ni_lan))
-        _ni_v = _ni_res.get("score_val") or 0
-        _ni_col = "#EF4444" if _ni_v >= 16 else "#F59E0B" if _ni_v >= 5 else "#22C55E"
-        H(f'<div style="background:#0F172A;border-radius:8px;padding:12px;display:flex;'
-          f'align-items:center;gap:16px;margin:8px 0;">'
-          f'<div style="text-align:center;min-width:80px;">'
-          f'<div style="font-size:.72rem;color:#64748B;">NIHSS</div>'
-          f'<div style="font-size:2.2rem;font-weight:900;color:{_ni_col};">{_ni_v}/18</div></div>'
-          f'<div style="font-size:.78rem;color:#94A3B8;flex:1;">{_ni_res.get("interpretation","")}</div></div>')
-        AL(_ni_res.get("recommendation",""), "danger" if _ni_v >= 16 else "warning" if _ni_v >= 5 else "info")
-        CARD_END()
+        if _nihss_priority:
+            H('<div class="smart-tab-note muted">NIHSS déjà affiché en priorité en haut de l’onglet Scores.</div>')
+        else:
+            _render_nihss_rapide(WK)
 
         CARD("PRAM — Asthme pédiatrique (0-12)", "")
         st.caption("Chalut DS et al., J Pediatr 2000 | Sévérité GINA pédiatrique")

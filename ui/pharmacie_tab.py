@@ -1,6 +1,7 @@
 # ui/pharmacie_tab.py — Onglet Pharmacie — AKIR-IAO v20
 # Logique extraite de streamlit_app.py T[2] (modularisation)
 from __future__ import annotations
+import pandas as pd
 import streamlit as st
 from datetime import datetime
 
@@ -20,9 +21,14 @@ from clinical.perfusion import (
     perf_magnesium, perf_nicardipine, perf_dobutamine,
     calculer_debit, convertir_debit,
 )
+from clinical.compatibility import check_iv_compatibility, med_from_perfusion_choice
 from akir_iao_enhancements import (
     section_dilutions_hainaut, calculateur_noradrenaline,
     section_fiches_medicaments,
+)
+from clinical.pharmaco_rea import (
+    search_dilutions, get_compatibilites, get_substances_list,
+    check_compatibility, get_all_compat_for, get_partner,
 )
 from ui.components import H, AL
 
@@ -34,6 +40,194 @@ def _wk(base: str, scope: str | None = None) -> str:
         parts.append(str(scope))
     parts.append(str(base))
     return "__".join(p.replace(" ", "_") for p in parts if p)
+
+
+def _render_rea_database(WK) -> None:
+    """Rendu de la base REA, isolé pour rester dans l'onglet Perfusions IV."""
+    st.divider()
+    H('<div class="card-title">🏥 Base de données REA — Hainaut v20</div>')
+
+    _all_dils = search_dilutions("")
+    with st.expander(
+        f"📋 Dilutions IV continues — {len(_all_dils)} molécules (protocole REA)",
+        expanded=False,
+    ):
+        st.caption(
+            "Source : Protocole dilutions standardisées intraveineuses continues "
+            "avec adaptation au marché pharmaceutique belge (BCFI/AFMPS). "
+            "⚠️ Les flags « check_protocol » signalent des discordances ou points à valider localement."
+        )
+        _rc1, _rc2 = st.columns([4, 1])
+        _rea_q = _rc1.text_input(
+            "Rechercher",
+            placeholder="ex : noradrénaline, midazolam, héparine…",
+            key=WK("rea_search"),
+            label_visibility="collapsed",
+        )
+        _rea_flags_only = _rc2.checkbox("⚠️ Flags seul.", key=WK("rea_flags"))
+
+        _dils = search_dilutions(_rea_q) if _rea_q else _all_dils
+        if _rea_flags_only:
+            _dils = [d for d in _dils if d.get("check_protocol")]
+
+        if not _dils:
+            st.info("Aucun résultat — essayer un autre terme")
+        else:
+            for _d in _dils:
+                _dil = _d.get("dilution", {})
+                _conc = _dil.get("concentration_finale", {})
+                _flag = _d.get("check_protocol", False)
+                _corr = _d.get("correction_manuscrite")
+                _flag_pfx = "⚠️ " if _flag else ""
+                _conc_value = _conc.get("valeur", "?")
+                _conc_unit = _conc.get("unite", "")
+                _conc_str = f"{_conc_value} {_conc_unit}".strip()
+                _title = (
+                    f"{_flag_pfx}{_d.get('nom_source', 'Molécule inconnue')} — "
+                    f"{_d.get('DCI', 'DCI ?')} — {_conc_str}"
+                )
+                with st.expander(_title, expanded=False):
+                    _da, _db = st.columns(2)
+                    with _da:
+                        st.markdown("**Dilution**")
+                        if _dil.get("description_source"):
+                            st.caption(_dil["description_source"])
+                        if _dil.get("volume_total_ml"):
+                            st.caption(
+                                f"Vol. total : {_dil['volume_total_ml']} ml  |  "
+                                f"Diluant : {_dil.get('diluant', '?')}"
+                            )
+                        if _dil.get("mode"):
+                            st.caption(f"Mode : {_dil['mode']}")
+                        if _d.get("conservation"):
+                            st.caption(f"🌡 {_d['conservation']}")
+                    with _db:
+                        st.markdown("**Adaptation belge**")
+                        _be = _d.get("adaptation_belge", {})
+                        if not isinstance(_be, dict):
+                            _be = {}
+                        _noms = _be.get("noms_commerciaux_be", [])
+                        if _noms:
+                            st.caption("BE : " + " | ".join(_noms[:2]))
+                        if _be.get("presentation_ampoule_be"):
+                            st.caption(_be["presentation_ampoule_be"])
+                        _val = _be.get("validation_dosage", "")
+                        if _val:
+                            _vic = (
+                                "🟢" if "conforme" in _val.lower()
+                                else "🔴" if "non" in _val.lower()
+                                else "🟡"
+                            )
+                            st.caption(f"{_vic} {_val}")
+                        if _be.get("remarque"):
+                            st.caption(_be["remarque"])
+
+                    if _flag:
+                        st.warning(
+                            f"⚠️ CHECK PROTOCOL : "
+                            f"{_d.get('flag_check_protocol_raison', '')}"
+                        )
+                    if _corr:
+                        st.info(f"📝 Correction manuscrite : {_corr}")
+
+                    _calc = _conc.get("calcul") or _conc.get("note") or ""
+                    if _calc:
+                        st.caption(f"Calcul : {_calc}")
+
+    _compat_count = len(get_compatibilites())
+    with st.expander(
+        f"🔬 Compatibilité en Y — Tableau HUG ({_compat_count} paires)",
+        expanded=False,
+    ):
+        st.caption(
+            "Source : Pharmacie des HUG (Hôpitaux Universitaires de Genève) — "
+            "HUG_CompatAdm_DCI.xlsx, révision 10.08.2018. "
+            "Compatibilité valable par paires uniquement. "
+            "C* = compatible sous conditions (lire la précision)."
+        )
+        _subs = get_substances_list()
+        _cc1, _cc2 = st.columns(2)
+        _sub_a = _cc1.selectbox(
+            "Substance A", ["— choisir —"] + _subs, key=WK("compat_a")
+        )
+        _sub_b = _cc2.selectbox(
+            "Substance B", ["— choisir —"] + _subs, key=WK("compat_b")
+        )
+
+        if _sub_a != "— choisir —" and _sub_b != "— choisir —":
+            if _sub_a == _sub_b:
+                st.info("Sélectionner deux substances différentes")
+            else:
+                _res = check_compatibility(_sub_a, _sub_b)
+                if _res:
+                    _st = _res.get("statut", "?")
+                    _pal = {
+                        "C": "#22C55E",
+                        "C*": "#F59E0B",
+                        "I": "#EF4444",
+                    }.get(_st, "#94A3B8")
+                    _lbl = {
+                        "C": "✅ COMPATIBLE",
+                        "C*": "⚠️ COMPATIBLE — sous conditions",
+                        "I": "🚫 INCOMPATIBLE",
+                    }.get(_st, _st)
+                    H(
+                        f"<div style='background:{_pal}18;border:2px solid {_pal};"
+                        f"border-radius:12px;padding:16px;text-align:center;margin:8px 0;'>"
+                        f"<div style='font-size:.7rem;color:#94A3B8;'>"
+                        f"{_res.get('substance_A', '?')} × {_res.get('substance_B', '?')}</div>"
+                        f"<div style='font-size:1.6rem;font-weight:900;color:{_pal};"
+                        f"margin:4px 0;'>{_lbl}</div>"
+                        f"<div style='font-size:.7rem;color:{_pal};'>"
+                        f"Réf. {_res.get('reference','?')} — "
+                        f"HUG_CompatAdm_DCI 2018</div></div>"
+                    )
+                    if _res.get("precision"):
+                        (st.warning if _st in ("C*", "I") else st.info)(
+                            _res["precision"]
+                        )
+                else:
+                    H(
+                        "<div style='background:#1E293B;border:2px solid #475569;"
+                        "border-radius:12px;padding:16px;text-align:center;margin:8px 0;'>"
+                        "<div style='font-size:1rem;font-weight:700;color:#94A3B8;'>"
+                        "Aucune donnée disponible pour cette paire</div>"
+                        "<div style='font-size:.72rem;color:#64748B;margin-top:4px;'>"
+                        "Contacter l'assistance pharmaceutique — CBP 070/245.245</div>"
+                        "</div>"
+                    )
+
+        if _sub_a != "— choisir —":
+            _all_for_a = get_all_compat_for(_sub_a)
+            if _all_for_a:
+                with st.expander(
+                    f"Toutes les compatibilités connues pour {_sub_a} "
+                    f"({len(_all_for_a)} entrées)",
+                    expanded=False,
+                ):
+                    _rows = []
+                    for _e in _all_for_a:
+                        _pname, _pdci = get_partner(_e, _sub_a)
+                        _st_e = _e.get("statut", "?")
+                        _ic = "✅" if _st_e == "C" else "⚠️" if _st_e == "C*" else "🚫"
+                        _rows.append({
+                            "Partenaire": _pname,
+                            "DCI": _pdci,
+                            "Statut": f"{_ic} {_st_e}",
+                            "Précision": _e.get("precision") or "",
+                            "Réf.": _e.get("reference", ""),
+                        })
+                    st.dataframe(
+                        pd.DataFrame(_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+        st.caption(
+            "⚠️ Données issues de tests par paires — pas de données disponibles "
+            "pour les associations de plus de 2 médicaments. "
+            "En cas de doute : CBP 070/245.245 (24h/24)."
+        )
 
 
 def render() -> None:
@@ -80,6 +274,10 @@ def render() -> None:
     if SS.niv in ("M", "1", "2") and SS.eva >= 7:
         H(f'<div style="background:#78350F;color:#FDE68A;border-radius:8px;padding:10px;font-weight:700;margin:6px 0;">'
           f'⚠️ TRI {SS.niv} — EVA {SS.eva}/10 — ANTALGIE FORTE PRIORITAIRE (piritramide/morphine)</div>')
+    if SS.get("pharmacie_auto_antalgie"):
+        with st.expander("🚨 Antalgie prioritaire — dictée clinique EVA ≥ 7", expanded=True):
+            AL(SS.get("pharmacie_auto_antalgie_reason") or "Douleur sévère détectée par la dictée.", "danger")
+            st.caption("L'onglet Antalgiques ci-dessous est à prioriser; doses calculées avec le poids patient synchronisé.")
 
     # ── Raccourcis médicaments ─────────────────────────────────────────────────
     H('<div class="card-title">⚡ Raccourcis — Doses immédiates</div>')
@@ -127,7 +325,13 @@ def render() -> None:
 
     st.divider()
 
-    _PH = st.tabs(["Antalgiques", "Urgences vitales", "Infectiologie", "Cardio/Respi", "Pédiatrie", "🧪 Perfusions IV"])
+    _ph_labels = [
+        "Antalgiques", "Urgences vitales", "Infectiologie",
+        "Cardio/Respi", "Pédiatrie", "🧪 Perfusions IV",
+    ]
+    if age >= 18:
+        _ph_labels[4] = "▫️ Pédiatrie"
+    _PH = st.tabs(_ph_labels)
 
     # ── Antalgiques ───────────────────────────────────────────────────────────
     with _PH[0]:
@@ -455,6 +659,46 @@ def render() -> None:
             "🔢 Convertisseur débit ↔ dose",
         ], key="perf_choice")
 
+        H("""<style>
+        @keyframes compatFlash {
+          0%, 100% { background:#7F1D1D; box-shadow:0 0 0 rgba(239,68,68,0); }
+          50% { background:#DC2626; box-shadow:0 0 0 6px rgba(239,68,68,.24); }
+        }
+        .compat-red-flash {
+          animation: compatFlash .9s ease-in-out infinite;
+          border:2px solid #FCA5A5;
+          border-radius:10px;
+          color:#FEE2E2;
+          font-weight:900;
+          margin:8px 0 12px;
+          padding:14px 16px;
+          text-align:center;
+        }
+        </style>""")
+        _current_iv_med = med_from_perfusion_choice(_perf_choice)
+        if _current_iv_med:
+            _y_partner = st.selectbox(
+                "Compatibilité Y — médicament déjà branché",
+                ["— aucun —"] + get_substances_list(),
+                key=WK("perf_y_partner"),
+                help="Contrôle rapide HUG par paire. En cas de doute: pharmacie clinique.",
+            )
+            if _y_partner != "— aucun —":
+                _compat = check_iv_compatibility(_current_iv_med, _y_partner)
+                if _compat["statut"] == "Incompatible":
+                    H(
+                        f'<div class="compat-red-flash">⚠️ ALERTE COMPATIBILITÉ : '
+                        f'{_compat["med_a"]} + {_compat["med_b"]} = Risque de précipitation.</div>'
+                    )
+                    if _compat.get("precision"):
+                        AL(_compat["precision"], "danger")
+                elif _compat["statut"] == "Prudence":
+                    AL(f"Compatibilité Y à vérifier : {_compat['message']}", "warning")
+                    if _compat.get("precision"):
+                        st.caption(_compat["precision"])
+                else:
+                    AL(f"Compatibilité Y OK : {_compat['message']}", "success")
+
         def _rx_perf(p: dict) -> None:
             if not p:
                 return
@@ -556,7 +800,9 @@ def render() -> None:
             st.markdown("##### Convertisseur universel ml/h ↔ dose")
             _cv_c1, _cv_c2 = st.columns(2)
             _cv_conc  = _cv_c1.number_input("Concentration (mg/ml)", 0.001, 50.0, 1.0, 0.1, key="cv_conc")
-            _cv_poids = _cv_c2.number_input("Poids (kg)", 1.0, 200.0, float(poids), 1.0, key="cv_poids")
+            _cv_poids = float(poids)
+            _cv_c2.metric("Poids patient", f"{_cv_poids:.0f} kg")
+            _cv_c2.caption("Synchronisé depuis l'onglet Patient.")
 
             st.markdown("**→ Débit → Dose :**")
             _cv_debit = st.number_input("Débit connu (ml/h)", 0.1, 500.0, 10.0, 0.5, key="cv_debit")
@@ -588,5 +834,5 @@ def render() -> None:
               </div>
             </div>''')
 
-    # ── Pharmacopée locale Hainaut ─────────────────────────────────────────────
-    section_fiches_medicaments()
+        _render_rea_database(WK)
+        section_fiches_medicaments()

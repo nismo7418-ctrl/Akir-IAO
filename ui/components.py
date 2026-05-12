@@ -2,7 +2,10 @@
 # Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
 # Design : Médical — Contrastes WCAG AAA — Mobile-friendly (44px min boutons)
 
+import json
+
 import streamlit as st
+import streamlit.components.v1 as components
 from typing import Optional
 from datetime import datetime
 from config import LABELS, SECTEURS, DELAIS, TCSS, HBCSS
@@ -365,6 +368,33 @@ def SBAR_RENDER(s: dict, key_suffix: str = "") -> None:
 ──────────────────────────────────────────────────────────"""
 
     H(f'<div class="sbar-block">{txt}</div>')
+    components.html(
+        f"""
+        <button id="copy-sbar" style="
+          width:100%;min-height:48px;border:0;border-radius:10px;
+          background:#16A34A;color:white;font-weight:900;font-size:15px;
+          cursor:pointer;transition:filter .12s ease,transform .08s ease;">
+          📋 Copier SBAR en un clic
+        </button>
+        <script>
+          const btn = document.getElementById("copy-sbar");
+          const txt = {json.dumps(txt)};
+          btn.addEventListener("click", async () => {{
+            try {{
+              await navigator.clipboard.writeText(txt);
+              btn.textContent = "✅ SBAR copié";
+              btn.style.background = "#15803D";
+            }} catch (err) {{
+              btn.textContent = "Copie indisponible — utiliser le bloc texte";
+              btn.style.background = "#B45309";
+            }}
+            btn.style.transform = "scale(.985)";
+            setTimeout(() => btn.style.transform = "scale(1)", 120);
+          }});
+        </script>
+        """,
+        height=60,
+    )
 
     # ── Actions d'export ──────────────────────────────────────────────────
     _col_dl, _col_cp = st.columns(2)

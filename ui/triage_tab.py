@@ -4,13 +4,13 @@ from __future__ import annotations
 import streamlit as st
 from datetime import datetime
 
-from config import NEWS2_TRI_M, DELAIS, LABELS, SECTEURS, TCSS
+from config import NEWS2_TRI_M, DELAIS, LABELS, SECTEURS, TCSS, ATCD
 from clinical.news2 import (
     calculer_news2,
     pews_meta, seuils_normaux_ped,
     calculer_pews as calculer_pews_vitaux,
 )
-from clinical.triage import french_triage, verifier_coherence
+from clinical.triage import french_triage, process_voice_triage, verifier_coherence
 from clinical.vitaux import si, sipa
 from clinical.french_v12 import (
     FRENCH_MOTS_CAT,
@@ -18,10 +18,44 @@ from clinical.french_v12 import (
     DISCRIMINANTS_ENRICHIS, render_discriminants_enrichis, process_answers,
 )
 from persistence.registry import enregistrer_patient
-from akir_iao_enhancements import gcs_visual_scale, borg_visual_scale, cam_icu_visual
+from akir_iao_enhancements import (
+    gcs_visual_scale, borg_visual_scale, cam_icu_visual,
+    sync_clinical_context, render_smart_alerts, render_next_steps,
+)
 from ui.components import H, AL, EVA_BAR, SBAR_RENDER, build_sbar
 
 MOTS_CAT = FRENCH_MOTS_CAT
+
+_VOICE_ATCD_WIDGETS = {
+    "HTA": "pt_hta",
+    "Insuffisance cardiaque": "pt_ic",
+    "Coronaropathie / SCA antérieur": "pt_coro",
+    "AVC / AIT antérieur": "pt_avc",
+    "BPCO": "pt_bpco",
+    "Asthme": "pt_asthme",
+    "Diabète type 2": "pt_diab2",
+    "Diabète type 1": "pt_diab1",
+    "Insuffisance rénale chronique": "pt_ir",
+    "Insuffisance hépatique": "pt_ih",
+    "Épilepsie": "pt_epi",
+    "Fibrillation atriale": "pt_fa",
+    "Drépanocytose": "pt_drep",
+    "Immunodépression": "pt_immuno",
+}
+
+_VOICE_RISK_WIDGETS = {
+    "Grossesse": "pt_gros",
+    "Obésité morbide (IMC ≥ 40)": "pt_ob",
+}
+
+_VOICE_TRT_WIDGETS = {
+    "Anticoagulants/AOD": "pt_acg",
+    "Antiagrégants plaquettaires": "pt_aap",
+    "Bêta-bloquants": "pt_beta",
+    "Corticoïdes au long cours": "pt_cort",
+    "IMAO (inhibiteurs MAO)": "pt_imao",
+    "Chimiothérapie en cours": "pt_chimo",
+}
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -39,6 +73,198 @@ def _wk(base: str, scope: str | None = None) -> str:
     return "__".join(p.replace(" ", "_") for p in parts if p)
 
 
+def apply_voice_triage_to_session(SS=None, WK=None) -> bool:
+    """Applique une extraction vocale en attente avant la création des widgets."""
+    SS = SS if SS is not None else st.session_state
+    WK = WK or _wk
+    data = SS.pop("voice_triage_pending", None)
+    if not isinstance(data, dict):
+        return False
+
+    age = data.get("age")
+    age_mois = data.get("age_mois")
+    if age is not None:
+        try:
+            SS["age"] = float(age)
+            SS["age_mois"] = 0
+            SS["pt_age"] = int(float(age))
+            SS["smart_ped_vitals"] = float(age) < 15
+        except (TypeError, ValueError):
+            pass
+    elif age_mois is not None:
+        try:
+            mois = int(float(age_mois))
+            SS["age"] = round(mois / 12.0, 4)
+            SS["age_mois"] = mois
+            SS["pt_age"] = 0
+            SS["pt_am"] = mois
+            SS["smart_ped_vitals"] = True
+        except (TypeError, ValueError):
+            pass
+
+    if data.get("sexe") in ("Masculin", "Féminin", "Non précisé"):
+        SS["pt_sex"] = data["sexe"]
+
+    category = data.get("categorie") or ""
+    motif = data.get("motif") or ""
+    if category in MOTS_CAT and motif in MOTS_CAT[category]:
+        SS["cat"] = category
+        SS["motif"] = motif
+        SS["tr_cat"] = category
+        SS["tr_mot"] = motif
+
+    atcd_found = [a for a in data.get("atcd", []) if a in ATCD]
+    if atcd_found:
+        current = [a for a in SS.get("atcd", []) if a in ATCD]
+        merged = [a for a in ATCD if a in set(current + atcd_found)]
+        SS["atcd"] = merged
+        other = []
+        for label in merged:
+            if label in _VOICE_ATCD_WIDGETS:
+                SS[WK(_VOICE_ATCD_WIDGETS[label])] = True
+            elif label in _VOICE_RISK_WIDGETS:
+                SS[WK(_VOICE_RISK_WIDGETS[label])] = True
+            elif label in _VOICE_TRT_WIDGETS:
+                SS[WK(_VOICE_TRT_WIDGETS[label])] = True
+            else:
+                other.append(label)
+        SS["pt_atcd_other"] = [a for a in other if a in ATCD]
+
+    pqrst = data.get("pqrst") if isinstance(data.get("pqrst"), dict) else {}
+    if pqrst:
+        det = dict(SS.get("det") or {})
+        det["pqrst"] = pqrst
+        det["voice_pqrst"] = pqrst
+        SS["det"] = det
+        sev = pqrst.get("severite")
+        if sev is not None:
+            try:
+                sev_i = max(0, min(10, int(float(sev))))
+                SS["eva"] = sev_i
+                SS[WK("tr_eva")] = str(sev_i)
+                pain_text = " ".join([
+                    str(data.get("texte_anonymise") or ""),
+                    str(data.get("motif") or ""),
+                    " ".join(str(v) for v in pqrst.values() if v),
+                ]).casefold()
+                if sev_i >= 7 and ("douleur" in pain_text or pqrst.get("region") or pqrst.get("qualite")):
+                    SS["pharmacie_auto_antalgie"] = True
+                    SS["pharmacie_auto_antalgie_reason"] = f"Dictée clinique: douleur EVA {sev_i}/10"
+            except (TypeError, ValueError):
+                pass
+
+    if data.get("allergies"):
+        SS["alg"] = data["allergies"]
+        SS["pt_alg"] = data["allergies"]
+
+    constantes = data.get("constantes") if isinstance(data.get("constantes"), dict) else {}
+    _vital_map = {
+        "fc": ("v_fc", "tr_fc", int),
+        "pas": ("v_pas", "tr_pas", int),
+        "spo2": ("v_spo2", "tr_sp", int),
+        "fr": ("v_fr", "tr_fr", int),
+        "temperature": ("v_temp", "tr_t", float),
+        "gcs": ("v_gcs", "tr_gcs", int),
+    }
+    for key, (ss_key, widget_key, caster) in _vital_map.items():
+        value = constantes.get(key)
+        if value is None:
+            continue
+        try:
+            casted = caster(value)
+        except (TypeError, ValueError):
+            continue
+        SS[ss_key] = casted
+        SS[widget_key] = casted
+
+    sync_clinical_context(SS)
+    return True
+
+
+def apply_new_triage_reset_to_session(SS=None, WK=None) -> bool:
+    """Nettoie le contexte patient avant les widgets lors d'une nouvelle arrivée."""
+    SS = SS if SS is not None else st.session_state
+    WK = WK or _wk
+    started_at = SS.pop("new_triage_reset_pending", None)
+    if not started_at:
+        return False
+
+    first_cat = list(MOTS_CAT.keys())[0]
+    first_motif = MOTS_CAT[first_cat][0]
+    SS.update({
+        "t_arr": datetime.fromisoformat(started_at) if isinstance(started_at, str) else datetime.now(),
+        "t_cont": None,
+        "t_reev": None,
+        "v_temp": 37.0,
+        "v_fc": 80,
+        "v_pas": 120,
+        "v_spo2": 98,
+        "v_fr": 16,
+        "v_gcs": 15,
+        "v_news2": 0,
+        "v_bpco": False,
+        "age": 45,
+        "age_mois": 0,
+        "poids": 70,
+        "taille": 170,
+        "alg": "",
+        "o2": False,
+        "motif": first_motif,
+        "cat": first_cat,
+        "eva": 0,
+        "gl": None,
+        "niv": None,
+        "just": "",
+        "crit": "",
+        "det": {},
+        "uid_cur": None,
+        "histo": [],
+        "reevs": [],
+        "atcd": [],
+        "atcd_checks": {},
+        "risk_checks": {},
+        "trt_checks": {},
+        "voice_triage_last": None,
+        "voice_triage_pending": None,
+        "pharmacie_auto_antalgie": False,
+        "pharmacie_auto_antalgie_reason": "",
+        "smart_ped_vitals": False,
+        "smart_context": {},
+    })
+
+    widget_defaults = {
+        "pt_age": 45,
+        "pt_am": 0,
+        "pt_sex": "Non précisé",
+        "pt_kg": 70,
+        "pt_taille": 170,
+        "pt_alg": "",
+        "pt_atcd_other": [],
+        "tr_fc": 80,
+        "tr_pas": 120,
+        "tr_sp": 98,
+        "tr_fr": 16,
+        "tr_t": 37.0,
+        "tr_gcs": 15,
+        "tr_gl": 0,
+        "tr_cat": first_cat,
+        "tr_mot": first_motif,
+    }
+    for key, value in widget_defaults.items():
+        SS[key] = value
+    SS[WK("tr_eva")] = "0"
+    SS[WK("tr_bp")] = False
+    SS[WK("voice_text")] = ""
+    for suffix in {
+        *_VOICE_ATCD_WIDGETS.values(),
+        *_VOICE_RISK_WIDGETS.values(),
+        *_VOICE_TRT_WIDGETS.values(),
+        "pt_allait", "pt_chir", "pt_tabac", "pt_o2",
+    }:
+        SS[WK(suffix)] = False
+    return True
+
+
 def render() -> None:
     SS = st.session_state
     WK = _wk
@@ -49,8 +275,72 @@ def render() -> None:
     alg   = str(SS.get("alg") or "")
     o2    = bool(SS.get("o2") or False)
     _si_val = 0.0  # valeur par défaut si PAS <= 0
+    _smart = sync_clinical_context(SS)
+
+    H("""<style>
+    @media (max-width: 768px) {
+      button[kind="primary"] {
+        background:#16A34A !important;
+        border-color:#15803D !important;
+        color:#fff !important;
+        width:100% !important;
+        transition:transform .08s ease, filter .12s ease, background-color .12s ease;
+      }
+      button[kind="primary"]:active {
+        transform:scale(.985);
+        filter:brightness(1.12);
+        background:#22C55E !important;
+      }
+    }
+    </style>""")
+
+    _last_voice = SS.get("voice_triage_last")
+    if isinstance(_last_voice, dict):
+        _src = _last_voice.get("source", "NLP")
+        _parts = [
+            f"{_last_voice.get('age')} ans" if _last_voice.get("age") is not None else "",
+            _last_voice.get("sexe") or "",
+            _last_voice.get("motif") or "",
+        ]
+        _summary = " · ".join(p for p in _parts if p)
+        AL(f"🎙️ Dictée clinique appliquée ({_src}) : {_summary or 'données partielles'}", "success")
+        for _vw in _last_voice.get("warnings") or []:
+            AL(_vw, "info")
+        with st.expander("Voir les données extraites de la dictée", expanded=False):
+            st.json({k: v for k, v in _last_voice.items() if k != "texte_anonymise"})
+
+    with st.expander("🎙️ Dictée Clinique — pré-remplissage sécurisé", expanded=False):
+        st.caption(
+            "Dicter ou coller une présentation patient. Les noms/prénoms détectés sont supprimés "
+            "avant l'extraction; les champs incertains restent vides."
+        )
+        _voice_text = st.text_area(
+            "Présentation dictée",
+            placeholder=(
+                "ex : Homme 67 ans, oppression thoracique depuis 45 min, EVA 8/10, "
+                "ATCD stent, diabète, sous Eliquis..."
+            ),
+            height=110,
+            key=WK("voice_text"),
+            label_visibility="collapsed",
+        )
+        _v1, _v2 = st.columns([2, 1])
+        if _v1.button("🎙️ Analyser et pré-remplir", type="primary", use_container_width=True, key=WK("voice_apply")):
+            if not _voice_text.strip():
+                AL("Dicter ou coller une présentation clinique avant l'analyse.", "warning")
+            else:
+                _voice_data = process_voice_triage(_voice_text)
+                SS["voice_triage_pending"] = _voice_data
+                SS["voice_triage_last"] = _voice_data
+                st.rerun()
+        if _v2.button("Effacer dictée", use_container_width=True, key=WK("voice_clear")):
+            SS.pop("voice_triage_last", None)
+            SS.pop("voice_triage_pending", None)
+            SS[WK("voice_text")] = ""
+            st.rerun()
 
     def _n2_compute() -> int:
+        sync_clinical_context(SS)
         n2 = _calc_news2_triage(
             SS.v_fr, SS.v_spo2, SS.o2,
             SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
@@ -60,7 +350,7 @@ def render() -> None:
     # ── BLOC A : Chronomètre tactile ─────────────────────────────────────────
     _ta1, _ta2 = st.columns(2)
     if _ta1.button("⏱ Marquer arrivée", key="tr_arr", use_container_width=True):
-        SS.t_arr = datetime.now(); SS.histo = []; SS.reevs = []
+        SS["new_triage_reset_pending"] = datetime.now().isoformat()
         st.rerun()
     if _ta2.button("👨‍⚕️ 1er contact médecin", key="tr_cont", use_container_width=True):
         SS.t_cont = datetime.now(); st.rerun()
@@ -93,10 +383,29 @@ def render() -> None:
     with st.expander("🧠 GCS détaillé par sous-scores", expanded=False):
         gcs_visual_scale()
 
-    SS.v_bpco = st.checkbox("BPCO — utiliser SpO2 cible 88-92 %", key=WK("tr_bp"),
-                             value=bool(SS.v_bpco or "BPCO" in atcd))
+    _bpco_key = WK("tr_bp")
+    _bpco_locked = bool(_smart.get("bpco_forced"))
+    if _bpco_locked:
+        SS.v_bpco = True
+        SS[_bpco_key] = True
+        st.checkbox(
+            "BPCO — utiliser SpO2 cible 88-92 %",
+            key=_bpco_key,
+            value=True,
+            disabled=True,
+            help="Forcé automatiquement par les antécédents.",
+        )
+        AL("BPCO détectée dans les antécédents — NEWS2 calcule avec la cible SpO2 88-92 %", "info")
+    else:
+        SS.v_bpco = st.checkbox(
+            "BPCO — utiliser SpO2 cible 88-92 %",
+            key=_bpco_key,
+            value=bool(SS.v_bpco),
+        )
     if SS.v_bpco:
         AL("BPCO actif — SpO2 > 96 % sous O₂ = RISQUE hypercapnie", "warning")
+    if SS.get("smart_ped_vitals"):
+        AL("Mode pédiatrique activé par la dictée — constantes interprétées avec PEWS.", "info")
 
     _n2 = _n2_compute()
 
@@ -237,6 +546,7 @@ def render() -> None:
     _mot  = st.selectbox("Motif principal", MOTS_CAT[_cat], key="tr_mot")
     SS.cat   = _cat
     SS.motif = _mot
+    _smart_slot = st.empty()
 
     _det = dict(SS.det) if isinstance(SS.det, dict) else {}
     _det.update({"eva": SS.eva, "atcd": atcd, "glycemie_mgdl": SS.gl})
@@ -262,6 +572,9 @@ def render() -> None:
         _selected_crit = None
 
     SS.det = _det
+    _smart = sync_clinical_context(SS)
+    with _smart_slot.container():
+        render_smart_alerts(_smart, show_incoherence=False)
 
     st.divider()
 
@@ -347,9 +660,11 @@ def render() -> None:
         if _selected_crit:
             SS.niv, SS.just, SS.crit = apply_discriminant_selection(
                 SS.niv, SS.just, SS.crit, _selected_crit)
+        sync_clinical_context(SS)
 
     # ── RÉSULTAT — toujours visible si calculé ────────────────────────────────
     if SS.niv:
+        _smart = sync_clinical_context(SS)
         if SS.motif and any(k in SS.motif.lower() for k in
                 ("suicidaire","psychiatrique","intoxication")):
             H('''<div style="background:#1E3A5F;border:2px solid #3B82F6;
@@ -387,6 +702,11 @@ def render() -> None:
               <div style="font-size:.72rem;color:#94A3B8;margin-top:2px;">{SS.just}</div>
             </div>''')
 
+        if _smart.get("triage_incoherence"):
+            _ctx_no_ecg = dict(_smart)
+            _ctx_no_ecg["ecg_hint"] = False
+            render_smart_alerts(_ctx_no_ecg, show_incoherence=True)
+
         _actions_imm = []
         if SS.niv in ("M","1","2"):
             _actions_imm.append("📞 Appeler le médecin (≤ 5 min pour Tri M/1)")
@@ -405,10 +725,11 @@ def render() -> None:
                 st.checkbox(_act, key=WK(f"act_{_act_i}"))
 
         _css = TCSS.get(SS.niv, "tri-3B")
+        _hero_extra = " smart-incoherence" if _smart.get("triage_incoherence") else ""
         _lbl = LABELS.get(SS.niv, f"TRI {SS.niv}")
         _sec = SECTEURS.get(SS.niv, "À définir")
         _del = DELAIS.get(SS.niv, 60)
-        H(f'<div class="tri-hero {_css}">'
+        H(f'<div class="tri-hero triage-result-sticky {_css}{_hero_extra}">'
           f'<div class="tri-hero-level">{_lbl}</div>'
           f'<div class="tri-hero-just">{SS.just}</div>'
           f'<div class="tri-hero-meta">'
@@ -423,6 +744,8 @@ def render() -> None:
             atcd, SS.det, SS.v_news2, SS.gl, age, SS.niv or "")
         for d in _D: AL(d, "danger")
         for a in _A: AL(a, "warning")
+
+        render_next_steps(SS, WK("next"))
 
         st.divider()
 
