@@ -26,6 +26,38 @@ st.markdown("""
 <meta name="format-detection" content="telephone=no">
 """, unsafe_allow_html=True)
 
+# ── Anti-extension : empêche Grammarly / dictée iOS / LanguageTool ───────────
+# d'injecter des overlays/icônes dans les inputs de l'app.
+# On ajoute les attributs HTML reconnus + on bloque les patterns connus.
+st.markdown("""
+<script>
+(function() {
+  const doc = window.parent ? window.parent.document : document;
+  function harden() {
+    const fields = doc.querySelectorAll(
+      '.stTextInput input, .stNumberInput input, .stTextArea textarea'
+    );
+    fields.forEach(function(el) {
+      if (el.dataset.akirHardened === '1') return;
+      el.dataset.akirHardened = '1';
+      el.setAttribute('autocomplete',   'off');
+      el.setAttribute('autocorrect',    'off');
+      el.setAttribute('autocapitalize', 'off');
+      el.setAttribute('spellcheck',     'false');
+      el.setAttribute('data-form-type', 'other');
+      el.setAttribute('data-lpignore',  'true');     // LastPass
+      el.setAttribute('data-1p-ignore', 'true');     // 1Password
+      el.setAttribute('data-gramm',     'false');    // Grammarly
+      el.setAttribute('data-gramm_editor','false');
+      el.setAttribute('data-enable-grammarly','false');
+    });
+  }
+  harden();
+  setInterval(harden, 1200);   // ré-appliquer après chaque re-run Streamlit
+})();
+</script>
+""", unsafe_allow_html=True)
+
 from config import *
 from clinical.news2 import (
     calculer_news2, n2_meta,
@@ -146,6 +178,7 @@ _defaults = {
     "timers": {},  # {"nom": datetime}
     "atcd": [], "atcd_checks": {}, "risk_checks": {}, "trt_checks": {},
     "tab_active": 0,
+    "compact_mode": False,    # mode compact onglets emoji-only forcé
 }
 for _k, _v in _defaults.items():
     if _k not in SS:
@@ -383,27 +416,154 @@ H("""<style>
   }
 }
 
-/* ── Onglets : compact emoji-first sous 480px ──────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   ONGLETS — MODE MOBILE COMPACT (sous 480px)
+   - Wrap automatique sur plusieurs lignes (pas de scroll horizontal)
+   - Onglets inactifs : emoji-only (compact)
+   - Onglet actif : emoji + label complet (élargi)
+   - Tap target 44px minimum (WCAG)
+════════════════════════════════════════════════════════════════════ */
 @media (max-width: 480px) {
+  /* Container des tabs : wrap sur plusieurs lignes */
   .stTabs [data-baseweb="tab-list"] {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    flex-wrap: wrap !important;
+    overflow-x: visible !important;
+    overflow-y: hidden !important;
+    gap: 3px !important;
+    padding: 4px !important;
+    justify-content: center !important;
+    background: var(--BG2) !important;
+    border-radius: var(--r2) !important;
   }
   .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+
+  /* Onglets inactifs : emoji seul, carré 44x44px */
   .stTabs [data-baseweb="tab"] {
     flex: 0 0 auto !important;
-    scroll-snap-align: start;
-    padding: 12px 10px !important;
-    min-width: 64px !important;
-    font-size: .68rem !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    border-radius: 10px !important;
+    font-size: 1.25rem !important;
+    line-height: 1 !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: clip !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--CARD) !important;
+    border: 1.5px solid transparent !important;
+    color: var(--TM) !important;
+    transition: all .18s ease !important;
   }
-  /* Le tab actif s'élargit pour montrer le label complet */
+
+  /* Onglet actif : s'élargit pour afficher le label complet */
   .stTabs [data-baseweb="tab"][aria-selected="true"] {
-    min-width: 110px !important;
-    font-size: .72rem !important;
+    max-width: none !important;
+    width: auto !important;
+    min-width: 140px !important;
+    padding: 0 14px !important;
+    font-size: .82rem !important;
+    font-weight: 800 !important;
+    background: linear-gradient(135deg, var(--PD), var(--P)) !important;
+    color: #fff !important;
+    border-color: var(--P) !important;
+    box-shadow: 0 3px 10px var(--P20) !important;
+    gap: 6px !important;
   }
+
+  /* Indicateur souligneur natif Streamlit caché en mobile (l'élargissement suffit) */
+  .stTabs [data-baseweb="tab-highlight"],
+  .stTabs [data-baseweb="tab-border"] {
+    display: none !important;
+  }
+}
+
+/* Tablet (481-768px) — compromis : labels visibles mais petits */
+@media (min-width: 481px) and (max-width: 768px) {
+  .stTabs [data-baseweb="tab"] {
+    padding: 8px 10px !important;
+    font-size: .72rem !important;
+    min-height: 44px !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MODE COMPACT FORCÉ — déclenché par le toggle utilisateur
+   Applique le comportement mobile à tous les écrans
+════════════════════════════════════════════════════════════════════ */
+body.akir-compact .stTabs [data-baseweb="tab-list"] {
+  flex-wrap: wrap !important;
+  overflow-x: visible !important;
+  gap: 3px !important;
+  padding: 4px !important;
+  justify-content: center !important;
+  background: var(--BG2) !important;
+  border-radius: var(--r2) !important;
+}
+body.akir-compact .stTabs [data-baseweb="tab"] {
+  flex: 0 0 auto !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 !important;
+  border-radius: 10px !important;
+  font-size: 1.25rem !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: clip !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--CARD) !important;
+  border: 1.5px solid transparent !important;
+  color: var(--TM) !important;
+  transition: all .18s ease !important;
+}
+body.akir-compact .stTabs [data-baseweb="tab"][aria-selected="true"] {
+  max-width: none !important;
+  width: auto !important;
+  min-width: 140px !important;
+  padding: 0 14px !important;
+  font-size: .82rem !important;
+  font-weight: 800 !important;
+  background: linear-gradient(135deg, var(--PD), var(--P)) !important;
+  color: #fff !important;
+  border-color: var(--P) !important;
+  box-shadow: 0 3px 10px var(--P20) !important;
+}
+body.akir-compact .stTabs [data-baseweb="tab-highlight"],
+body.akir-compact .stTabs [data-baseweb="tab-border"] {
+  display: none !important;
+}
+
+/* Bouton toggle dans la sticky bar */
+.akir-compact-toggle {
+  margin-left: auto;
+  background: transparent;
+  border: 1.5px solid var(--B);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--TM);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+  flex-shrink: 0;
+}
+.akir-compact-toggle:hover,
+.akir-compact-toggle.active {
+  background: var(--P12);
+  color: var(--P);
+  border-color: var(--P);
 }
 
 /* ── Inputs : empêcher le zoom iOS sur focus (font-size ≥ 16px) ────── */
@@ -466,6 +626,45 @@ H("""<style>
 
 @media (max-width: 768px) {
   .vp-chip { padding: 8px 14px; font-size: .78rem; min-height: 42px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ANTI-EXTENSION OVERLAY — empêcher Grammarly/LanguageTool/dictée
+   d'injecter des icônes/labels sur les inputs de l'app
+════════════════════════════════════════════════════════════════════ */
+/* Grammarly */
+grammarly-extension,
+grammarly-desktop-integration,
+[data-gramm="true"],
+[data-gramm_editor="true"] { display: none !important; }
+.stTextInput input,
+.stNumberInput input,
+.stTextArea textarea {
+  /* Désactive l'analyse Grammarly */
+  /* Streamlit n'expose pas directement les attrs HTML, on neutralise via CSS */
+}
+/* LanguageTool */
+.lt-buttons-container,
+.lt-toolbar { display: none !important; }
+/* Microsoft Editor */
+[data-mseditor],
+.ms-editor-popup { display: none !important; }
+/* Google Translate icon dans input */
+.goog-te-balloon-frame,
+#goog-gt-tt,
+.goog-te-banner-frame { display: none !important; }
+/* Apple Pencil Scribble overlay (iOS Safari sur iPad) */
+::-webkit-input-placeholder { opacity: .55; }
+/* Safari iOS — masquer le bouton micro / dictée sur les champs */
+input::-webkit-contacts-auto-fill-button,
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-list-button,
+input::-webkit-input-speech-button { display: none !important; visibility: hidden; }
+/* Anti-affichage du label key= dans aria-label parfois exposé par les extensions */
+.stApp [aria-label^="tr_"],
+.stApp [aria-label^="re_"],
+.stApp [aria-label^="sb_"] {
+  /* Pas de masquage du composant, juste désactivation du tooltip natif */
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -875,6 +1074,39 @@ try:
     </div>""")
 
     _sticky_bar()
+
+    # ══ TOGGLE MODE COMPACT (onglets emoji-only) ════════════════════════════
+    _ct1, _ct2 = st.columns([4, 1])
+    with _ct2:
+        _new_compact = st.toggle(
+            "📱 Compact",
+            value=SS.get("compact_mode", False),
+            key="compact_mode_toggle",
+            help="Affiche les onglets en mode emoji-only (idéal mobile / petit écran).",
+        )
+        if _new_compact != SS.get("compact_mode"):
+            SS.compact_mode = _new_compact
+            st.rerun()
+
+    # Applique la classe body si le mode est actif
+    if SS.get("compact_mode"):
+        H("""
+        <script>
+        (function() {
+          const doc = window.parent ? window.parent.document : document;
+          if (doc.body) doc.body.classList.add('akir-compact');
+        })();
+        </script>
+        """)
+    else:
+        H("""
+        <script>
+        (function() {
+          const doc = window.parent ? window.parent.document : document;
+          if (doc.body) doc.body.classList.remove('akir-compact');
+        })();
+        </script>
+        """)
 
     # ══ NEXT-BEST-ACTION CARD ════════════════════════════════════════════════
     # Synthèse intelligente : que doit faire l'IAO maintenant ?

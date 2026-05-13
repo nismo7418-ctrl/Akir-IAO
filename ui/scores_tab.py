@@ -20,6 +20,7 @@ from clinical.scores import (
 )
 from akir_iao_enhancements import sync_clinical_context
 from ui.components import H, AL, CARD, CARD_END
+from ui.explainer import explain
 
 
 def _wk(base: str, scope: str | None = None) -> str:
@@ -97,6 +98,15 @@ def render() -> None:
 
     # ── SC[0] CARDIO / NEURO ─────────────────────────────────────────────────
     with _SC[0]:
+        with st.expander("ℹ️ Comprendre les scores Cardio / Neuro", expanded=False):
+            _ec1, _ec2 = st.columns(2)
+            with _ec1:
+                explain("qsofa")
+                explain("heart")
+                explain("timi")
+            with _ec2:
+                explain("grace")
+                explain("nihss")
         _sl, _sr = st.columns(2)
         with _sl:
             CARD("qSOFA — Sepsis", "")
@@ -176,6 +186,14 @@ def render() -> None:
 
     # ── SC[1] INFECTIO / RESPI ───────────────────────────────────────────────
     with _SC[1]:
+        with st.expander("ℹ️ Comprendre les scores Infectio / Respi", expanded=False):
+            _e1, _e2 = st.columns(2)
+            with _e1:
+                explain("curb65")
+                explain("wells_ep")
+            with _e2:
+                explain("perc")
+                explain("sepsis_bundle")
         _s2l, _s2r = st.columns(2)
         with _s2l:
             CARD("CURB-65 — Pneumonie", "")
@@ -208,6 +226,14 @@ def render() -> None:
 
     # ── SC[2] IMAGERIE ───────────────────────────────────────────────────────
     with _SC[2]:
+        with st.expander("ℹ️ Comprendre les règles d'imagerie", expanded=False):
+            _e1, _e2 = st.columns(2)
+            with _e1:
+                explain("ottawa")
+                explain("canadian_ct")
+            with _e2:
+                explain("fast")
+                explain("wells")
         _s3l, _s3r = st.columns(2)
         with _s3l:
             CARD("Ottawa — Cheville / Pied", "")
@@ -239,6 +265,16 @@ def render() -> None:
 
     # ── SC[3] NEURO SPÉCIALISÉS ──────────────────────────────────────────────
     with _SC[3]:
+        with st.expander("ℹ️ Comprendre les scores Neurologie spécifiques", expanded=False):
+            _e1, _e2 = st.columns(2)
+            with _e1:
+                explain("nihss")
+                explain("nihss_rapide")
+                explain("abcd2")
+            with _e2:
+                explain("gcs")
+                explain("avpu")
+                explain("cam_icu")
         _n1, _n2c = st.columns(2)
         with _n1:
             CARD("ABCD2 — Risque AVC après AIT", "")
@@ -333,6 +369,16 @@ def render() -> None:
 
     # ── SC[4] PÉDIATRIE + SEVRAGE ─────────────────────────────────────────────
     with _SC[4]:
+        with st.expander("ℹ️ Comprendre les scores Pédia / Sevrage", expanded=False):
+            _e1, _e2 = st.columns(2)
+            with _e1:
+                explain("pews")
+                explain("pram")
+                explain("croup")
+            with _e2:
+                explain("ciwa")
+                explain("algoplus")
+                explain("cfs")
         _sp1, _sp2 = st.columns(2)
         with _sp1:
             CARD("PEWS — Dégradation pédiatrique précoce", "")
@@ -446,6 +492,15 @@ def render() -> None:
             <div style="font-size:.68rem;opacity:.7;margin-top:2px;">CBP Belgique : 070 / 245.245 (24h/24)</div>
           </div>
         </div>''')
+
+        with st.expander("ℹ️ Comprendre les concepts toxicologiques", expanded=False):
+            _e1, _e2 = st.columns(2)
+            with _e1:
+                explain("toxidrome")
+                explain("pss")
+            with _e2:
+                explain("paracetamol_intox")
+                explain("tricycliques_ecg")
 
         _TOX = st.tabs(["🎯 Toxidrome", "📊 PSS", "💊 Paracétamol", "❤️ Tricycliques / ECG", "🏥 TOXIC2"])
 

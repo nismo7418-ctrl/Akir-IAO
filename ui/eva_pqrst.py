@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 from clinical.utils import norm
 from ui.components import EVA_BAR
+from ui.explainer import explain
 
 
 def _slug(value: str) -> str:
@@ -65,10 +66,14 @@ def EVA_WIDGET_COMPLET(key_prefix: str, age: float, non_communicant: bool = Fals
     else:
         st.success("🟢 EVA 0/10 — Pas de douleur déclarée")
 
+    # Aide pédagogique discrète sur EVA + PQRST
+    explain("eva", compact=True)
+
     # Pré-initialisation des variables PQRST pour éviter un NameError si
     # l'expander ne s'est pas encore affiché (première exécution).
     p = q = r = s = t = ""
     with st.expander("📋 Questionnaire PQRST", expanded=False):
+        explain("pqrst")
         p1, p2 = st.columns(2)
         p = p1.text_input("P — Facteurs déclenchants / soulageants",
                           key=_widget_key("p", scope=widget_scope),

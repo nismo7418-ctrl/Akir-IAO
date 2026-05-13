@@ -31,6 +31,7 @@ from clinical.pharmaco_rea import (
     check_compatibility, get_all_compat_for, get_partner,
 )
 from ui.components import H, AL
+from ui.explainer import explain
 
 
 def _wk(base: str, scope: str | None = None) -> str:
@@ -278,6 +279,19 @@ def render() -> None:
         with st.expander("🚨 Antalgie prioritaire — dictée clinique EVA ≥ 7", expanded=True):
             AL(SS.get("pharmacie_auto_antalgie_reason") or "Douleur sévère détectée par la dictée.", "danger")
             st.caption("L'onglet Antalgiques ci-dessous est à prioriser; doses calculées avec le poids patient synchronisé.")
+
+    with st.expander("ℹ️ Comprendre la pharmacologie d'urgence", expanded=False):
+        _e1, _e2 = st.columns(2)
+        with _e1:
+            explain("eva")
+            explain("opioides_conversion")
+            explain("poids_ideal")
+            explain("5b")
+        with _e2:
+            explain("anaphylaxie")
+            explain("hypoglycemie")
+            explain("sepsis_bundle")
+            explain("aod")
 
     # ── Raccourcis médicaments ─────────────────────────────────────────────────
     H('<div class="card-title">⚡ Raccourcis — Doses immédiates</div>')

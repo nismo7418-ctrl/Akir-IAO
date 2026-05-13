@@ -458,6 +458,510 @@ GLOSSARY: dict[str, dict[str, str]] = {
     },
 
     # ══════════════════════════════════════════════════════════════════════
+    # SCORES SUPPLÉMENTAIRES (cardiologie, neurologie, infectieux, trauma)
+    # ══════════════════════════════════════════════════════════════════════
+
+    "timi": {
+        "title": "Score TIMI — Risque coronarien",
+        "tldr": "Score 0-7 pour stratifier le risque chez un patient avec angor instable / NSTEMI.",
+        "body": (
+            "TIMI combine 7 critères, 1 point chacun : âge ≥ 65 ans, ≥ 3 facteurs de risque CV, "
+            "sténose coronaire connue, déviation ST, ≥ 2 épisodes angineux 24h, prise d'aspirine 7j, "
+            "marqueurs cardiaques élevés. "
+            "**0-2** : risque faible (4-8 % d'événement à 14j). "
+            "**3-4** : modéré. "
+            "**5-7** : élevé (jusqu'à 41 %). "
+            "Guide la décision de coronarographie urgente."
+        ),
+        "source": "Antman EM et al., JAMA 2000",
+    },
+
+    "grace": {
+        "title": "Score GRACE — Pronostic SCA",
+        "tldr": "Estime la mortalité hospitalière et à 6 mois d'un patient avec syndrome coronarien aigu.",
+        "body": (
+            "GRACE intègre 8 paramètres : âge, FC, PAS, créatinine, classe Killip (insuffisance cardiaque), "
+            "arrêt cardiaque à l'admission, déviation ST, marqueurs cardiaques. "
+            "Score chiffré qui prédit la mortalité à 6 mois. "
+            "**> 140** : haut risque, coronarographie sous 24h recommandée. "
+            "**109-140** : modéré, sous 72h. "
+            "**< 109** : bas risque, stratégie conservatrice possible."
+        ),
+        "source": "Fox KAA et al., BMJ 2006 — GRACE 2.0",
+    },
+
+    "abcd2": {
+        "title": "Score ABCD2 — Risque AVC après AIT",
+        "tldr": "Estime le risque d'AVC dans les 7 jours suivant un accident ischémique transitoire.",
+        "body": (
+            "ABCD2 (0-7 points) : "
+            "**A**ge ≥ 60 ans (1pt). "
+            "**B**lood pressure ≥ 140/90 (1pt). "
+            "**C**linical : déficit moteur unilatéral (2pts) ou trouble parole sans déficit moteur (1pt). "
+            "**D**uration ≥ 60 min (2pts) ou 10-59 min (1pt). "
+            "**D**iabète (1pt). "
+            "**0-3** : risque AVC J7 ~ 1 %. "
+            "**4-5** : ~ 4 %. "
+            "**6-7** : ~ 8 % — hospitalisation pour bilan urgent."
+        ),
+        "source": "Johnston SC et al., Lancet 2007",
+    },
+
+    "curb65": {
+        "title": "CURB-65 — Sévérité pneumonie communautaire",
+        "tldr": "Score 0-5 qui guide la décision d'hospitalisation pour pneumonie.",
+        "body": (
+            "Un point par critère : "
+            "**C**onfusion. "
+            "**U**rée > 7 mmol/L. "
+            "**R**espiratory rate ≥ 30/min. "
+            "**B**lood pressure < 90/60 mmHg. "
+            "Âge ≥ **65** ans. "
+            "**0-1** : traitement ambulatoire possible (mortalité < 3 %). "
+            "**2** : hospitalisation à envisager. "
+            "**≥ 3** : pneumonie sévère, hospitalisation et possiblement USI (mortalité 15-40 %)."
+        ),
+        "source": "Lim WS et al., Thorax 2003",
+    },
+
+    "wells_ep": {
+        "title": "Score de Wells EP — Probabilité d'embolie pulmonaire",
+        "tldr": "Score qui pré-test la probabilité d'EP avant d'engager imagerie ou D-dimères.",
+        "body": (
+            "Wells EP cumule : signes cliniques de TVP (3 pts), EP plus probable que diag. alternatif (3 pts), "
+            "FC > 100 (1.5 pts), immobilisation/chirurgie récente (1.5 pts), ATCD TVP/EP (1.5 pts), "
+            "hémoptysie (1 pt), cancer actif (1 pt). "
+            "**≤ 4** : EP improbable → D-dimères. "
+            "**> 4** : EP probable → angio-TDM directement."
+        ),
+        "source": "Wells PS et al., NEJM 2003",
+    },
+
+    "sofa": {
+        "title": "Score SOFA — Défaillance d'organes",
+        "tldr": "Score 0-24 quantifiant la défaillance multi-viscérale en réanimation.",
+        "body": (
+            "SOFA évalue 6 systèmes, 0 à 4 points chacun : respiratoire (PaO2/FiO2), "
+            "coagulation (plaquettes), foie (bilirubine), cardiovasculaire (PAM + amines), "
+            "neurologique (GCS), rénal (créatinine + diurèse). "
+            "Utilisé pour le **diagnostic de sepsis (Sepsis-3, 2016)** : sepsis = infection + augmentation SOFA ≥ 2. "
+            "Score initial > 11 = mortalité > 80 %. "
+            "Dans AKIR-IAO, version 'proxy' utilisant les vitaux seulement."
+        ),
+        "source": "Vincent JL et al., Intensive Care Med 1996 / Singer M et al., JAMA 2016",
+    },
+
+    "fast": {
+        "title": "FAST/eFAST — Échographie au lit du polytraumatisé",
+        "tldr": "Échographie ciblée pour détecter un saignement intra-abdominal ou un pneumothorax.",
+        "body": (
+            "**F**ocused **A**ssessment with **S**onography for **T**rauma — explore 4 fenêtres : "
+            "péricardique, hépato-rénale (Morison), spléno-rénale, pelvienne (vessie). "
+            "Cherche **liquide libre** = saignement. "
+            "**eFAST étendu** ajoute les plèvres (pneumothorax) et la veine cave inférieure (volémie). "
+            "Examen non invasif, lit du malade, < 5 min. Si FAST + et patient instable → chirurgie."
+        ),
+        "source": "Rozycki GS et al., J Trauma 1998",
+    },
+
+    "ottawa": {
+        "title": "Règle d'Ottawa — Cheville et pied",
+        "tldr": "Détermine si une radio est nécessaire après entorse de cheville/pied.",
+        "body": (
+            "Radio cheville indiquée si **douleur dans la zone malléolaire** ET au moins un de : "
+            "douleur osseuse à la palpation de la malléole interne ou externe (6 cm distale), "
+            "ou incapacité totale à mettre 4 pas de poids (à l'évaluation OU sur les lieux). "
+            "Sensibilité ~ 100 % pour les fractures cliniquement significatives. "
+            "Évite ~ 30 % des radios inutiles."
+        ),
+        "source": "Stiell IG et al., Ann Emerg Med 1992",
+    },
+
+    "canadian_ct": {
+        "title": "Canadian CT Head Rule — TC adulte",
+        "tldr": "Détermine si un TDM cérébral est nécessaire après traumatisme crânien.",
+        "body": (
+            "TDM **obligatoire** si au moins un critère à risque élevé : "
+            "GCS < 15 à 2h, fracture du crâne suspectée, signe de fracture de la base, "
+            "≥ 2 épisodes vomissements, âge ≥ 65 ans. "
+            "Critères à risque modéré (TDM si présent) : amnésie rétrograde > 30 min, "
+            "mécanisme dangereux (chute > 1m, piéton renversé, etc.). "
+            "Sensibilité ~ 100 % pour les lésions nécessitant une intervention neurochirurgicale."
+        ),
+        "source": "Stiell IG et al., Lancet 2001",
+    },
+
+    "blatchford": {
+        "title": "Score de Glasgow-Blatchford — Hémorragie digestive",
+        "tldr": "Identifie les patients à faible risque d'hémorragie digestive haute qui peuvent rentrer à domicile.",
+        "body": (
+            "Combine urée, hémoglobine, PAS, FC, mélaena, syncope, insuffisance hépatique, cardiopathie. "
+            "**0** : risque très faible, ambulatoire envisageable. "
+            "**1-5** : faible. "
+            "**≥ 6** : risque élevé d'intervention (endoscopie urgente, transfusion). "
+            "Plus sensible que Rockall pour le tri urgences."
+        ),
+        "source": "Blatchford O et al., Lancet 2000",
+    },
+
+    "cfs": {
+        "title": "Clinical Frailty Scale (CFS) — Fragilité",
+        "tldr": "Échelle 1-9 qui évalue le niveau de fragilité d'une personne âgée.",
+        "body": (
+            "**1** : très en forme. "
+            "**2** : bien. "
+            "**3** : autonome mais comorbidités contrôlées. "
+            "**4** : vulnérable (fatigue, ralentissement). "
+            "**5** : fragilité légère (aide pour AVQ instrumentales). "
+            "**6** : modérée (aide pour AVQ de base). "
+            "**7** : sévère. "
+            "**8** : très sévère. "
+            "**9** : phase terminale. "
+            "Influence les décisions de réanimation et de niveau de soins."
+        ),
+        "source": "Rockwood K et al., CMAJ 2005",
+    },
+
+    "algoplus": {
+        "title": "ALGOPLUS — Échelle douleur personne âgée",
+        "tldr": "Évalue la douleur aiguë chez la personne âgée non communicante.",
+        "body": (
+            "5 items observationnels (1 point chacun) : "
+            "expression du visage, regard, plaintes, attitudes corporelles, comportement. "
+            "**≥ 2 / 5** : présence de douleur significative justifiant traitement. "
+            "Adaptée aux patients déments, aphasiques ou intubés. "
+            "Très utilisée en urgences gériatriques."
+        ),
+        "source": "Rat P et al., Eur J Pain 2011",
+    },
+
+    "pram": {
+        "title": "Score PRAM — Asthme pédiatrique",
+        "tldr": "Évalue la sévérité d'une crise d'asthme chez l'enfant.",
+        "body": (
+            "PRAM (Pediatric Respiratory Assessment Measure) note 5 items : "
+            "tirage suprasternal, scalène, sibilance, entrée d'air, SpO2. "
+            "Score 0-12. "
+            "**0-3** : crise légère. "
+            "**4-7** : modérée — bronchodilatateurs nébulisés répétés + corticoïdes. "
+            "**8-12** : sévère — bronchodilatateurs continus, sulfate de magnésium IV, USI."
+        ),
+        "source": "Chalut DS et al., J Pediatr 2000",
+    },
+
+    "croup": {
+        "title": "Score de Westley — Croup (laryngite striduleuse)",
+        "tldr": "Évalue la sévérité d'une obstruction laryngée chez l'enfant.",
+        "body": (
+            "5 critères : niveau de conscience (0-5), cyanose (0-5), stridor (0-2), "
+            "entrée d'air (0-2), tirage (0-3). Score 0-17. "
+            "**≤ 2** : léger — dexaméthasone PO. "
+            "**3-7** : modéré — adrénaline nébulisée + dexaméthasone. "
+            "**≥ 8** : sévère — risque imminent de détresse, anesthésiste."
+        ),
+        "source": "Westley CR et al., Am J Dis Child 1978",
+    },
+
+    "nihss_rapide": {
+        "title": "NIHSS rapide — Version 5 items",
+        "tldr": "Évaluation NIHSS en moins d'1 minute pour le pré-hospitalier.",
+        "body": (
+            "Version abrégée du NIHSS complet (15 items), utilisée par les paramédics et IAO : "
+            "**1 — Niveau de conscience (questions/commandes)**. "
+            "**2 — Champ visuel (test confrontation simple)**. "
+            "**3 — Paralysie faciale**. "
+            "**4 — Motricité bras (test 10 sec)**. "
+            "**5 — Langage**. "
+            "Un déficit sur un de ces items justifie l'activation du Code Stroke."
+        ),
+        "source": "NIHSS abrégé — adapté SFMU",
+    },
+
+    "pss": {
+        "title": "Score PSS — Sévérité d'intoxication aiguë",
+        "tldr": "Échelle internationale 0-4 pour graduer une intoxication.",
+        "body": (
+            "Poisoning Severity Score : "
+            "**0** : pas de symptôme. "
+            "**1** : léger (digestif simple, somnolence). "
+            "**2** : modéré (vomissements répétés, instabilité). "
+            "**3** : sévère (coma, dépression respiratoire). "
+            "**4** : fatal. "
+            "Évalue 13 organes/systèmes (digestif, respiratoire, cardiovasculaire, neuro, etc.). "
+            "Permet la priorisation en cas d'intoxications multiples."
+        ),
+        "source": "Persson HE et al., J Toxicol Clin Toxicol 1998",
+    },
+
+    "toxidrome": {
+        "title": "Toxidromes — Syndromes d'intoxication",
+        "tldr": "Constellations cliniques typiques qui orientent vers la classe du toxique.",
+        "body": (
+            "Les principaux : "
+            "**Anticholinergique** (atropine, antihistaminiques) : mydriase, fièvre, hallucinations, peau sèche. "
+            "**Cholinergique** (organophosphorés) : myosis, hypersalivation, bradycardie, fasciculations. "
+            "**Opioïde** : myosis, dépression respi, bradycardie. Antidote : **naloxone**. "
+            "**Sympathomimétique** (cocaïne, amphét.) : mydriase, tachycardie, agitation. "
+            "**Sédatif** (BZD, alcool) : somnolence, dépression respi. "
+            "**Sérotoninergique** : tremblements, clonus, hyperthermie."
+        ),
+        "source": "Goldfrank's Toxicologic Emergencies",
+    },
+
+    "paracetamol_intox": {
+        "title": "Intoxication paracétamol — N-acétylcystéine",
+        "tldr": "Nomogramme Rumack-Matthew + antidote NAC selon dose et délai.",
+        "body": (
+            "Dose toxique : > 150 mg/kg en aigu (ou > 7.5 g chez l'adulte). "
+            "Risque : nécrose hépatique fulminante. "
+            "**N-acétylcystéine (NAC)** = antidote, idéalement < 10h post-ingestion. "
+            "Protocole IV (Prescott) ou PO (Rumack). "
+            "Suivi : transaminases (ASAT/ALAT) qui s'élèvent à 24-48h si l'intox était significative. "
+            "Décision NAC selon le **nomogramme Rumack-Matthew** (concentration paracétamol vs heure)."
+        ),
+        "source": "Rumack BH, Matthew H, Pediatrics 1975 / SFMU 2017",
+    },
+
+    "tricycliques_ecg": {
+        "title": "Intoxication tricycliques — Signes ECG",
+        "tldr": "L'ECG dépiste précocement la cardiotoxicité des antidépresseurs tricycliques.",
+        "body": (
+            "Signes ECG à surveiller : "
+            "**QRS > 100 ms** : risque convulsions. "
+            "**QRS > 160 ms** : risque arythmies ventriculaires. "
+            "**Onde R en aVR > 3 mm** : marqueur sensible. "
+            "**Antidote** : bicarbonate de sodium 8.4% IV (1-2 mEq/kg) bolus, "
+            "renouvelable jusqu'à QRS < 100 ms. "
+            "Surveillance cardiologique en USI."
+        ),
+        "source": "Liebelt EL et al., Ann Emerg Med 1995",
+    },
+
+    # ══════════════════════════════════════════════════════════════════════
+    # OUTILS THÉRAPEUTIQUES SUPPLÉMENTAIRES
+    # ══════════════════════════════════════════════════════════════════════
+
+    "recharge_volemique": {
+        "title": "Recharge volémique — Choc / déshydratation",
+        "tldr": "Cristalloïde 20 mL/kg en bolus rapide, à réévaluer après chaque passage.",
+        "body": (
+            "Indication : choc hémodynamique, déshydratation sévère, sepsis. "
+            "**Adulte** : 500 mL de cristalloïde (Ringer ou NaCl 0.9 %) en 15 min, max 30 mL/kg en 1h. "
+            "**Pédiatrie** : 10-20 mL/kg en bolus rapide. "
+            "**Réévaluer après chaque bolus** : PA, FC, diurèse, lactates. "
+            "Arrêter si crépitants, distension jugulaire ou amélioration suffisante. "
+            "Risque d'œdème pulmonaire si excès."
+        ),
+        "source": "Surviving Sepsis Campaign 2021",
+    },
+
+    "opioides_conversion": {
+        "title": "Conversion d'opioïdes — Équianalgésie",
+        "tldr": "Calcule la dose d'un autre opioïde équivalente en effet antalgique.",
+        "body": (
+            "Ratios IV de référence vs **morphine 10 mg IV** : "
+            "**Piritramide (Dipidolor®)** : 15 mg. "
+            "**Fentanyl** : 100 µg. "
+            "**Sufentanil** : 10 µg. "
+            "**Tramadol** : 100 mg. "
+            "Lors du switch, **diminuer de 30 %** la dose équianalgésique pour tenir compte "
+            "de la tolérance croisée incomplète. Risque principal : sous-dosage si pas de switch correct."
+        ),
+        "source": "SFAR 2018 — Bonnes pratiques douleur",
+    },
+
+    "natremie": {
+        "title": "Correction de la natrémie — Hyperglycémie",
+        "tldr": "Corrige la valeur de sodium mesurée en cas de glycémie élevée.",
+        "body": (
+            "Formule : **Na corrigé = Na mesuré + 0.024 × (glycémie − 100)** (mg/dL). "
+            "Ou Katz : Na corrigé = Na mesuré + 1.6 × (glycémie − 100) / 100 mmol. "
+            "Pourquoi ? L'hyperglycémie attire l'eau intracellulaire → dilution → fausse hyponatrémie. "
+            "Correction trop rapide de l'hyponatrémie réelle = risque de myélinolyse centro-pontine. "
+            "Objectif : ≤ 8 mmol/L par 24h chez le patient chronique."
+        ),
+        "source": "Hillier TA et al., Am J Med 1999",
+    },
+
+    "joules_defib": {
+        "title": "Joules de défibrillation — FV/TV sans pouls",
+        "tldr": "Énergie de défibrillation selon l'appareil et le poids.",
+        "body": (
+            "**Adulte (biphasique)** : 150-200 J au 1er choc, puis 200-360 J. "
+            "**Adulte (monophasique, ancien)** : 360 J d'emblée. "
+            "**Enfant** : 4 J/kg. "
+            "**Nourrisson** : 4 J/kg avec palettes pédiatriques ou atténuateur. "
+            "Cardioversion synchronisée (FA, flutter) : 50-100 J biphasique. "
+            "RCP de 2 min entre chaque choc, vérification rythme à la fin."
+        ),
+        "source": "ERC Guidelines 2021",
+    },
+
+    "mosteller": {
+        "title": "Surface corporelle Mosteller — Brûlures et anticancéreux",
+        "tldr": "Calcule la surface corporelle en m² pour ajuster les doses.",
+        "body": (
+            "Formule Mosteller : **SC (m²) = √[(taille cm × poids kg) / 3600]**. "
+            "Plus simple et aussi précise que DuBois ou Haycock. "
+            "Utilisée pour : "
+            "**Brûlés** : règle des 9 (Wallace) ou Lund-Browder pour estimer la surface brûlée → calcul Parkland (4 mL/kg/%SCB). "
+            "**Oncologie** : doses de chimiothérapie en mg/m². "
+            "**Pédiatrie** : posologies de référence en mg/m²/jour."
+        ),
+        "source": "Mosteller RD, NEJM 1987",
+    },
+
+    "naegele": {
+        "title": "Règle de Naegele — Terme de grossesse",
+        "tldr": "Estime la date d'accouchement à partir des dernières règles.",
+        "body": (
+            "Formule : **terme = DDR + 9 mois + 7 jours** "
+            "(ou DDR - 3 mois + 7 jours + 1 an). "
+            "Pour un cycle régulier de 28 jours. "
+            "Si cycle plus long/court : ajuster en conséquence. "
+            "Utile aux urgences pour situer une grossesse, évaluer l'âge gestationnel "
+            "et adapter prise en charge (médicaments contre-indiqués, signes d'alerte spécifiques)."
+        ),
+        "source": "Naegele FK, 19e siècle",
+    },
+
+    # ══════════════════════════════════════════════════════════════════════
+    # OUTILS D'ÉVALUATION DOULEUR ET DYSPNÉE
+    # ══════════════════════════════════════════════════════════════════════
+
+    "eva": {
+        "title": "EVA — Échelle Visuelle Analogique de la douleur",
+        "tldr": "Réglette 0-10 pour mesurer l'intensité subjective de la douleur.",
+        "body": (
+            "0 = pas de douleur. 10 = douleur maximale imaginable. "
+            "Le patient pointe ou décale un curseur. "
+            "**0-3** : légère — palier 1 OMS (paracétamol, AINS). "
+            "**4-6** : modérée — palier 2 (tramadol, codéine). "
+            "**≥ 7** : sévère — palier 3 (morphine titrée, kétamine, péridurale). "
+            "Réévaluation à 30 min post-antalgie est obligatoire (Circulaire HAS 2014)."
+        ),
+        "source": "OMS — Échelle d'évaluation antalgique",
+    },
+
+    "pqrst": {
+        "title": "PQRST — Analyse de la douleur",
+        "tldr": "5 questions pour caractériser une douleur de manière structurée.",
+        "body": (
+            "**P — Provoquant / palliant** : qu'est-ce qui déclenche/soulage ? "
+            "**Q — Qualité** : type (brûlure, oppression, coup de poignard, colique). "
+            "**R — Région / irradiation** : où ? Vers où ? "
+            "**S — Sévérité** : intensité 0-10 (EVA). "
+            "**T — Temps** : depuis quand ? Évolution ? Brutal ou progressif ? "
+            "Méthode standardisée pour rapporter une douleur de manière exploitable médicalement."
+        ),
+        "source": "Pédagogie infirmière standard",
+    },
+
+    "borg": {
+        "title": "Échelle de Borg — Dyspnée et effort",
+        "tldr": "Auto-évaluation de la difficulté respiratoire de 0 à 10.",
+        "body": (
+            "**0** : aucune. **1** : très légère. **3** : modérée. **5** : sévère. "
+            "**7** : très sévère. **10** : extrême — impossible de continuer. "
+            "Utilisée en pneumologie, réhabilitation respiratoire, urgences pour quantifier l'amélioration "
+            "après bronchodilatateurs ou oxygénothérapie. "
+            "Complémentaire à la SpO2 (qui peut être normale alors que le patient s'épuise)."
+        ),
+        "source": "Borg GA, Med Sci Sports Exerc 1982",
+    },
+
+    "cam_icu": {
+        "title": "CAM-ICU — Détection du delirium en soins intensifs",
+        "tldr": "Test rapide pour identifier un état confusionnel aigu chez un patient sous monitoring.",
+        "body": (
+            "4 critères : "
+            "**1.** Début brutal ou évolution fluctuante. "
+            "**2.** Inattention (compter à l'envers). "
+            "**3.** Niveau de conscience altéré (vigilance, somnolence). "
+            "**4.** Pensée désorganisée (questions logiques). "
+            "**Positif si 1 + 2 + (3 ou 4)**. "
+            "Le delirium aggrave la mortalité et la durée de séjour. À dépister systématiquement."
+        ),
+        "source": "Ely EW et al., JAMA 2001",
+    },
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PROTOCOLES THÉRAPEUTIQUES
+    # ══════════════════════════════════════════════════════════════════════
+
+    "anaphylaxie": {
+        "title": "Anaphylaxie — Adrénaline IM en première ligne",
+        "tldr": "Adrénaline 0.3-0.5 mg IM (cuisse) en première intention, IV uniquement si choc réfractaire.",
+        "body": (
+            "Diagnostic : début brutal + 2 critères parmi atteinte cutanéo-muqueuse, respiratoire, "
+            "cardiovasculaire, gastro-intestinale, après contact allergène. "
+            "**Adrénaline IM** : 0.5 mg adulte, 0.3 mg adolescent, 0.15 mg < 6 ans. "
+            "À répéter toutes les 5-15 min si nécessaire. "
+            "Position : décubitus dorsal jambes surélevées (jamais assis si choc). "
+            "Compléments : O2, remplissage, antihistaminiques H1+H2, corticoïdes. "
+            "**Surveillance ≥ 24h** : risque de récidive biphasique."
+        ),
+        "source": "WAO Anaphylaxis Guidance 2020",
+    },
+
+    "purpura": {
+        "title": "Purpura fulminans — Méningococcémie",
+        "tldr": "Purpura non effaçable + fièvre = urgence absolue, antibiothérapie IMMÉDIATE avant tout.",
+        "body": (
+            "Signes : taches rouge sombre à violacé qui **ne s'effacent pas à la vitropression**, "
+            "extension rapide, peuvent confluer. Souvent associé à : fièvre, choc, troubles conscience. "
+            "**Cause principale** : méningocoque (Neisseria meningitidis) — mortalité ~ 50 % sans traitement. "
+            "**Antibiothérapie immédiate** AVANT toute autre exploration : **Ceftriaxone 2 g IV/IM** "
+            "(ou cefotaxime 50 mg/kg si enfant). Isolement gouttelettes. Prophylaxie entourage. "
+            "Hospitalisation USI obligatoire."
+        ),
+        "source": "SPILF / HCSP — Recommandations 2018",
+    },
+
+    "hypoglycemie": {
+        "title": "Hypoglycémie sévère — Resucrage en urgence",
+        "tldr": "Glucose 30 % IV (ou 50 mL Glucose 30 %) si < 54 mg/dL ou trouble de conscience.",
+        "body": (
+            "Seuils : "
+            "**< 54 mg/dL (3.0 mmol/L)** : hypoglycémie sévère, intervention immédiate. "
+            "**< 70 mg/dL** : hypoglycémie. "
+            "**Conscient** : 15 g sucre PO (3 morceaux, jus de fruit, gel glucosé) puis collation. "
+            "**Trouble conscience / VAD impossible** : **Glucose 30 % 50 mL IV** ou **G50 25-50 mL**. "
+            "**Pas d'accès IV** : **Glucagon 1 mg IM/SC** (adulte, 0.5 mg < 25 kg). "
+            "**Sous-jacent diabétique sous SU** : risque récidive 24-48h → surveillance prolongée."
+        ),
+        "source": "SFEndocrino 2021",
+    },
+
+    "ile1_hta": {
+        "title": "Crise hypertensive — Urgences vs urgences relatives",
+        "tldr": "PAS > 180 ou PAD > 120 sans atteinte d'organe = urgence relative ; avec atteinte = urgence vraie.",
+        "body": (
+            "**Urgence relative** (sans atteinte d'organe) : abaisser progressivement, PO (captopril, amlodipine). "
+            "PAS de descente brutale (risque AVC). "
+            "**Urgence vraie** (atteinte d'organe : encéphalopathie, OAP, dissection, éclampsie, IDM, AVC...) : "
+            "**baisse de 20-25 % en 1-2h** seulement, sous voie IV. "
+            "**Molécules IV** : nicardipine (Loxen®), labétalol (Trandate®), clevidipine, urapidil (Eupressyl®). "
+            "**Éclampsie** : sulfate de magnésium 4 g IV en 20 min + labétalol."
+        ),
+        "source": "ESC/ESH 2018 — Hypertensive emergencies",
+    },
+
+    "epilepsie": {
+        "title": "État de mal épileptique — Crise > 5 min",
+        "tldr": "Convulsions > 5 min ou répétées sans récupération = EME, intervention immédiate.",
+        "body": (
+            "**1ère ligne** (0-5 min) : **Midazolam 10 mg IM** (5 mg si < 40 kg) — préféré au diazépam si pas de VVP. "
+            "Si VVP : Diazépam 10 mg IV ou Lorazépam 4 mg IV. "
+            "**2e ligne** (5-20 min) : phénytoïne 20 mg/kg IV ou lévétiracétam 60 mg/kg IV. "
+            "**3e ligne (réfractaire, > 20 min)** : intubation + thiopental ou propofol. "
+            "**Pédiatrique** : midazolam buccal 0.5 mg/kg (max 10 mg). "
+            "Toujours : G30 IV (hypoglycémie ?), Thiamine si suspicion alcoolisme."
+        ),
+        "source": "ILAE 2015 / Glauser T et al., Epilepsy Curr 2016",
+    },
+
+    # ══════════════════════════════════════════════════════════════════════
     # GÉNÉRAL
     # ══════════════════════════════════════════════════════════════════════
 

@@ -63,22 +63,53 @@ def glossary_grid() -> None:
     Groupe les entrées par catégorie thématique.
     """
     categories: dict[str, list[str]] = {
-        "🩺 Scores cliniques": [
-            "news2", "pews", "qsofa", "gcs", "avpu", "shock_index",
-            "lace", "charlson", "heart", "nihss", "ciwa", "wells", "perc",
+        "🩺 Scores d'alerte précoce": [
+            "news2", "pews", "qsofa", "shock_index", "sofa",
+        ],
+        "🧠 Conscience & neurologie": [
+            "gcs", "avpu", "nihss", "nihss_rapide", "abcd2", "cam_icu",
+        ],
+        "❤️ Cardiologie": [
+            "heart", "timi", "grace",
+        ],
+        "🫁 Respiratoire & infectiologie": [
+            "curb65", "wells", "wells_ep", "perc", "pram", "croup",
+            "bpco_spo2", "sepsis_bundle",
+        ],
+        "🩻 Traumatologie & imagerie": [
+            "fast", "ottawa", "canadian_ct", "mosteller",
+        ],
+        "🆘 Réadmission & comorbidités": [
+            "lace", "charlson", "cfs",
+        ],
+        "😣 Douleur & évaluation": [
+            "eva", "pqrst", "borg", "algoplus",
+        ],
+        "💊 Pharmacologie & antidotes": [
+            "rsi", "broselow", "opioides_conversion", "poids_ideal",
+            "aod", "natremie", "joules_defib",
+        ],
+        "☠️ Toxicologie & intoxications": [
+            "pss", "toxidrome", "paracetamol_intox", "tricycliques_ecg",
+        ],
+        "🚨 Urgences vitales": [
+            "anaphylaxie", "purpura", "hypoglycemie", "ile1_hta",
+            "epilepsie", "code_stroke", "recharge_volemique",
+        ],
+        "🩺 Gastro & hémorragie": [
+            "blatchford",
+        ],
+        "👶 Grossesse & gynéco": [
+            "naegele",
         ],
         "⚡ Triage & workflow": [
             "french", "sbar", "5b", "next_action", "audit_log",
         ],
         "🤖 Intelligence artificielle": [
             "ia_triage", "ia_mortalite", "ia_readmission",
-            "mimic", "ktas", "sofa_proxy",
+            "mimic", "ktas", "sofa_proxy", "dfge",
         ],
-        "💊 Pharmacologie & outils": [
-            "rsi", "broselow", "code_stroke", "dfge", "aod",
-            "bpco_spo2", "poids_ideal", "sepsis_bundle",
-        ],
-        "📚 Référentiels": [
+        "📚 Référentiels & standards": [
             "icd10",
         ],
     }
