@@ -18,6 +18,7 @@ from clinical.french_v12 import (
     DISCRIMINANTS_ENRICHIS, render_discriminants_enrichis, process_answers,
 )
 from persistence.registry import enregistrer_patient
+from ui.explainer import explain
 from akir_iao_enhancements import (
     gcs_visual_scale, borg_visual_scale, cam_icu_visual,
     sync_clinical_context, render_smart_alerts, render_next_steps,
@@ -399,7 +400,49 @@ def render() -> None:
     st.divider()
 
     # ── BLOC B : Constantes vitales — saisie dense ───────────────────────────
+    H('<div id="akir-anchor-vitaux" style="scroll-margin-top:80px;"></div>')
     H('<div class="card-title">📊 Constantes vitales</div>')
+    explain("news2", compact=True)
+
+    # ── Presets rapides (1 tap pour pré-remplir un scénario courant) ─────────
+    _preset_applied = SS.pop("vitals_preset_pending", None)
+    if _preset_applied:
+        SS.v_fc   = _preset_applied["fc"]
+        SS.v_pas  = _preset_applied["pas"]
+        SS.v_spo2 = _preset_applied["spo2"]
+        SS.v_fr   = _preset_applied["fr"]
+        SS.v_temp = _preset_applied["temp"]
+        SS.v_gcs  = _preset_applied["gcs"]
+        # Forcer la mise à jour des widgets via leurs clés
+        for _k, _v in [
+            ("tr_fc",  _preset_applied["fc"]),
+            ("tr_pas", _preset_applied["pas"]),
+            ("tr_sp",  _preset_applied["spo2"]),
+            ("tr_fr",  _preset_applied["fr"]),
+            ("tr_t",   _preset_applied["temp"]),
+            ("tr_gcs", _preset_applied["gcs"]),
+        ]:
+            SS[_k] = _v
+
+    with st.expander("⚡ Presets rapides (1 tap)", expanded=False):
+        st.caption("Pré-remplit les 6 vitaux avec un scénario type. Ajustables ensuite.")
+        _pp1, _pp2, _pp3 = st.columns(3)
+        _pp4, _pp5, _pp6 = st.columns(3)
+
+        _presets = [
+            (_pp1, "✅ Stable",      "success",  {"fc": 75, "pas": 125, "spo2": 98, "fr": 14, "temp": 37.0, "gcs": 15}),
+            (_pp2, "🔥 Fièvre",      "warning",  {"fc": 105, "pas": 115, "spo2": 96, "fr": 22, "temp": 39.0, "gcs": 15}),
+            (_pp3, "💔 Tachycardie", "warning",  {"fc": 135, "pas": 110, "spo2": 96, "fr": 22, "temp": 37.2, "gcs": 15}),
+            (_pp4, "🩸 Choc compensé","danger",  {"fc": 115, "pas": 88,  "spo2": 94, "fr": 24, "temp": 36.8, "gcs": 14}),
+            (_pp5, "🫁 Hypoxie",     "danger",   {"fc": 110, "pas": 130, "spo2": 86, "fr": 28, "temp": 37.5, "gcs": 14}),
+            (_pp6, "🧠 GCS bas",     "danger",   {"fc":  88, "pas": 140, "spo2": 95, "fr": 16, "temp": 37.0, "gcs": 9}),
+        ]
+        for _col, _label, _kind, _vals in _presets:
+            with _col:
+                if st.button(_label, key=f"preset_{_label}", use_container_width=True,
+                             help=f"FC{_vals['fc']} PAS{_vals['pas']} SpO2{_vals['spo2']} FR{_vals['fr']} T{_vals['temp']} GCS{_vals['gcs']}"):
+                    SS["vitals_preset_pending"] = _vals
+                    st.rerun()
 
     _vc1, _vc2, _vc3 = st.columns(3)
     SS.v_fc   = _vc1.number_input("FC (bpm)",   20, 220, int(SS.v_fc),         key="tr_fc")
@@ -571,7 +614,9 @@ def render() -> None:
     st.divider()
 
     # ── BLOC E : Motif + critères FRENCH ─────────────────────────────────────
+    H('<div id="akir-anchor-triage" style="scroll-margin-top:80px;"></div>')
     H('<div class="card-title">🏷️ Motif de recours</div>')
+    explain("french", compact=True)
     _cat  = st.selectbox("Catégorie", list(MOTS_CAT.keys()), key="tr_cat")
     _mot  = st.selectbox("Motif principal", MOTS_CAT[_cat], key="tr_mot")
     SS.cat   = _cat

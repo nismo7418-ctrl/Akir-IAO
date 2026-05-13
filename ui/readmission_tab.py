@@ -9,7 +9,9 @@ from clinical.scores import (
     detecter_charlson_depuis_icd10,
     probabilite_readmission_lace,
 )
+from clinical.prefill import build_readmission_prefill
 from ui.components import H, AL, CARD, DISC
+from ui.explainer import explain
 
 
 _COMORBIDITES_OPTIONS = {
@@ -128,6 +130,29 @@ def render() -> None:
 
     st.caption("Score LACE · van Walraven C et al., CMAJ 2010;182(6):551-7")
 
+    explain("lace")
+    explain("charlson", compact=True)
+
+    # ── Pré-remplissage depuis le profil patient ─────────────────────────────
+    _pf = build_readmission_prefill(SS)
+    _has_atcd = len(_pf["comorbidites_charlson"]) > 0
+    if _has_atcd or _pf.get("urgence_admission"):
+        _msg_parts = []
+        if _pf.get("urgence_admission"):
+            _msg_parts.append(f"admission urgences (Tri {SS.get('niv','?')})")
+        if _has_atcd:
+            _msg_parts.append(f"{len(_pf['comorbidites_charlson'])} comorbidités Charlson détectées depuis ATCD")
+        AL("✓ Pré-rempli : " + " · ".join(_msg_parts), "success")
+    if _pf.get("anticoag"):
+        AL("⚠️ Anticoagulant détecté — risque hémorragique amplifie le risque de réadmission", "warning")
+
+    # Pré-positionner le multiselect Charlson si pas encore défini par l'IAO
+    _comorb_key = _wk("comorbidites")
+    if _comorb_key not in SS and _pf["comorbidites_charlson"]:
+        SS[_comorb_key] = [
+            _KEY_TO_LABEL[k] for k in _pf["comorbidites_charlson"] if k in _KEY_TO_LABEL
+        ]
+
     col_form, col_result = st.columns([1, 1], gap="large")
 
     with col_form:
@@ -140,8 +165,9 @@ def render() -> None:
         )
         urgence = st.checkbox(
             "Admission via les urgences",
-            value=True,
+            value=_pf["urgence_admission"],
             key=_wk("urgence"),
+            help="Pré-coché si triage M/1/2/3A — modifiable",
         )
         passages = st.slider(
             "Passages aux urgences (6 derniers mois, hors séjour actuel)",

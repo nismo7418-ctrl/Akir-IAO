@@ -36,7 +36,12 @@
       "Bash(python -m pytest tests/test_scores.py -v)",
       "Bash(awk '{print $2}')",
       "Bash(xargs -r kill)",
-      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} — App OK\\\\n\" http://localhost:8501)"
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} — App OK\\\\n\" http://localhost:8501)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8501)",
+      "Bash(python -m pytest tests/test_next_action.py -v)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/test_prefill.py -v)",
+      "Bash(python -m pytest tests/)"
     ]
   }
 }

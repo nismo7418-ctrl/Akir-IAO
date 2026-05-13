@@ -15,6 +15,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── PWA / iOS / Android meta — comportement app + safe-area ──────────────────
+st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AKIR-IAO">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#004A99">
+<meta name="format-detection" content="telephone=no">
+""", unsafe_allow_html=True)
+
 from config import *
 from clinical.news2 import (
     calculer_news2, n2_meta,
@@ -98,6 +109,12 @@ from ui.pharmacie_tab import render as render_pharmacie
 from ui.scores_tab import render as render_scores
 from ui.readmission_tab import render as render_readmission
 from ui.mortality_tab import render as render_mortality
+from clinical.next_action import compute_next_action, URGENCY_STYLE, URGENCY_DONE
+from clinical.prefill import (
+    build_triage_payload, build_mortality_payload, build_readmission_prefill,
+    gcs_to_avpu, motif_is_trauma,
+)
+from ui.explainer import explain, glossary_grid, info_chip
 
 MOTS_CAT       = FRENCH_MOTS_CAT
 MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
@@ -324,8 +341,338 @@ H("""<style>
 @media (max-width: 768px) {
   [data-testid="stSidebar"],
   [data-testid="collapsedControl"] { display: none !important; }
-  .block-container { padding: .4rem .5rem 4rem !important; }
+  .block-container { padding: .4rem .5rem max(4rem, env(safe-area-inset-bottom, 1rem)) !important; }
   button, .stButton > button { min-height: 48px !important; font-weight: 700 !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE-OPTIMIZATION — Safe area iOS + tactile renforcé
+══════════════════════════════════════════════════════════════════ */
+@supports (padding: max(0px)) {
+  .block-container {
+    padding-left:  max(.875rem, env(safe-area-inset-left))  !important;
+    padding-right: max(.875rem, env(safe-area-inset-right)) !important;
+  }
+  .sticky-bar { padding-top: max(6px, env(safe-area-inset-top, 0px)); }
+}
+
+/* ── Sticky bar scrollable horizontalement sur mobile ──────────────── */
+@media (max-width: 768px) {
+  .sticky-bar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    padding: 6px 8px !important;
+    gap: 6px !important;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .sticky-bar::-webkit-scrollbar { display: none; }
+  .sticky-bar .sticky-badge {
+    flex-shrink: 0;
+    scroll-snap-align: start;
+    padding: 4px 8px !important;
+    font-size: .65rem !important;
+  }
+  .sticky-bar .badge-chrono {
+    position: sticky; right: 0;
+    background: var(--CARD);
+    padding-left: 6px;
+    box-shadow: -6px 0 8px -4px rgba(0,0,0,.15);
+  }
+}
+
+/* ── Onglets : compact emoji-first sous 480px ──────────────────────── */
+@media (max-width: 480px) {
+  .stTabs [data-baseweb="tab-list"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+  .stTabs [data-baseweb="tab"] {
+    flex: 0 0 auto !important;
+    scroll-snap-align: start;
+    padding: 12px 10px !important;
+    min-width: 64px !important;
+    font-size: .68rem !important;
+  }
+  /* Le tab actif s'élargit pour montrer le label complet */
+  .stTabs [data-baseweb="tab"][aria-selected="true"] {
+    min-width: 110px !important;
+    font-size: .72rem !important;
+  }
+}
+
+/* ── Inputs : empêcher le zoom iOS sur focus (font-size ≥ 16px) ────── */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="email"],
+  textarea,
+  [data-baseweb="select"] input,
+  .stNumberInput input,
+  .stTextInput input,
+  .stTextArea textarea {
+    font-size: 16px !important;
+  }
+  /* Tap targets agrandis pour boutons +/- des number inputs */
+  .stNumberInput button,
+  .stNumberInput [role="button"] {
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
+  /* Selectbox plus haut pour le tactile */
+  [data-baseweb="select"] > div { min-height: 44px !important; }
+}
+
+/* ── Tabs : retirer le scroll-snap quand desktop ───────────────────── */
+@media (min-width: 481px) {
+  .stTabs [data-baseweb="tab-list"] { scroll-snap-type: none; }
+}
+
+/* ── Chips de presets vitaux ───────────────────────────────────────── */
+.vp-chips {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin: 6px 0 10px;
+}
+.vp-chip {
+  background: var(--BG2);
+  border: 1.5px solid var(--B);
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--TM);
+  cursor: pointer;
+  transition: all .12s;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.vp-chip:hover, .vp-chip:focus {
+  border-color: var(--P);
+  background: var(--PP);
+  color: var(--P);
+}
+.vp-chip-danger { border-color: #FCA5A5; color: #B91C1C; background: #FEF2F2; }
+.vp-chip-warning { border-color: #FCD34D; color: #B45309; background: #FFFBEB; }
+.vp-chip-success { border-color: #86EFAC; color: #166534; background: #F0FDF4; }
+
+@media (max-width: 768px) {
+  .vp-chip { padding: 8px 14px; font-size: .78rem; min-height: 42px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INFO CHIPS — Explications cliniques accessibles (composant explainer)
+════════════════════════════════════════════════════════════════════ */
+.akir-info-chip {
+  margin: 6px 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #EFF6FF, #F0F9FF);
+  border: 1.5px solid #BFDBFE;
+  overflow: hidden;
+  transition: box-shadow .15s;
+}
+.akir-info-chip:hover { box-shadow: 0 2px 8px rgba(59,130,246,.15); }
+.akir-info-chip > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: .76rem;
+  font-weight: 600;
+  color: #1D4ED8;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.akir-info-chip > summary::-webkit-details-marker { display: none; }
+.akir-info-chip > summary::after {
+  content: " ›";
+  font-weight: 700;
+  transition: transform .15s;
+  display: inline-block;
+}
+.akir-info-chip[open] > summary::after {
+  transform: rotate(90deg);
+}
+.akir-info-body {
+  padding: 4px 14px 12px;
+  font-size: .78rem;
+  line-height: 1.55;
+  color: #1E3A8A;
+}
+.akir-info-body p { margin: 4px 0 8px; }
+.akir-info-body strong { color: #1D4ED8; }
+.akir-info-source {
+  font-size: .68rem !important;
+  opacity: .75;
+  font-style: italic;
+  margin-top: 8px !important;
+  border-top: 1px solid #BFDBFE;
+  padding-top: 6px;
+}
+
+@media (max-width: 480px) {
+  .akir-info-chip > summary { padding: 10px 14px; font-size: .82rem; }
+  .akir-info-body { font-size: .82rem; padding: 6px 14px 14px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NEXT-BEST-ACTION CARD — guide l'IAO vers la prochaine action
+════════════════════════════════════════════════════════════════════ */
+.next-action-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  margin: 8px 0 12px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12);
+  transition: opacity .2s;
+}
+.next-action-card .na-ico {
+  font-size: 1.8rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.next-action-card .na-body {
+  flex: 1;
+  min-width: 0;
+}
+.next-action-card .na-label {
+  font-size: .95rem;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: .01em;
+}
+.next-action-card .na-detail {
+  font-size: .74rem;
+  opacity: .92;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.next-action-card .na-source {
+  font-size: .62rem;
+  opacity: .68;
+  margin-top: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.next-action-card .na-cta {
+  background: rgba(255,255,255,.18);
+  border: 1.5px solid rgba(255,255,255,.32);
+  color: inherit;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .12s, background .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.next-action-card .na-cta:hover,
+.next-action-card .na-cta:active {
+  background: rgba(255,255,255,.32);
+  transform: scale(1.06);
+}
+
+@media (max-width: 480px) {
+  .next-action-card { padding: 10px 12px; gap: 10px; }
+  .next-action-card .na-ico { font-size: 1.5rem; }
+  .next-action-card .na-label { font-size: .86rem; }
+  .next-action-card .na-detail { font-size: .68rem; }
+  .next-action-card .na-source { font-size: .58rem; }
+  .next-action-card .na-cta { width: 40px; height: 40px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BOTTOM NAV MOBILE — 4 actions principales toujours accessibles
+   Visible uniquement < 768px. Switch tab + scroll via JS.
+══════════════════════════════════════════════════════════════════ */
+.bottom-nav { display: none; }
+
+@media (max-width: 768px) {
+  .bottom-nav {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--CARD);
+    border-top: 1.5px solid var(--B);
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    padding-left:   calc(8px + env(safe-area-inset-left, 0px));
+    padding-right:  calc(8px + env(safe-area-inset-right, 0px));
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 9999;
+    box-shadow: 0 -2px 12px rgba(0,0,0,.10);
+  }
+  .bnav-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 6px 4px;
+    text-decoration: none;
+    color: var(--TM);
+    transition: color .15s, background .12s, transform .08s;
+    min-height: 52px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .bnav-btn:active {
+    background: var(--P12);
+    color: var(--P);
+    transform: scale(0.96);
+  }
+  .bnav-btn.active {
+    color: var(--P);
+  }
+  .bnav-btn.active .bnav-ico {
+    transform: scale(1.10);
+  }
+  .bnav-ico {
+    font-size: 1.45rem;
+    line-height: 1;
+    transition: transform .15s;
+  }
+  .bnav-lbl {
+    font-size: .64rem;
+    margin-top: 3px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+  /* Bottom-padding sur le contenu pour ne pas être masqué par la nav */
+  .block-container {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* ── Texte sélectionnable désactivé sur boutons mobiles ────────────── */
+@media (max-width: 768px) {
+  .stButton > button,
+  .vp-chip,
+  .sticky-badge {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 </style>""")
@@ -396,7 +743,7 @@ def _sticky_bar():
       {"<span class='sticky-badge' style='color:#1D4ED8;border-color:#93C5FD;background:#EFF6FF;'>ECG</span>" if _smart.get("ecg_hint") else ""}
       {"<span class='sticky-badge' style='color:#3730A3;border-color:#A5B4FC;background:#EEF2FF;'>NIHSS</span>" if _smart.get("focus_score") == "nihss" else ""}
       {("<span class='sticky-badge' style='color:#38BDF8;border-color:#7DD3FC;background:#EFF6FF;font-size:.72rem;'>" + str(len(SS.reevs)) + " réév.</span>") if SS.reevs else ""}
-      {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2={SS.v_news2}</span>" if SS.v_news2 >= 5 else ""}
+      {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2=" + str(SS.v_news2) + "</span>" if (SS.v_news2 is not None and SS.v_news2 >= 5) else ""}
       {"<span class='badge-chrono'>" + _timer_txt + "</span>" if _timer_txt else ""}
     </div>""")
 
@@ -528,6 +875,87 @@ try:
     </div>""")
 
     _sticky_bar()
+
+    # ══ NEXT-BEST-ACTION CARD ════════════════════════════════════════════════
+    # Synthèse intelligente : que doit faire l'IAO maintenant ?
+    def _build_next_action_state() -> dict:
+        """Construit le state pour compute_next_action depuis SS."""
+        _atcd_lower = [str(a).lower() for a in (SS.get("atcd") or [])]
+        _aod = any(k in " ".join(_atcd_lower) for k in
+                   ("anticoagulant", "aod", "avk", "eliquis", "xarelto", "pradaxa", "lixiana"))
+        _motif_lower = str(SS.get("motif", "")).lower()
+        _trauma = "trauma" in _motif_lower or "chute" in _motif_lower
+        _avc_suspect = "avc" in _motif_lower or "déficit" in _motif_lower or SS.get("det", {}).get("avc_suspect", False)
+        _avc_delai_h = SS.get("det", {}).get("delai")
+
+        # qSOFA approximatif depuis vitaux
+        _fr   = SS.get("v_fr")
+        _pas  = SS.get("v_pas")
+        _gcs  = SS.get("v_gcs", 15)
+        _qsofa = sum([
+            (_fr or 0) >= 22,
+            (_pas or 200) <= 100,
+            (_gcs or 15) < 15,
+        ])
+
+        # Minutes depuis le triage / dernière réévaluation
+        _now = datetime.now()
+        _triage_elapsed = None
+        if SS.get("t_arr") and SS.get("niv"):
+            _triage_elapsed = (_now - SS.t_arr).total_seconds() / 60
+        _last_reev = None
+        if SS.get("reevs"):
+            try:
+                _last_h = SS.reevs[-1].get("h")
+                _last_reev = (_now - datetime.fromisoformat(_last_h)).total_seconds() / 60
+            except Exception:
+                pass
+
+        return {
+            "fc":    SS.get("v_fc"),
+            "pas":   SS.get("v_pas"),
+            "spo2":  SS.get("v_spo2"),
+            "fr":    _fr,
+            "temp":  SS.get("v_temp"),
+            "gcs":   _gcs,
+            "news2": SS.get("v_news2"),
+            "news2_error": SS.get("v_news2_error"),
+            "qsofa": _qsofa,
+            "eva":   SS.get("eva", 0),
+            "triage_validated":   bool(SS.get("niv")),
+            "triage_level":       SS.get("niv"),
+            "triage_elapsed_min": _triage_elapsed or 0,
+            "last_reev_min":      _last_reev,
+            "sbar_generated":     bool(SS.get("sbar_generated")),
+            "antalgie_initiee":   bool(SS.get("antalgie_initiee")),
+            "aod_or_avk":         _aod,
+            "trauma":             _trauma,
+            "avc_suspect":        _avc_suspect,
+            "avc_delai_h":        _avc_delai_h,
+            "readmission_risk":   SS.get("readmission_risk"),
+        }
+
+    _na_state  = _build_next_action_state()
+    _na        = compute_next_action(_na_state)
+    _na_style  = URGENCY_STYLE[_na.urgency]
+    _na_dim    = 0.85 if _na.urgency == URGENCY_DONE else 1.0   # apaiser si tout OK
+    H(f"""
+    <div class="next-action-card" style="
+        background:{_na_style['bg']};
+        color:{_na_style['color']};
+        border-left:5px solid {_na_style['border']};
+        opacity:{_na_dim};">
+      <div class="na-ico">{_na.icon}</div>
+      <div class="na-body">
+        <div class="na-label">{_na.label}</div>
+        <div class="na-detail">{_na.detail}</div>
+        <div class="na-source">{_na.source}</div>
+      </div>
+      {('<button class="bnav-btn na-cta" data-tabs="' + _na.target_tabs + '" data-anchor="'
+        + _na.target_anchor + '" aria-label="Y aller">→</button>')
+       if _na.target_tabs and _na.target_anchor else ''}
+    </div>
+    """)
 
     # ══ ONGLETS PRINCIPAUX ════════════════════════════════════════════════════
     T = st.tabs([
@@ -724,34 +1152,38 @@ try:
 
         from ml.triage_predictor import get_ml_priority
 
-        # Pré-remplissage depuis les vitaux déjà saisis dans l'onglet Triage
-        _pf_fc   = int(SS.get("v_fc")   or 80)
-        _pf_pas  = int(SS.get("v_pas")  or 120)
-        _pf_spo2 = int(SS.get("v_spo2") or 98)
-        _pf_fr   = int(SS.get("v_fr")   or 16)
-        _pf_temp = float(SS.get("v_temp") or 37.0)
-        _pf_gcs  = int(SS.get("v_gcs")  or 15)
-        _pf_eva  = int(SS.get("eva")    or 0)
+        # Pré-remplissage centralisé depuis le contexte patient
+        _payload = build_triage_payload(SS)
+        _avpu_auto    = _payload["avpu"]
+        _trauma_auto  = bool(_payload["injury"])
+
+        AL("✓ Vitaux pré-remplis depuis l'onglet Triage. Ajustez si besoin.", "info")
+        explain("ia_triage")
+        explain("avpu", compact=True)
 
         with st.form("ia_triage_form_v2"):
             st.subheader("Saisie des constantes vitales")
             col1, col2 = st.columns(2)
             with col1:
-                _fc   = st.number_input("Fréquence cardiaque (bpm)",     20, 250, _pf_fc,   step=1)
-                _fr   = st.number_input("Fréquence respiratoire (/min)", 4,  60,  _pf_fr,   step=1)
-                _pas  = st.number_input("PAS (mmHg)",                    40, 300, _pf_pas,  step=1)
-                _pad  = st.number_input("PAD (mmHg)",                    20, 200, int(_pf_pas * 0.65), step=1)
+                _fc   = st.number_input("Fréquence cardiaque (bpm)",     20, 250, int(_payload["fc"]),   step=1)
+                _fr   = st.number_input("Fréquence respiratoire (/min)", 4,  60,  int(_payload["fr"]),   step=1)
+                _pas  = st.number_input("PAS (mmHg)",                    40, 300, int(_payload["pas"]),  step=1)
+                _pad  = st.number_input("PAD (mmHg)",                    20, 200, int(_payload["pad"]),  step=1)
             with col2:
-                _spo2 = st.number_input("SpO2 (%)",                      50, 100, _pf_spo2, step=1)
-                _temp = st.number_input("Température (°C)",              30.0, 45.0, _pf_temp, step=0.1, format="%.1f")
-                _avpu_lbl = st.selectbox("AVPU", ["A — Alerte", "V — Réactif voix", "P — Réactif douleur", "U — Inconscient"])
-                _nrs  = st.number_input("Douleur NRS (0-10)",            0,  10,  _pf_eva,  step=1)
+                _spo2 = st.number_input("SpO2 (%)",                      50, 100, int(_payload["spo2"]), step=1)
+                _temp = st.number_input("Température (°C)",              30.0, 45.0, float(_payload["temp"]), step=0.1, format="%.1f")
+                _avpu_lbls = ["A — Alerte", "V — Réactif voix", "P — Réactif douleur", "U — Inconscient"]
+                _avpu_idx  = {"A": 0, "V": 1, "P": 2, "U": 3}.get(_avpu_auto, 0)
+                _avpu_lbl  = st.selectbox("AVPU (dérivé GCS)", _avpu_lbls, index=_avpu_idx,
+                                          help="Mapping automatique depuis le GCS — modifiable")
+                _nrs  = st.number_input("Douleur NRS (0-10)",            0,  10,  int(_payload["nrs_pain"]), step=1)
 
             col3, col4 = st.columns(2)
             with col3:
                 _amb  = st.checkbox("Arrivée en ambulance", value=False)
             with col4:
-                _inj  = st.checkbox("Traumatisme / lésion",  value=False)
+                _inj  = st.checkbox("Traumatisme / lésion",  value=_trauma_auto,
+                                     help="Auto-détecté depuis le motif")
 
             submitted = st.form_submit_button("🤖 Analyser le triage", type="primary", use_container_width=True)
 
@@ -1061,6 +1493,7 @@ try:
         _ST = st.tabs(["🔄 Réévaluation", "📜 Historique", "📡 SBAR"])
 
         with _ST[0]:
+            H('<div id="akir-anchor-reev" style="scroll-margin-top:80px;"></div>')
             if not SS.uid_cur:
                 AL("Enregistrer d'abord un patient dans l'onglet ⚡ Triage", "info")
             else:
@@ -1168,6 +1601,8 @@ try:
                 AL(_au.get("message",""), "success" if _au.get("ok") else "danger")
 
         with _ST[2]:
+            H('<div id="akir-anchor-sbar" style="scroll-margin-top:80px;"></div>')
+            explain("sbar", compact=True)
             if not SS.niv:
                 AL("Calculer d'abord le triage (onglet ⚡ Triage)", "info")
             else:
@@ -1184,12 +1619,99 @@ try:
         render_mortality()
 
     with T[9]:
-        _render_presentation()
+        _intro_sub, _glossary_sub = st.tabs(["📖 Présentation", "❓ Glossaire pédagogique"])
+        with _intro_sub:
+            _render_presentation()
+        with _glossary_sub:
+            glossary_grid()
 
     # ── Footer légal — affiché une seule fois ──────────────────────────────
     st.divider()
     st.warning("🤖 **Avertissement IA** : Le modèle de triage par IA est expérimental et ne remplace pas le jugement clinique de l'infirmier IAO. Utilisez-le uniquement comme aide complémentaire.")
     DISC()
+
+    # ══ BOTTOM NAV MOBILE — 4 actions principales toujours 1 tap ═════════════
+    # data-tabs    = séquence de fragments de texte d'onglets à cliquer (séparés par "|")
+    # data-anchor  = ID HTML cible à scroller après navigation
+    H("""
+    <nav class="bottom-nav" role="navigation" aria-label="Navigation rapide IAO">
+      <button class="bnav-btn" data-tabs="Triage" data-anchor="akir-anchor-vitaux"
+              aria-label="Aller aux constantes vitales">
+        <span class="bnav-ico">📊</span><span class="bnav-lbl">Vitaux</span>
+      </button>
+      <button class="bnav-btn" data-tabs="Triage" data-anchor="akir-anchor-triage"
+              aria-label="Aller à la validation triage">
+        <span class="bnav-ico">⚡</span><span class="bnav-lbl">Triage</span>
+      </button>
+      <button class="bnav-btn" data-tabs="Suivi|SBAR" data-anchor="akir-anchor-sbar"
+              aria-label="Générer SBAR pour transmission DPI">
+        <span class="bnav-ico">📡</span><span class="bnav-lbl">SBAR</span>
+      </button>
+      <button class="bnav-btn" data-tabs="Suivi|Réévaluation" data-anchor="akir-anchor-reev"
+              aria-label="Réévaluation rapide">
+        <span class="bnav-ico">🔄</span><span class="bnav-lbl">Réév.</span>
+      </button>
+    </nav>
+    """)
+
+    # Script de navigation — match d'onglet par texte (robuste aux ré-ordonnancements)
+    # + scroll smooth vers l'ancre. Pattern d'attache périodique pour survivre aux re-runs.
+    H("""
+    <script>
+    (function() {
+      const doc = window.parent ? window.parent.document : document;
+
+      function findTabByText(fragment) {
+        const tabs = doc.querySelectorAll('button[data-baseweb="tab"]');
+        const norm = fragment.toLowerCase();
+        for (const t of tabs) {
+          const txt = (t.textContent || '').toLowerCase();
+          if (txt.includes(norm)) return t;
+        }
+        return null;
+      }
+
+      function akirNavigate(tabsSequence, anchorId) {
+        const fragments = (tabsSequence || '').split('|').filter(Boolean);
+        let delay = 0;
+        for (const frag of fragments) {
+          setTimeout(function() {
+            const tab = findTabByText(frag);
+            if (tab) tab.click();
+          }, delay);
+          delay += 140;
+        }
+        // Scroll vers l'ancre après que tous les tabs aient été cliqués
+        setTimeout(function() {
+          const el = doc.getElementById(anchorId);
+          if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }, delay + 120);
+      }
+
+      function attachHandlers() {
+        // Toute "balise navigation" reconnue : bouton bottom nav + CTA next-action
+        const btns = doc.querySelectorAll('[data-tabs][data-anchor]');
+        btns.forEach(function(btn) {
+          if (btn.dataset.akirBound === '1') return;
+          btn.dataset.akirBound = '1';
+          btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const t = btn.dataset.tabs;
+            const a = btn.dataset.anchor;
+            akirNavigate(t, a);
+            doc.querySelectorAll('.bnav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            setTimeout(() => btn.classList.remove('active'), 1200);
+          }, {passive: false});
+        });
+      }
+
+      attachHandlers();
+      // Ré-attache périodiquement pour survivre aux re-runs Streamlit
+      setInterval(attachHandlers, 1500);
+    })();
+    </script>
+    """)
 
 except Exception as _e:
     st.error(f"🚨 Erreur : {_e}")

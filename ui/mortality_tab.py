@@ -5,6 +5,8 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.components import H, AL, CARD, CARD_END
+from clinical.prefill import build_mortality_payload
+from ui.explainer import explain
 
 
 def _wk(key: str) -> str:
@@ -48,17 +50,12 @@ def _sofa_bar(score: float) -> None:
 
 
 def _prefill_from_session() -> dict:
-    """Pré-remplit depuis les vitaux patient déjà saisis dans le triage."""
-    SS = st.session_state
-    return {
-        "hr":   SS.get("pt_fc", 88),
-        "sbp":  SS.get("pt_pas", 120),
-        "dbp":  SS.get("pt_pad", SS.get("pt_pas", 120) * 0.65),
-        "spo2": SS.get("pt_spo2", 97),
-        "rr":   SS.get("pt_fr", 16),
-        "temp": SS.get("pt_temp", 37.0),
-        "age":  SS.get("pt_age", 65),
-    }
+    """Pré-remplit depuis le contexte clinique courant.
+
+    Utilise le helper centralisé build_mortality_payload qui agrège les vitaux
+    actuels + l'historique des réévaluations pour calculer mean/min/max.
+    """
+    return build_mortality_payload(st.session_state)
 
 
 def render() -> None:
@@ -75,39 +72,53 @@ def render() -> None:
        "Il évalue le risque de décès hospitalier à partir des paramètres vitaux. "
        "Indicatif — ne se substitue pas au jugement clinique.", "warning")
 
+    explain("ia_mortalite")
+    explain("mimic", compact=True)
+    explain("sofa_proxy", compact=True)
+
     pf = _prefill_from_session()
+    SS = st.session_state
+    _has_reev = len(SS.get("reevs") or []) >= 3
+
+    if _has_reev:
+        AL(f"✓ Agrégats calculés depuis {len(SS.reevs)} réévaluations + vitaux courants.", "success")
+    else:
+        AL("ℹ️ Pas assez de réévaluations — min/max estimés ± variation physiologique.", "info")
 
     # ── Saisie vitaux ─────────────────────────────────────────────────────────
     with st.expander("Paramètres vitaux (valeurs de séjour)", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            hr_mean  = st.number_input("FC moyenne (bpm)",  min_value=20,  max_value=300, value=int(pf["hr"]),   step=1,  key=_wk("hr_mean"))
-            hr_min   = st.number_input("FC min (bpm)",       min_value=20,  max_value=300, value=max(20, int(pf["hr"]) - 20), step=1, key=_wk("hr_min"))
-            hr_max   = st.number_input("FC max (bpm)",       min_value=20,  max_value=300, value=min(300, int(pf["hr"]) + 30), step=1, key=_wk("hr_max"))
+            hr_mean  = st.number_input("FC moyenne (bpm)",  min_value=20,  max_value=300, value=int(pf["hr_mean"]),   step=1,  key=_wk("hr_mean"))
+            hr_min   = st.number_input("FC min (bpm)",       min_value=20,  max_value=300, value=int(pf["hr_min"]),   step=1, key=_wk("hr_min"))
+            hr_max   = st.number_input("FC max (bpm)",       min_value=20,  max_value=300, value=int(pf["hr_max"]),   step=1, key=_wk("hr_max"))
         with c2:
-            sbp_mean = st.number_input("PAS moyenne (mmHg)", min_value=40,  max_value=300, value=int(pf["sbp"]),  step=1,  key=_wk("sbp_mean"))
-            sbp_min  = st.number_input("PAS min (mmHg)",     min_value=40,  max_value=300, value=max(40, int(pf["sbp"]) - 25), step=1, key=_wk("sbp_min"))
-            dbp_mean = st.number_input("PAD moyenne (mmHg)", min_value=10,  max_value=200, value=int(pf["dbp"]),  step=1,  key=_wk("dbp_mean"))
+            sbp_mean = st.number_input("PAS moyenne (mmHg)", min_value=40,  max_value=300, value=int(pf["sbp_mean"]), step=1,  key=_wk("sbp_mean"))
+            sbp_min  = st.number_input("PAS min (mmHg)",     min_value=40,  max_value=300, value=int(pf["sbp_min"]),  step=1, key=_wk("sbp_min"))
+            dbp_mean = st.number_input("PAD moyenne (mmHg)", min_value=10,  max_value=200, value=int(pf["dbp_mean"]), step=1,  key=_wk("dbp_mean"))
         with c3:
-            spo2_mean = st.number_input("SpO2 moyenne (%)",  min_value=50,  max_value=100, value=int(pf["spo2"]), step=1,  key=_wk("spo2_mean"))
-            spo2_min  = st.number_input("SpO2 min (%)",      min_value=50,  max_value=100, value=max(50, int(pf["spo2"]) - 6), step=1, key=_wk("spo2_min"))
-            rr_mean   = st.number_input("FR moyenne (/min)", min_value=4,   max_value=60,  value=int(pf["rr"]),   step=1,  key=_wk("rr_mean"))
-            rr_max    = st.number_input("FR max (/min)",     min_value=4,   max_value=60,  value=min(60, int(pf["rr"]) + 6),  step=1, key=_wk("rr_max"))
+            spo2_mean = st.number_input("SpO2 moyenne (%)",  min_value=50,  max_value=100, value=int(pf["spo2_mean"]), step=1,  key=_wk("spo2_mean"))
+            spo2_min  = st.number_input("SpO2 min (%)",      min_value=50,  max_value=100, value=int(pf["spo2_min"]),  step=1, key=_wk("spo2_min"))
+            rr_mean   = st.number_input("FR moyenne (/min)", min_value=4,   max_value=60,  value=int(pf["rr_mean"]),   step=1,  key=_wk("rr_mean"))
+            rr_max    = st.number_input("FR max (/min)",     min_value=4,   max_value=60,  value=int(pf["rr_max"]),    step=1, key=_wk("rr_max"))
 
     with st.expander("Démographie & contexte admission", expanded=False):
         c1, c2, c3 = st.columns(3)
         with c1:
-            age        = st.number_input("Âge (ans)", min_value=18, max_value=120, value=int(pf["age"]), key=_wk("age"))
-            gender     = st.selectbox("Genre", ["Homme", "Femme"], key=_wk("gender"))
+            age        = st.number_input("Âge (ans)", min_value=18, max_value=120, value=int(pf["age_approx"]), key=_wk("age"))
+            _gender_default = "Femme" if pf["gender_enc"] == 1 else "Homme"
+            gender     = st.selectbox("Genre", ["Homme", "Femme"], index=(1 if _gender_default == "Femme" else 0), key=_wk("gender"))
             gender_enc = 1 if gender == "Femme" else 0
         with c2:
-            temp_mean  = st.number_input("Temp. moyenne (°C)", min_value=30.0, max_value=45.0, value=float(pf["temp"]), step=0.1, format="%.1f", key=_wk("temp_mean"))
-            temp_max   = st.number_input("Temp. max (°C)",     min_value=30.0, max_value=45.0, value=min(45.0, float(pf["temp"]) + 0.8), step=0.1, format="%.1f", key=_wk("temp_max"))
+            temp_mean  = st.number_input("Temp. moyenne (°C)", min_value=30.0, max_value=45.0, value=float(pf["temp_c_mean"]), step=0.1, format="%.1f", key=_wk("temp_mean"))
+            temp_max   = st.number_input("Temp. max (°C)",     min_value=30.0, max_value=45.0, value=float(pf["temp_c_max"]),  step=0.1, format="%.1f", key=_wk("temp_max"))
         with c3:
-            adm_type   = st.selectbox("Type admission", ["Urgences", "Urgent", "Électif"], key=_wk("adm_type"))
-            adm_enc    = {"Électif": 0, "Urgent": 1, "Urgences": 2}[adm_type]
-            los_h      = st.number_input("Durée séjour (heures)", min_value=0, max_value=5000, value=48, key=_wk("los_h"))
-            n_mesures  = st.number_input("Nb mesures vitaux", min_value=0, max_value=10000, value=300, key=_wk("n_mesures"),
+            _adm_lbls  = ["Électif", "Urgent", "Urgences"]
+            _adm_idx   = int(pf["admission_type_enc"])
+            adm_type   = st.selectbox("Type admission", _adm_lbls, index=_adm_idx, key=_wk("adm_type"))
+            adm_enc    = _adm_lbls.index(adm_type)
+            los_h      = st.number_input("Durée séjour (heures)", min_value=0, max_value=5000, value=int(pf["los_hours"]), key=_wk("los_h"))
+            n_mesures  = st.number_input("Nb mesures vitaux", min_value=0, max_value=10000, value=int(pf["n_vital_measures"]), key=_wk("n_mesures"),
                                           help="Nombre total de mesures enregistrées — proxy de l'intensité du monitoring.")
 
     # ── Prédiction ────────────────────────────────────────────────────────────
