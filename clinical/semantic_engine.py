@@ -11,6 +11,15 @@ from typing import List, Optional
 import anthropic
 from pydantic import BaseModel, Field
 
+
+def _get_api_key() -> str | None:
+    """Lit la clé API depuis st.secrets (local / Streamlit Cloud) ou l'env."""
+    try:
+        import streamlit as st
+        return st.secrets.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    except Exception:
+        return os.environ.get("ANTHROPIC_API_KEY")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Schéma de sortie Pydantic
 # ══════════════════════════════════════════════════════════════════════════════
@@ -112,6 +121,12 @@ def _anonymise(texte: str) -> str:
 # Moteur principal
 # ══════════════════════════════════════════════════════════════════════════════
 
+_TOOL_NAME = "extract_clinical_analysis"
+
+# Schéma JSON dérivé de Pydantic — calculé 1 seule fois au chargement du module
+_TOOL_SCHEMA = AnalyseClinique.model_json_schema()
+
+
 def analyser_dictee(
     dictee: str,
     *,
@@ -125,15 +140,19 @@ def analyser_dictee(
 
     Returns:
         AnalyseClinique validé par Pydantic.
+
+    Raises:
+        ValueError: dictée vide ou réponse Claude non parsable.
+        anthropic.APIError: erreur de l'API Anthropic (auth, quota, etc.).
     """
     if not dictee or not dictee.strip():
         raise ValueError("La dictée ne peut pas être vide.")
 
     texte_anonymise = _anonymise(dictee.strip())
+    client = anthropic.Anthropic(api_key=api_key or _get_api_key())
 
-    client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
-
-    response = client.messages.parse(
+    # Tool use → sortie JSON garantie conforme au schéma Pydantic
+    response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         system=[
@@ -143,16 +162,30 @@ def analyser_dictee(
                 "cache_control": {"type": "ephemeral"},
             }
         ],
+        tools=[
+            {
+                "name": _TOOL_NAME,
+                "description": "Extrait l'analyse clinique structurée de la dictée IAO.",
+                "input_schema": _TOOL_SCHEMA,
+            }
+        ],
+        tool_choice={"type": "tool", "name": _TOOL_NAME},
         messages=[
             {
                 "role": "user",
                 "content": f"Dictée médicale : {texte_anonymise}",
             }
         ],
-        output_format=AnalyseClinique,
     )
 
-    return response.parsed_output
+    # Extraction du tool_use block — toujours présent grâce à tool_choice forcé
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", "") == _TOOL_NAME:
+            return AnalyseClinique(**block.input)
+
+    raise ValueError(
+        "Réponse Claude sans tool_use exploitable — extraction sémantique impossible."
+    )
 
 
 def analyser_dictee_dict(dictee: str, *, api_key: str | None = None) -> dict:

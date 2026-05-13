@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import akir_iao_enhancements\")",
+      "Bash(python -c ' *)",
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(streamlit run *)",
+      "Bash(streamlit --version)",
+      "Bash(python -m streamlit run streamlit_app.py --server.port 8501 --server.headless true)",
+      "Bash(curl -s http://localhost:8501/_stcore/health)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(pip show *)",
+      "Bash(python -c \"from clinical.semantic_engine import analyser_dictee_dict, AnalyseClinique; print\\('Import OK'\\)\")",
+      "Bash(git checkout *)",
+      "Bash(python -m py_compile akir_iao_enhancements.py clinical/semantic_engine.py clinical/triage.py ui/triage_tab.py)",
+      "Bash(python -m py_compile /workspaces/Akir-IAO/clinical/semantic_engine.py)",
+      "Bash(python -c \"import sklearn; print\\(sklearn.__version__\\)\")",
+      "Bash(python -c \"import joblib; print\\(joblib.__version__\\)\")",
+      "Bash(python -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -c \"import sklearn; import joblib; print\\('sklearn', sklearn.__version__, '/ joblib', joblib.__version__\\)\")",
+      "Bash(python ml/train_triage_model.py)",
+      "Bash(python ml/triage_predictor.py)",
+      "Bash(python -m py_compile akir_iao_enhancements.py ml/triage_predictor.py ml/train_triage_model.py)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/workspaces/Akir-IAO/data/pharmacie_rea.json'\\)\\); print\\('dilutions:', len\\(d.get\\('dilutions',[]\\)\\), '| compatibilités:', len\\(d.get\\('compatibilites',[]\\)\\)\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import sklearn, joblib; print\\('sklearn OK'\\); import pandas as pd; print\\('pandas OK'\\)\")",
+      "Bash(python ml/train_readmission_model.py)",
+      "Bash(python nettoyage_IA.py)",
+      "Bash(python ml/prepare_mimic_data.py)",
+      "Bash(python ml/train_mortality_model.py)",
+      "Bash(python ml/mortality_predictor.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501)",
+      "Bash(kill 1972)",
+      "Bash(python -m pytest tests/test_scores.py -v)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs -r kill)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} — App OK\\\\n\" http://localhost:8501)"
+    ]
+  }
+}

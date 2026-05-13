@@ -292,6 +292,9 @@ def _normalise_voice_payload(data: dict, text_anonymized: str, source: str, warn
     payload["allergies"] = str(data.get("allergies") or "").strip()
     payload["constantes"] = data.get("constantes") if isinstance(data.get("constantes"), dict) else {}
     payload["warnings"] = warnings
+    # Conserver les données sémantiques enrichies si présentes (semantic_engine)
+    if data.get("_semantic"):
+        payload["_semantic"] = data["_semantic"]
     return payload
 
 
@@ -308,6 +311,52 @@ def _merge_voice_payload(primary: dict, fallback: dict) -> dict:
     merged["constantes"] = {**(fallback.get("constantes") or {}), **(primary.get("constantes") or {})}
     merged["warnings"] = list(dict.fromkeys((primary.get("warnings") or []) + (fallback.get("warnings") or [])))
     return merged
+
+
+def _call_claude_voice_extract(text_anonymized: str) -> tuple[dict | None, str | None]:
+    """Extraction via Claude Sonnet + semantic_engine. Retourne (payload_dict | None, warning | None)."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None, None  # silencieux — GPT ou fallback prendra le relais
+    try:
+        from clinical.semantic_engine import analyser_dictee_dict
+        sem = analyser_dictee_dict(text_anonymized)
+    except Exception as exc:
+        _LOG.warning("Semantic engine Claude indisponible: %s", exc)
+        return None, "Mode local activé (Claude indisponible)."
+
+    ana = sem.get("anamnese") or {}
+    flags = sem.get("flags_systeme") or {}
+
+    # Remonter les flags BPCO / anticoagulant dans atcd
+    atcd_extra: list[str] = list(sem.get("atcd_matching") or [])
+    if flags.get("news2_target_o2") and "BPCO" not in atcd_extra:
+        atcd_extra.append("BPCO")
+    if flags.get("alerte_hemorragique") and "Anticoagulants / AOD" not in atcd_extra:
+        atcd_extra.append("Anticoagulants / AOD")
+
+    # Sévérité : essayer de parser un entier si la valeur est du type "EVA 7/10"
+    sev_raw = ana.get("pqrst_s") or ""
+    sev_match = re.search(r"(\d+)\s*/\s*10", str(sev_raw))
+    severite = int(sev_match.group(1)) if sev_match else None
+
+    return {
+        "age": None,
+        "age_mois": None,
+        "sexe": "",
+        "categorie": "",
+        "motif": ana.get("motif_reformule") or "",
+        "pqrst": {
+            "provoque_par": "",
+            "qualite": ana.get("pqrst_q") or "",
+            "region": ana.get("pqrst_r") or "",
+            "severite": severite,
+            "temps": ana.get("pqrst_t") or "",
+        },
+        "atcd": atcd_extra,
+        "allergies": "",
+        "constantes": {},
+        "_semantic": sem,  # données enrichies pour l'UI
+    }, None
 
 
 def _call_gpt55_voice_extract(text_anonymized: str) -> tuple[dict | None, str | None]:
@@ -406,10 +455,19 @@ def process_voice_triage(text_input: str, *, use_gpt: bool | None = None) -> dic
     warnings: list[str] = []
 
     model_data = None
+    # 1. Essayer Claude (priorité si ANTHROPIC_API_KEY est définie)
     if use_gpt is not False and text_anonymized:
-        model_data, warning = _call_gpt55_voice_extract(text_anonymized)
+        model_data, warning = _call_claude_voice_extract(text_anonymized)
         if warning:
             warnings.append(warning)
+
+    # 2. Essayer OpenAI en repli si Claude n'a rien retourné
+    if not model_data and use_gpt is not False and text_anonymized:
+        gpt_data, gpt_warning = _call_gpt55_voice_extract(text_anonymized)
+        if gpt_data:
+            model_data = gpt_data
+        if gpt_warning:
+            warnings.append(gpt_warning)
 
     if model_data:
         primary = _normalise_voice_payload(model_data, text_anonymized, "gpt-5.5", warnings)

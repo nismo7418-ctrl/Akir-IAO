@@ -1068,3 +1068,109 @@ def render_next_steps(ss, key: str) -> None:
     with st.expander("📋 Prochaines étapes recommandées", expanded=(niv in {"M", "1", "2"})):
         for step in steps:
             st.markdown(f"- {step}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 11. ML TRIAGE — Random Forest Classifier
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_ml_priority(data: dict) -> dict:
+    """
+    Wrapper public vers ml.triage_predictor.get_ml_priority.
+
+    Retourne un dict avec : priorite, label, couleur, probabilites,
+    confiance, alerte_p1, features_input, erreur.
+    Renvoie erreur non-None si le modèle n'est pas entraîné.
+    """
+    try:
+        from ml.triage_predictor import get_ml_priority as _predict
+        return _predict(data)
+    except Exception as exc:
+        return {
+            "priorite": None, "label": "—", "couleur": "#64748B",
+            "probabilites": {}, "confiance": 0.0,
+            "alerte_p1": False, "features_input": {}, "erreur": str(exc),
+        }
+
+
+def render_ml_priority(ss) -> None:
+    """
+    Affiche le widget de prédiction ML dans l'UI Streamlit.
+    À appeler depuis triage_tab après la saisie des constantes.
+
+    Lit FC, FR, PAS, SpO2, Temp, NEWS2 depuis ss.
+    AVPU est déduit du GCS : GCS 15 → A, 9-14 → V, 5-8 → P, 3-4 → U.
+    """
+    def _gcs_to_avpu(gcs: int) -> str:
+        if gcs >= 15:  return "A"
+        if gcs >= 9:   return "V"
+        if gcs >= 5:   return "P"
+        return "U"
+
+    data = {
+        "fc":    float(ss.get("v_fc")    or 0),
+        "fr":    float(ss.get("v_fr")    or 0),
+        "pas":   float(ss.get("v_pas")   or 0),
+        "spo2":  float(ss.get("v_spo2")  or 100),
+        "temp":  float(ss.get("v_temp")  or 37.0),
+        "news2": int(ss.get("v_news2")   or 0),
+        "avpu":  _gcs_to_avpu(int(ss.get("v_gcs") or 15)),
+        # Features v2 — passées si disponibles dans la session
+        "pad":               float(ss.get("v_pad") or 0) or None,
+        "nrs_pain":          float(ss.get("v_nrs_pain") or 0),
+        "arrival_ambulance": int(bool(ss.get("v_arrival_ambulance", False))),
+        "injury":            int(bool(ss.get("v_injury", False))),
+    }
+    # Supprimer pad=None pour déclencher l'estimation interne
+    if data["pad"] is None or data["pad"] == 0:
+        data.pop("pad", None)
+
+    res = get_ml_priority(data)
+
+    if res["erreur"]:
+        if "introuvable" in res["erreur"] or "train" in res["erreur"].lower():
+            st.caption("🤖 ML non disponible — lance `python ml/train_triage_model.py`")
+        else:
+            st.caption(f"🤖 ML indisponible : {res['erreur']}")
+        return
+
+    prio  = res["priorite"]
+    col   = res["couleur"]
+    conf  = res["confiance"]
+    probs = res["probabilites"]
+
+    # ── Bandeau principal ────────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='background:{col}20;border-left:4px solid {col};"
+        f"border-radius:0 8px 8px 0;padding:8px 14px;margin:4px 0;'>"
+        f"<span style='font-size:.78rem;color:{col};font-weight:700;'>🤖 ML </span>"
+        f"<span style='font-size:.82rem;font-weight:700;color:{col};'>{res['label']}</span>"
+        f"<span style='font-size:.7rem;color:#64748B;'> — confiance {conf:.0%}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Alerte P1 cachée ────────────────────────────────────────────────────
+    if res["alerte_p1"] and prio != 1:
+        p1_prob = probs.get(1, 0)
+        st.markdown(
+            f"<div class='smart-incoherence-alert'>"
+            f"⚠️ ML détecte un risque P1 ({p1_prob:.0%}) malgré le niveau assigné — réévaluer"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Barre de probabilités ────────────────────────────────────────────────
+    with st.expander("📊 Probabilités par niveau (ML)", expanded=False):
+        _pcols = st.columns(5)
+        _colors = {1: "#EF4444", 2: "#F97316", 3: "#EAB308", 4: "#22C55E", 5: "#64748B"}
+        for i, col_el in enumerate(_pcols, 1):
+            p = probs.get(i, 0.0)
+            c = _colors[i]
+            col_el.markdown(
+                f"<div style='text-align:center;'>"
+                f"<div style='font-size:.7rem;color:{c};font-weight:700;'>P{i}</div>"
+                f"<div style='font-size:.85rem;font-weight:800;color:{c};'>{p:.0%}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )

@@ -72,11 +72,27 @@ def test_news2_bpco_hyperoxie():
     score, alertes = calculer_news2(16, 98, True, 37.0, 120, 75, 15, True)
     assert any("hyperoxie" in a.lower() or "hypercapnie" in a.lower() for a in alertes)
 
-def test_news2_valeurs_invalides():
-    # TypeError géré : retourne score=0 avec message d'erreur
-    score, alertes = calculer_news2("x", None, False, "y", 120, 75, 15, False)
-    assert score == 0
-    assert any("Erreur" in a for a in alertes)
+def test_news2_valeurs_invalides_type():
+    """Sécurité patient : fail-loud sur types non numériques.
+    Un score=0 silencieux trierait à tort un patient critique en P5.
+    """
+    import pytest
+    with pytest.raises(ValueError, match="non numérique"):
+        calculer_news2("x", None, False, "y", 120, 75, 15, False)
+
+
+def test_news2_valeurs_hors_plage():
+    """Sécurité patient : fail-loud sur vitaux hors plages physiologiques."""
+    import pytest
+    # FC = 999 (impossible physiologiquement)
+    with pytest.raises(ValueError, match="FC hors plage"):
+        calculer_news2(16, 97, False, 37.0, 120, 999, 15, False)
+    # SpO2 = 150 % (impossible)
+    with pytest.raises(ValueError, match="SpO2 hors plage"):
+        calculer_news2(16, 150, False, 37.0, 120, 75, 15, False)
+    # GCS = 20 (max = 15)
+    with pytest.raises(ValueError, match="GCS hors plage"):
+        calculer_news2(16, 97, False, 37.0, 120, 75, 20, False)
 
 
 # ─── Shock Index si() ─────────────────────────────────────────────────────────

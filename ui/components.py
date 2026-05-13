@@ -49,16 +49,15 @@ def AL(msg: str, level: str = "info") -> None:
 def DISC() -> None:
     """Disclaimer juridique et mention auteur — obligatoire sur chaque onglet."""
     H("""<div class="disclaimer">
-      <div class="disclaimer-title">⚖️ Avertissement Légal — AKIR-IAO v19.3</div>
+      <div class="disclaimer-title">⚖️ Avertissement légal — AKIR-IAO v20</div>
       Cette application est un <strong style="color:#94A3B8;">outil d'aide à la décision clinique</strong>
       destiné aux professionnels de santé qualifiés. Elle ne se substitue en aucun cas
-      au jugement clinique du praticien ni aux protocoles institutionnels en vigueur.<br>
+      au jugement clinique du praticien, aux prescriptions médicales, ni aux protocoles institutionnels en vigueur.<br>
       Classification fondée sur la grille <strong style="color:#94A3B8;">FRENCH Triage V1.1 (SFMU 2018)</strong>
       et les protocoles <strong style="color:#94A3B8;">BCFI Belgique</strong>.
       Localisation : Urgences — Province de Hainaut, Wallonie, Belgique.<br>
-      <strong style="color:#64748B;">Aucune donnée nominative n'est stockée (RGPD).</strong><br>
-      <span style="color:#475569;">Développeur exclusif : Ismail Ibn-Daifa — v20 — 2025</span><br>
-      <em style="font-size:0.8em;">Pour assistance : ismail.ibn-daifa@outlook.com</em>
+      <strong style="color:#64748B;">Aucune donnée nominative n'est requise ou stockée dans le registre local (RGPD).</strong><br>
+      <span style="color:#475569;">Développeur : Ismail Ibn-Daifa — AKIR-IAO v20</span>
     </div>""")
 
 

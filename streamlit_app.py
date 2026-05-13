@@ -5,6 +5,8 @@
 import streamlit as st
 import uuid, io, csv as csv_mod, traceback
 from datetime import datetime
+import joblib
+import numpy as np
 
 st.set_page_config(
     page_title="AKIR-IAO v20",
@@ -94,9 +96,20 @@ from ui.triage_tab import (
 )
 from ui.pharmacie_tab import render as render_pharmacie
 from ui.scores_tab import render as render_scores
+from ui.readmission_tab import render as render_readmission
+from ui.mortality_tab import render as render_mortality
 
 MOTS_CAT       = FRENCH_MOTS_CAT
 MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
+
+# ── Chargement du modèle IA ───────────────────────────────────────────────────
+@st.cache_resource
+def load_triage_model():
+    try:
+        return joblib.load("triage_model.joblib")
+    except FileNotFoundError:
+        st.error("Modèle IA introuvable. Lancez d'abord `python train_IA.py`.")
+        return None
 
 # ── Session State ─────────────────────────────────────────────────────────────
 SS = st.session_state
@@ -133,18 +146,27 @@ def WK(base: str, scope: str | None = None) -> str:
     parts.append(str(base))
     return "__".join(p.replace(" ", "_") for p in parts if p)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=200)
 def _calc_news2(fr, spo2, o2, temp, pas, fc, gcs, bpco):
+    """Pure wrapper cacheable. Lève ValueError sur vitaux invalides."""
     n2, _ = calculer_news2(fr, spo2, o2, temp, pas, fc, gcs, bpco)
     return n2
 
-def _n2() -> int:
+def _n2() -> int | None:
+    """Retourne le NEWS2 courant ou None si les vitaux sont invalides.
+    L'erreur est affichée à l'écran — pas de fallback silencieux à 0.
+    """
     sync_clinical_context(SS)
-    n2 = _calc_news2(
-        SS.v_fr, SS.v_spo2, SS.o2,
-        SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
-    SS.v_news2 = n2
-    return n2
+    try:
+        n2 = _calc_news2(
+            SS.v_fr, SS.v_spo2, SS.o2,
+            SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
+        SS.v_news2 = n2
+        return n2
+    except ValueError as exc:
+        st.error(f"🚨 NEWS2 indisponible — {exc}")
+        SS.v_news2 = None
+        return None
 
 apply_new_triage_reset_to_session(SS, WK)
 apply_voice_triage_to_session(SS, WK)
@@ -379,6 +401,116 @@ def _sticky_bar():
     </div>""")
 
 
+def _render_presentation():
+    """Page de présentation intégrée à l'application."""
+    H("""<div style="background:linear-gradient(135deg,#0F766E,#2563EB);color:#fff;
+      border-radius:12px;padding:18px 20px;margin-bottom:14px;">
+      <div style="font-size:.72rem;opacity:.78;text-transform:uppercase;letter-spacing:.12em;">
+        Présentation GitHub intégrée
+      </div>
+      <div style="font-size:1.45rem;font-weight:900;margin-top:2px;">AKIR-IAO v20</div>
+      <div style="font-size:.88rem;opacity:.88;margin-top:5px;max-width:820px;">
+        Système expert Streamlit d'aide au triage infirmier d'accueil et d'orientation,
+        conçu pour structurer rapidement une situation d'urgence.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <span class="tag">FRENCH V1.1</span>
+        <span class="tag">NEWS2 / PEWS</span>
+        <span class="tag">BCFI Belgique</span>
+        <span class="tag">SBAR</span>
+        <span class="tag">RGPD</span>
+      </div>
+    </div>""")
+
+    _p1, _p2, _p3, _p4 = st.columns(4)
+    _p1.metric("Workflow", "7 onglets")
+    _p2.metric("Triage", "M à 5")
+    _p3.metric("Suivi", "SBAR")
+    _p4.metric("Données", "Anonymes")
+
+    st.markdown(
+        """
+AKIR-IAO regroupe le profil patient, les constantes vitales, le triage FRENCH,
+les scores d'urgence, la pharmacie de première ligne, les outils de réanimation,
+la réévaluation et la transmission structurée.
+        """
+    )
+
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        H('<div class="card-title">⚡ Triage IAO</div>')
+        st.markdown(
+            """
+- Classification FRENCH V1.1 avec justification clinique.
+- NEWS2, PEWS pédiatrique, Shock Index et critères vitaux.
+- Discriminants enrichis par motif.
+- Pré-remplissage possible par dictée clinique anonymisée.
+- Alertes de cohérence entre motif, constantes et niveau proposé.
+            """
+        )
+    with _c2:
+        H('<div class="card-title">💊 Pharmacie et sécurité</div>')
+        st.markdown(
+            """
+- Calculs de doses selon poids, âge et contexte.
+- Alertes pharmacovigilance : AOD, grossesse, IMAO, insuffisance rénale, allergies.
+- Protocoles IAO, perfusions IV, dilutions de réanimation.
+- Compatibilité IV en Y et rappel de la règle des 5B.
+            """
+        )
+
+    _c3, _c4 = st.columns(2)
+    with _c3:
+        H('<div class="card-title">🧬 Scores et outils</div>')
+        st.markdown(
+            """
+- GCS, qSOFA, HEART, TIMI, NIHSS, ABCD2, Wells, PERC, GRACE, CURB-65.
+- Toxicologie : PSS, toxidromes, paracétamol, tricycliques, TOXIC2.
+- RSI, Broselow, opioïdes, DFGe, natrémie corrigée, code stroke, défibrillation.
+            """
+        )
+    with _c4:
+        H('<div class="card-title">📋 Suivi et traçabilité</div>')
+        st.markdown(
+            """
+- Réévaluations avec delta NEWS2 et courbe des constantes.
+- Registre anonymisé limité en taille.
+- Export CSV de session.
+- Journal d'audit chaîné SHA-256.
+- Transmission SBAR générée et téléchargeable.
+            """
+        )
+
+    st.divider()
+    _c5, _c6 = st.columns(2)
+    with _c5:
+        H('<div class="card-title">📚 Références intégrées</div>')
+        st.markdown(
+            """
+- FRENCH Triage V1.1, SFMU 2018.
+- NEWS2, Royal College of Physicians.
+- Protocoles et références BCFI/AFMPS pour le contexte belge.
+- Scores validés cités dans les modules cliniques.
+- Compatibilités IV issues de tableaux HUG.
+            """
+        )
+    with _c6:
+        H('<div class="card-title">🤖 Module ML expérimental</div>')
+        st.markdown(
+            """
+Le dépôt contient un classifieur Random Forest de priorité de triage.
+Il fournit une aide secondaire à partir des constantes vitales, NEWS2 et AVPU.
+Il ne remplace pas le moteur clinique FRENCH.
+            """
+        )
+
+    st.warning(
+        "AKIR-IAO est un outil d'aide à la décision pour professionnels de santé. "
+        "Il ne remplace ni le jugement clinique, ni les protocoles institutionnels, "
+        "ni les prescriptions médicales."
+    )
+
+
 try:
     # ══ EN-TÊTE COMPACT ══════════════════════════════════════════════════════
     H("""<div class="app-hdr" style="padding:10px 16px;margin-bottom:8px;">
@@ -401,10 +533,14 @@ try:
     T = st.tabs([
         "👤 Patient",
         "⚡ Triage",
+        "🤖 IA Triage",
         "💊 Pharmacie",
         "🧬 Scores",
         "🛠️ Outils",
         "📋 Suivi",
+        "🔄 Réadmission J30",
+        "💀 Mortalité ICU",
+        "ℹ️ Présentation",
     ])
 
 
@@ -577,36 +713,123 @@ try:
             st.error(f"⚠️ Erreur onglet Triage — rechargez la page ({type(_e).__name__}: {_e})")
 
     # ════════════════════════════════════════════════════════════════════════════
-    # ONGLET 2 — PHARMACIE (filtrée par motif, doses calculées)
+    # ONGLET 2 — IA TRIAGE (modèle v2 : 13 features + enrichissement MIMIC-III)
     # ════════════════════════════════════════════════════════════════════════════
     with T[2]:
+        H('<div style="background:linear-gradient(135deg,#7C3AED,#A855F7);color:#fff;'
+          'border-radius:10px;padding:12px 16px;margin-bottom:12px;">'
+          '<div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">'
+          'Modèle v2 · KTAS + MIMIC-III</div>'
+          '<div style="font-size:1rem;font-weight:700;">Triage par IA</div></div>')
+
+        from ml.triage_predictor import get_ml_priority
+
+        # Pré-remplissage depuis les vitaux déjà saisis dans l'onglet Triage
+        _pf_fc   = int(SS.get("v_fc")   or 80)
+        _pf_pas  = int(SS.get("v_pas")  or 120)
+        _pf_spo2 = int(SS.get("v_spo2") or 98)
+        _pf_fr   = int(SS.get("v_fr")   or 16)
+        _pf_temp = float(SS.get("v_temp") or 37.0)
+        _pf_gcs  = int(SS.get("v_gcs")  or 15)
+        _pf_eva  = int(SS.get("eva")    or 0)
+
+        with st.form("ia_triage_form_v2"):
+            st.subheader("Saisie des constantes vitales")
+            col1, col2 = st.columns(2)
+            with col1:
+                _fc   = st.number_input("Fréquence cardiaque (bpm)",     20, 250, _pf_fc,   step=1)
+                _fr   = st.number_input("Fréquence respiratoire (/min)", 4,  60,  _pf_fr,   step=1)
+                _pas  = st.number_input("PAS (mmHg)",                    40, 300, _pf_pas,  step=1)
+                _pad  = st.number_input("PAD (mmHg)",                    20, 200, int(_pf_pas * 0.65), step=1)
+            with col2:
+                _spo2 = st.number_input("SpO2 (%)",                      50, 100, _pf_spo2, step=1)
+                _temp = st.number_input("Température (°C)",              30.0, 45.0, _pf_temp, step=0.1, format="%.1f")
+                _avpu_lbl = st.selectbox("AVPU", ["A — Alerte", "V — Réactif voix", "P — Réactif douleur", "U — Inconscient"])
+                _nrs  = st.number_input("Douleur NRS (0-10)",            0,  10,  _pf_eva,  step=1)
+
+            col3, col4 = st.columns(2)
+            with col3:
+                _amb  = st.checkbox("Arrivée en ambulance", value=False)
+            with col4:
+                _inj  = st.checkbox("Traumatisme / lésion",  value=False)
+
+            submitted = st.form_submit_button("🤖 Analyser le triage", type="primary", use_container_width=True)
+
+        if submitted:
+            _avpu = _avpu_lbl.split(" ", 1)[0]   # "A", "V", "P", "U"
+
+            res = get_ml_priority({
+                "fc":   _fc,   "fr":   _fr,   "pas":  _pas,  "pad":  _pad,
+                "spo2": _spo2, "temp": _temp, "avpu": _avpu, "nrs_pain": _nrs,
+                "arrival_ambulance": int(_amb),
+                "injury":            int(_inj),
+            })
+
+            if res["erreur"]:
+                AL(f"Erreur prédiction : {res['erreur']}", "danger")
+            else:
+                couleur = res["couleur"]
+                st.markdown(
+                    f'<div style="background:{couleur};color:white;padding:18px;'
+                    f'border-radius:10px;text-align:center;font-weight:900;'
+                    f'box-shadow:0 4px 12px rgba(0,0,0,.2);margin:8px 0;">'
+                    f'<div style="font-size:24px;">{res["label"]}</div>'
+                    f'<div style="font-size:14px;opacity:.85;margin-top:4px;">'
+                    f'Confiance : {res["confiance"]:.0%}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                if res["alerte_p1"]:
+                    AL("🚨 ALERTE P1 — Probabilité critique ≥ 25 % — Vérifier hémodynamique et appeler médecin", "danger")
+
+                # Probabilités par priorité
+                _proba_cols = st.columns(5)
+                for _i, _p in enumerate(sorted(res["probabilites"].keys())):
+                    _proba_cols[_i].metric(f"P{_p}", f"{res['probabilites'][_p]:.0%}")
+
+                # Features dérivées (shock index, MAP, PP)
+                _fi = res.get("features_input", {})
+                _si  = _fi.get("shock_index", 0)
+                _map = _fi.get("map_val", 0)
+                _pp  = _fi.get("pp", 0)
+                _si_color = "#EF4444" if _si > 1.0 else "#F59E0B" if _si > 0.8 else "#22C55E"
+                st.markdown(
+                    f'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+                    f'<div style="background:#1E293B;padding:8px 12px;border-radius:8px;flex:1;">'
+                    f'<span style="font-size:.7rem;color:#94A3B8;">Index de choc</span><br>'
+                    f'<span style="font-size:1.2rem;font-weight:700;color:{_si_color};">{_si:.2f}</span></div>'
+                    f'<div style="background:#1E293B;padding:8px 12px;border-radius:8px;flex:1;">'
+                    f'<span style="font-size:.7rem;color:#94A3B8;">PAM</span><br>'
+                    f'<span style="font-size:1.2rem;font-weight:700;color:#E2E8F0;">{_map:.0f} mmHg</span></div>'
+                    f'<div style="background:#1E293B;padding:8px 12px;border-radius:8px;flex:1;">'
+                    f'<span style="font-size:.7rem;color:#94A3B8;">Pression pulsée</span><br>'
+                    f'<span style="font-size:1.2rem;font-weight:700;color:#E2E8F0;">{_pp:.0f} mmHg</span></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # ONGLET 3 — PHARMACIE (filtrée par motif, doses calculées)
+    # ════════════════════════════════════════════════════════════════════════════
+    with T[3]:
         try:
             render_pharmacie()
         except Exception as _e:
             st.error(f"⚠️ Erreur onglet Pharmacie — rechargez la page ({type(_e).__name__}: {_e})")
 
     # ════════════════════════════════════════════════════════════════════════════
-    # ONGLET 3 — SCORES CLINIQUES
+    # ONGLET 4 — SCORES CLINIQUES
     # ════════════════════════════════════════════════════════════════════════════
-    with T[3]:
+    with T[4]:
         try:
             render_scores()
         except Exception as _e:
             st.error(f"⚠️ Erreur onglet Scores — rechargez la page ({type(_e).__name__}: {_e})")
 
-
-
     # ═══════════════════════════════════════════════════════════════════════════
-    # ONGLET 4 — SUIVI (Réévaluation + Historique + SBAR)
+    # ONGLET 5 — 🛠️ OUTILS CLINIQUES
     # ═══════════════════════════════════════════════════════════════════════════
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # ONGLET 4 — MUG / SMUR (Aide à la décision appel pré-hospitalier)
-    # ═══════════════════════════════════════════════════════════════════════════
-    with T[4]:
-        # ═══════════════════════════════════════════════════════════════════════
-        # ONGLET 4 — 🛠️ OUTILS CLINIQUES
-        # ═══════════════════════════════════════════════════════════════════════
+    with T[5]:
         H('''<div style="background:linear-gradient(135deg,#1E3A5F,#1D4ED8);color:#fff;
             border-radius:12px;padding:14px 18px;margin-bottom:12px;">
           <div style="display:flex;align-items:center;gap:12px;">
@@ -834,7 +1057,7 @@ try:
             AL(_gb["recommendation"], _gb["niveau"])
             st.caption(_gb["source"])
 
-    with T[5]:
+    with T[6]:
         _ST = st.tabs(["🔄 Réévaluation", "📜 Historique", "📡 SBAR"])
 
         with _ST[0]:
@@ -849,22 +1072,29 @@ try:
                 _re_spo2 = _rc2.number_input("SpO2", 50, 100, int(SS.v_spo2), key="re_sp")
                 _re_fr   = _rc3.number_input("FR",    5,  60, int(SS.v_fr),   key="re_fr")
                 _re_gcs  = _rc3.number_input("GCS",   3,  15, int(SS.v_gcs),  key="re_gcs")
-                _ren2, _ = calculer_news2(_re_fr, _re_spo2, o2, _re_temp, _re_pas,
-                                          _re_fc, _re_gcs, SS.v_bpco)
-                _reniv, _rejust, _ = french_triage(SS.motif, SS.det, _re_fc, _re_pas, _re_spo2,
-                                                    _re_fr, _re_gcs, _re_temp, age, _ren2, SS.gl)
-                _delta = _ren2 - SS.v_news2
-                st.metric("NEWS2 réévaluation", _ren2, delta=_delta, delta_color="inverse")
-                TRI_CARD_INLINE(_reniv, _rejust, _ren2)
-                if _delta >= 3:
-                    AL(f"🔴 Δ NEWS2 +{_delta} — Aggravation rapide — Appel médical IMMÉDIAT", "danger")
-                elif _delta > 0:
-                    AL(f"NEWS2 +{_delta} — Score en hausse — Surveillance renforcée", "warning")
-                elif _delta <= -2:
-                    AL(f"Δ NEWS2 {_delta} — Amélioration clinique confirmée", "success")
-                elif _delta < 0:
-                    AL(f"NEWS2 {_delta} — Score en légère baisse", "success")
-                SS.det = {**(SS.det or {}), "n2_precedent": SS.v_news2}
+                try:
+                    _ren2, _ = calculer_news2(_re_fr, _re_spo2, o2, _re_temp, _re_pas,
+                                              _re_fc, _re_gcs, SS.v_bpco)
+                except ValueError as _exc:
+                    st.error(f"🚨 NEWS2 réévaluation indisponible — {_exc}")
+                    _ren2 = None
+
+                if _ren2 is not None:
+                    _reniv, _rejust, _ = french_triage(SS.motif, SS.det, _re_fc, _re_pas, _re_spo2,
+                                                        _re_fr, _re_gcs, _re_temp, age, _ren2, SS.gl)
+                    _baseline = SS.v_news2 if SS.v_news2 is not None else _ren2
+                    _delta = _ren2 - _baseline
+                    st.metric("NEWS2 réévaluation", _ren2, delta=_delta, delta_color="inverse")
+                    TRI_CARD_INLINE(_reniv, _rejust, _ren2)
+                    if _delta >= 3:
+                        AL(f"🔴 Δ NEWS2 +{_delta} — Aggravation rapide — Appel médical IMMÉDIAT", "danger")
+                    elif _delta > 0:
+                        AL(f"NEWS2 +{_delta} — Score en hausse — Surveillance renforcée", "warning")
+                    elif _delta <= -2:
+                        AL(f"Δ NEWS2 {_delta} — Amélioration clinique confirmée", "success")
+                    elif _delta < 0:
+                        AL(f"NEWS2 {_delta} — Score en légère baisse", "success")
+                    SS.det = {**(SS.det or {}), "n2_precedent": SS.v_news2}
 
                 # Alertes temporelles
                 if SS.t_reev:
@@ -947,8 +1177,18 @@ try:
                     SS.op or "IAO", SS.gl)
                 SBAR_RENDER(_sbar, key_suffix="_suivi")
 
+    with T[7]:
+        render_readmission()
+
+    with T[8]:
+        render_mortality()
+
+    with T[9]:
+        _render_presentation()
+
     # ── Footer légal — affiché une seule fois ──────────────────────────────
     st.divider()
+    st.warning("🤖 **Avertissement IA** : Le modèle de triage par IA est expérimental et ne remplace pas le jugement clinique de l'infirmier IAO. Utilisez-le uniquement comme aide complémentaire.")
     DISC()
 
 except Exception as _e:

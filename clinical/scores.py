@@ -1316,3 +1316,288 @@ def terme_naegele(date_dernières_regles: str) -> Optional[str]:
                 f"SA actuelles : {sa_actuelles} SA")
     except Exception:
         return None
+
+
+# ── Score LACE — Risque de réadmission J30 ────────────────────────────────
+# Source : van Walraven C et al., CMAJ 2010;182(6):551-7
+# Validé cliniquement au Canada, Belgique, France, Suisse.
+# Seuil : LACE ≥ 10 = risque élevé de réadmission ou décès à J30.
+
+def _lace_length(duree_sejour_jours: int) -> int:
+    """Composante L du score LACE."""
+    if duree_sejour_jours <= 0:
+        return 0
+    elif duree_sejour_jours == 1:
+        return 1
+    elif duree_sejour_jours == 2:
+        return 2
+    elif duree_sejour_jours == 3:
+        return 3
+    elif duree_sejour_jours <= 6:
+        return 4
+    elif duree_sejour_jours <= 13:
+        return 5
+    else:
+        return 7
+
+
+def _lace_charlson(comorbidites: list[str]) -> int:
+    """
+    Index de Charlson simplifié pour le score LACE.
+    comorbidites : liste de clés parmi les pathologies reconnues.
+    """
+    poids = {
+        "infarctus":          1, "insuffisance_cardiaque": 1,
+        "avc":                1, "demence":                1,
+        "bpco":               1, "connectivite":           1,
+        "ulcere_peptique":    1, "diabete_sans_compl":     1,
+        "maladie_hepatique_legere": 1,
+        "hemiplegie":         2, "irc_moderee":            2,
+        "diabete_avec_compl": 2, "tumeur_solide":          2,
+        "leucemie":           2, "lymphome":               2,
+        "maladie_hepatique_severe": 3,
+        "tumeur_metastatique":6, "sida":                   6,
+    }
+    score = sum(poids.get(c, 0) for c in comorbidites)
+    if score == 0:   return 0
+    elif score <= 2: return 1
+    elif score <= 4: return 2
+    elif score <= 6: return 3
+    else:            return 5
+
+
+def calculer_lace(
+    duree_sejour_jours: int,
+    admission_urgence: bool,
+    comorbidites: list[str],
+    passages_urgences_6mois: int,
+) -> Dict:
+    """
+    Calcule le score LACE de risque de réadmission à 30 jours.
+
+    Args:
+        duree_sejour_jours      : durée du séjour hospitalier (jours)
+        admission_urgence       : True si admission via urgences
+        comorbidites            : liste de clés de comorbidités (voir _lace_charlson)
+        passages_urgences_6mois : nb de passages aux urgences dans les 6 derniers mois
+
+    Returns dict :
+        score_total  – int 0-19
+        composantes  – dict {L, A, C, E}
+        risque       – str "Faible" | "Modéré" | "Élevé"
+        couleur      – hex CSS
+        interpretation – str
+        recommandations – list[str]
+    """
+    L = _lace_length(duree_sejour_jours)
+    A = 3 if admission_urgence else 0
+    C = _lace_charlson(comorbidites)
+    E = min(passages_urgences_6mois, 4)
+
+    total = L + A + C + E
+
+    if total >= 10:
+        risque = "Élevé"
+        couleur = "#EF4444"
+        interpretation = (
+            f"LACE {total} — Risque élevé de réadmission ou décès à J30 "
+            f"(> 10 % selon van Walraven 2010)."
+        )
+        recommandations = [
+            "Planifier un suivi téléphonique à J2-J3 post-sortie",
+            "Consultation médecin traitant sous 7 jours",
+            "Évaluation par l'équipe de liaison hospitalière si disponible",
+            "Révision médicaments à la sortie (déprescription si ≥ 5 molécules)",
+            "Vérifier compréhension du patient sur signes d'alarme",
+        ]
+    elif total >= 5:
+        risque = "Modéré"
+        couleur = "#F97316"
+        interpretation = (
+            f"LACE {total} — Risque modéré. Surveillance recommandée."
+        )
+        recommandations = [
+            "Lettre de sortie détaillée transmise au médecin traitant",
+            "Consultation de suivi sous 14 jours",
+            "Éducation thérapeutique sur les signes d'alarme",
+        ]
+    else:
+        risque = "Faible"
+        couleur = "#22C55E"
+        interpretation = f"LACE {total} — Risque faible de réadmission à J30."
+        recommandations = [
+            "Suivi habituel par le médecin traitant",
+            "Instruction des signes d'alarme à surveiller",
+        ]
+
+    return {
+        "score_total":      total,
+        "composantes":      {"L": L, "A": A, "C": C, "E": E},
+        "risque":           risque,
+        "couleur":          couleur,
+        "interpretation":   interpretation,
+        "recommandations":  recommandations,
+    }
+
+
+# ── Probabilités empiriques LACE — van Walraven CMAJ 2010 ────────────────────
+# Cohorte de dérivation, Ontario, n = 4 812 séjours.
+# Modèle logistique calibré ; IC 95 % non publiés par score unitaire.
+
+_LACE_PROBA: dict[int, float] = {
+    0:  0.022, 1:  0.028, 2:  0.035, 3:  0.044,
+    4:  0.054, 5:  0.066, 6:  0.081, 7:  0.099,
+    8:  0.121, 9:  0.147, 10: 0.178, 11: 0.214,
+    12: 0.256, 13: 0.302, 14: 0.352, 15: 0.404,
+    16: 0.455, 17: 0.504, 18: 0.550, 19: 0.592,
+}
+
+
+def probabilite_readmission_lace(score: int) -> dict:
+    """
+    Probabilité empirique de réadmission J30 par score LACE.
+
+    Source : van Walraven C et al., CMAJ 2010;182(6):551-7
+
+    Returns :
+        probabilite  – float 0-1
+        pct          – str "17.8 %"
+        risque       – "Faible" | "Modéré" | "Élevé"
+        couleur      – hex CSS
+    """
+    s     = max(0, min(19, int(score)))
+    proba = _LACE_PROBA[s]
+    if s >= 10:
+        risque, couleur = "Élevé",  "#EF4444"
+    elif s >= 5:
+        risque, couleur = "Modéré", "#F97316"
+    else:
+        risque, couleur = "Faible", "#22C55E"
+    return {"probabilite": proba, "pct": f"{proba * 100:.1f} %",
+            "risque": risque, "couleur": couleur}
+
+
+# ── Mapping ICD-10 → Charlson (Quan H et al., Med Care 2005) ─────────────────
+# Préfixes normalisés (sans points, majuscules).
+
+_ICD10_CHARLSON: dict[str, list[str]] = {
+    "infarctus":                ["I21", "I22", "I252"],
+    "insuffisance_cardiaque":   ["I50"],
+    "avc":                      ["G45", "G46", "H340", "I60", "I61", "I62",
+                                  "I63", "I64", "I65", "I66", "I67", "I68", "I69"],
+    "demence":                  ["F00", "F01", "F02", "F03", "F051", "G30", "G311"],
+    "bpco":                     ["J40", "J41", "J42", "J43", "J44", "J45",
+                                  "J46", "J47", "J60", "J61", "J62", "J63",
+                                  "J64", "J65", "J66", "J67"],
+    "connectivite":             ["M05", "M06", "M315", "M32", "M33", "M34",
+                                  "M351", "M353", "M360"],
+    "ulcere_peptique":          ["K25", "K26", "K27", "K28"],
+    "diabete_sans_compl":       ["E100", "E101", "E106", "E108", "E109",
+                                  "E110", "E111", "E116", "E118", "E119",
+                                  "E120", "E121", "E126", "E128", "E129",
+                                  "E130", "E131", "E136", "E138", "E139",
+                                  "E140", "E141", "E146", "E148", "E149"],
+    "diabete_avec_compl":       ["E102", "E103", "E104", "E105", "E107",
+                                  "E112", "E113", "E114", "E115", "E117",
+                                  "E122", "E123", "E124", "E125", "E127",
+                                  "E132", "E133", "E134", "E135", "E137",
+                                  "E142", "E143", "E144", "E145", "E147"],
+    "hemiplegie":               ["G041", "G114", "G801", "G802", "G81",
+                                  "G82", "G830", "G831", "G832", "G833", "G839"],
+    "irc_moderee":              ["I120", "I131", "N032", "N033", "N034",
+                                  "N035", "N036", "N037", "N052", "N053",
+                                  "N054", "N055", "N056", "N057",
+                                  "N18", "N19", "N250", "Z490", "Z491",
+                                  "Z492", "Z940", "Z992"],
+    "maladie_hepatique_legere": ["B18", "K700", "K701", "K702", "K703",
+                                  "K709", "K713", "K714", "K715",
+                                  "K73", "K740", "K741", "K742", "K743",
+                                  "K744", "K745", "K746", "K760"],
+    "maladie_hepatique_severe": ["I850", "I859", "I864", "I982",
+                                  "K704", "K721", "K729",
+                                  "K765", "K766", "K767"],
+    "tumeur_solide":            ["C00", "C01", "C02", "C03", "C04", "C05",
+                                  "C06", "C07", "C08", "C09", "C10", "C11",
+                                  "C12", "C13", "C14", "C15", "C16", "C17",
+                                  "C18", "C19", "C20", "C21", "C22", "C23",
+                                  "C24", "C25", "C26", "C30", "C31", "C32",
+                                  "C33", "C34", "C37", "C38", "C39", "C40",
+                                  "C41", "C43", "C45", "C46", "C47", "C48",
+                                  "C49", "C50", "C51", "C52", "C53", "C54",
+                                  "C55", "C56", "C57", "C58", "C60", "C61",
+                                  "C62", "C63", "C64", "C65", "C66", "C67",
+                                  "C68", "C69", "C70", "C71", "C72", "C73",
+                                  "C74", "C75", "C76"],
+    "tumeur_metastatique":      ["C77", "C78", "C79", "C80"],
+    "leucemie":                 ["C91", "C92", "C93", "C94", "C95"],
+    "lymphome":                 ["C81", "C82", "C83", "C84", "C85", "C88", "C96"],
+    "sida":                     ["B20", "B21", "B22", "B24"],
+}
+
+# Nom lisible pour chaque clé Charlson (pour les messages de retour)
+_CHARLSON_LABELS: dict[str, str] = {
+    "infarctus":                "Infarctus du myocarde",
+    "insuffisance_cardiaque":   "Insuffisance cardiaque",
+    "avc":                      "AVC / AIT",
+    "demence":                  "Démence",
+    "bpco":                     "BPCO / Asthme sévère",
+    "connectivite":             "Connectivite / PR / LED",
+    "ulcere_peptique":          "Ulcère peptique",
+    "diabete_sans_compl":       "Diabète sans complication",
+    "diabete_avec_compl":       "Diabète avec complication",
+    "maladie_hepatique_legere": "Maladie hépatique légère",
+    "maladie_hepatique_severe": "Maladie hépatique sévère",
+    "irc_moderee":              "Insuffisance rénale chronique",
+    "hemiplegie":               "Hémiplégie",
+    "tumeur_solide":            "Tumeur solide sans métastase",
+    "tumeur_metastatique":      "Tumeur métastatique",
+    "leucemie":                 "Leucémie",
+    "lymphome":                 "Lymphome",
+    "sida":                     "SIDA",
+}
+
+
+def detecter_charlson_depuis_icd10(codes: list[str]) -> dict:
+    """
+    Détecte les comorbidités Charlson à partir d'une liste de codes ICD-10.
+
+    Algorithme : pour chaque code saisi, on normalise (majuscules, sans points)
+    puis on vérifie si le code commence par l'un des préfixes de la table,
+    ou si l'un des préfixes commence par le code (matching bidirectionnel pour
+    gérer les codes de haut niveau comme 'E11' → diabète).
+
+    Args:
+        codes : liste de chaînes (ex. ["E11.9", "I50", "N18.3"])
+
+    Returns dict :
+        comorbidites  – list[str]  clés Charlson détectées
+        labels        – list[str]  libellés lisibles
+        details       – list[str]  description des correspondances trouvées
+        non_matches   – list[str]  codes sans correspondance Charlson
+    """
+    normalized = [c.strip().upper().replace(".", "") for c in codes if c.strip()]
+
+    matched_keys: list[str] = []
+    details:      list[str] = []
+    matched_codes: set[str] = set()
+
+    for comorb_key, prefixes in _ICD10_CHARLSON.items():
+        for code in normalized:
+            for prefix in prefixes:
+                if code.startswith(prefix) or prefix.startswith(code):
+                    if comorb_key not in matched_keys:
+                        matched_keys.append(comorb_key)
+                    raw_code = codes[normalized.index(code)] if code in normalized else code
+                    detail   = f"{raw_code} → {_CHARLSON_LABELS[comorb_key]}"
+                    if detail not in details:
+                        details.append(detail)
+                    matched_codes.add(code)
+
+    non_matches = [codes[normalized.index(c)] for c in normalized if c not in matched_codes]
+
+    return {
+        "comorbidites": matched_keys,
+        "labels":       [_CHARLSON_LABELS[k] for k in matched_keys],
+        "details":      details,
+        "non_matches":  non_matches,
+    }

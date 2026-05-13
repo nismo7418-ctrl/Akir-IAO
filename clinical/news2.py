@@ -15,79 +15,108 @@ def calculer_news2(
     """
     Calcule le score NEWS2 et retourne (score, liste_avertissements).
     Prend en compte l'échelle SpO2-2 pour les patients BPCO.
+
+    Raises:
+        ValueError: si un paramètre n'est pas convertible en numérique ou
+                    se situe hors des plages physiologiques humaines.
+                    Sécurité patient : on échoue bruyamment plutôt que de
+                    retourner un score=0 trompeur sur des vitaux invalides.
     """
+    # Validation explicite — fail-loud sur entrées invalides
+    try:
+        fr   = float(fr)
+        spo2 = float(spo2)
+        temp = float(temp)
+        pas  = float(pas)
+        fc   = float(fc)
+        gcs  = int(gcs)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"NEWS2 — paramètre non numérique ({e}). "
+            "Vérifier la saisie des vitaux avant scoring."
+        ) from e
+
+    # Plages physiologiques humaines (au-delà = saisie incorrecte)
+    if not (0 < fr <= 80):
+        raise ValueError(f"NEWS2 — FR hors plage physiologique : {fr}/min")
+    if not (0 < spo2 <= 100):
+        raise ValueError(f"NEWS2 — SpO2 hors plage : {spo2}%")
+    if not (28.0 <= temp <= 45.0):
+        raise ValueError(f"NEWS2 — Température hors plage : {temp}°C")
+    if not (30 <= pas <= 300):
+        raise ValueError(f"NEWS2 — PAS hors plage : {pas} mmHg")
+    if not (20 <= fc <= 250):
+        raise ValueError(f"NEWS2 — FC hors plage : {fc} bpm")
+    if not (3 <= gcs <= 15):
+        raise ValueError(f"NEWS2 — GCS hors plage : {gcs}/15")
+
     alertes: List[str] = []
     s = 0
 
-    try:
-        # ── Fréquence respiratoire ────────────────────────────────────────
-        if fr <= 8:       s += 3
-        elif fr <= 11:    s += 1
-        elif fr <= 20:    s += 0
-        elif fr <= 24:    s += 2
-        else:             s += 3
+    # ── Fréquence respiratoire ────────────────────────────────────────────
+    if fr <= 8:       s += 3
+    elif fr <= 11:    s += 1
+    elif fr <= 20:    s += 0
+    elif fr <= 24:    s += 2
+    else:             s += 3
 
-        # ── SpO2 — échelle 1 (défaut) ou échelle 2 (BPCO) ────────────────
-        if not bpco:
-            # Échelle 1 — standard
-            if spo2 <= 91:   s += 3
-            elif spo2 <= 93: s += 2
-            elif spo2 <= 95: s += 1
-            else:            s += 0
-        else:
-            # Échelle 2 — BPCO (cible SpO2 88-92 %)
-            if spo2 <= 83:   s += 3
-            elif spo2 <= 85: s += 2
-            elif spo2 <= 87: s += 1
-            elif spo2 <= 92: s += 0
-            elif spo2 <= 94: s += 1
-            elif spo2 <= 96: s += 2
-            else:            s += 3  # hyperoxie BPCO = dangereux
+    # ── SpO2 — échelle 1 (défaut) ou échelle 2 (BPCO) ────────────────────
+    if not bpco:
+        if spo2 <= 91:   s += 3
+        elif spo2 <= 93: s += 2
+        elif spo2 <= 95: s += 1
+        else:            s += 0
+    else:
+        # Échelle 2 — BPCO (cible SpO2 88-92 %)
+        if spo2 <= 83:   s += 3
+        elif spo2 <= 85: s += 2
+        elif spo2 <= 87: s += 1
+        elif spo2 <= 92: s += 0
+        elif spo2 <= 94: s += 1
+        elif spo2 <= 96: s += 2
+        else:            s += 3  # hyperoxie BPCO = dangereux
 
-        # ── O2 supplémentaire ─────────────────────────────────────────────
-        if supp_o2:
-            s += 2
+    # ── O2 supplémentaire ─────────────────────────────────────────────────
+    if supp_o2:
+        s += 2
 
-        # ── Température ───────────────────────────────────────────────────
-        if temp <= 35.0:   s += 3
-        elif temp <= 36.0: s += 1
-        elif temp <= 38.0: s += 0
-        elif temp <= 39.0: s += 1
-        else:              s += 2
+    # ── Température ───────────────────────────────────────────────────────
+    if temp <= 35.0:   s += 3
+    elif temp <= 36.0: s += 1
+    elif temp <= 38.0: s += 0
+    elif temp <= 39.0: s += 1
+    else:              s += 2
 
-        # ── Pression artérielle systolique ────────────────────────────────
-        if pas <= 90:    s += 3
-        elif pas <= 100: s += 2
-        elif pas <= 110: s += 1
-        elif pas <= 219: s += 0
-        else:            s += 3
+    # ── Pression artérielle systolique ────────────────────────────────────
+    if pas <= 90:    s += 3
+    elif pas <= 100: s += 2
+    elif pas <= 110: s += 1
+    elif pas <= 219: s += 0
+    else:            s += 3
 
-        # ── Fréquence cardiaque ───────────────────────────────────────────
-        if fc <= 40:    s += 3
-        elif fc <= 50:  s += 1
-        elif fc <= 90:  s += 0
-        elif fc <= 110: s += 1
-        elif fc <= 130: s += 2
-        else:           s += 3
+    # ── Fréquence cardiaque ───────────────────────────────────────────────
+    if fc <= 40:    s += 3
+    elif fc <= 50:  s += 1
+    elif fc <= 90:  s += 0
+    elif fc <= 110: s += 1
+    elif fc <= 130: s += 2
+    else:           s += 3
 
-        # ── Conscience (GCS < 15 = altération) ───────────────────────────
-        if gcs < 15:
-            s += 3
+    # ── Conscience (GCS < 15 = altération) ───────────────────────────────
+    if gcs < 15:
+        s += 3
 
-        # ── Alertes cliniques selon niveau ────────────────────────────────
-        if s >= NEWS2_TRI_M:
-            alertes.append(f"NEWS2 {s} ≥ {NEWS2_TRI_M} — ENGAGEMENT VITAL — TRI M DÉCHOCAGE IMMÉDIAT")
-        elif s >= NEWS2_RISQUE_ELEVE:
-            alertes.append(f"NEWS2 {s} ≥ {NEWS2_RISQUE_ELEVE} — APPEL MÉDICAL IMMÉDIAT")
-        elif s >= NEWS2_RISQUE_MOD:
-            alertes.append(f"NEWS2 {s} ≥ {NEWS2_RISQUE_MOD} — Surveillance rapprochée")
+    # ── Alertes cliniques selon niveau ────────────────────────────────────
+    if s >= NEWS2_TRI_M:
+        alertes.append(f"NEWS2 {s} ≥ {NEWS2_TRI_M} — ENGAGEMENT VITAL — TRI M DÉCHOCAGE IMMÉDIAT")
+    elif s >= NEWS2_RISQUE_ELEVE:
+        alertes.append(f"NEWS2 {s} ≥ {NEWS2_RISQUE_ELEVE} — APPEL MÉDICAL IMMÉDIAT")
+    elif s >= NEWS2_RISQUE_MOD:
+        alertes.append(f"NEWS2 {s} ≥ {NEWS2_RISQUE_MOD} — Surveillance rapprochée")
 
-        # Alerte BPCO hyperoxie
-        if bpco and spo2 > 96 and supp_o2:
-            alertes.append("BPCO — SpO2 > 96 % sous O2 : risque d'hypercapnie — Titrer O2 cible 88-92 %")
-
-    except (TypeError, ValueError) as e:
-        alertes.append(f"Erreur calcul NEWS2 — Vérifier les constantes ({e})")
+    # Alerte BPCO hyperoxie
+    if bpco and spo2 > 96 and supp_o2:
+        alertes.append("BPCO — SpO2 > 96 % sous O2 : risque d'hypercapnie — Titrer O2 cible 88-92 %")
 
     return s, alertes
 

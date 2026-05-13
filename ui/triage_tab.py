@@ -58,10 +58,20 @@ _VOICE_TRT_WIDGETS = {
 }
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=200)
 def _calc_news2_triage(fr, spo2, o2, temp, pas, fc, gcs, bpco):
+    """Pure wrapper cacheable. Lève ValueError sur vitaux invalides."""
     n2, _ = calculer_news2(fr, spo2, o2, temp, pas, fc, gcs, bpco)
     return n2
+
+
+def _calc_news2_safe(fr, spo2, o2, temp, pas, fc, gcs, bpco):
+    """Variante UI : retourne None et affiche l'erreur si vitaux invalides."""
+    try:
+        return _calc_news2_triage(fr, spo2, o2, temp, pas, fc, gcs, bpco)
+    except ValueError as exc:
+        st.error(f"🚨 NEWS2 indisponible — {exc}")
+        return None
 
 
 def _wk(base: str, scope: str | None = None) -> str:
@@ -307,7 +317,27 @@ def render() -> None:
         for _vw in _last_voice.get("warnings") or []:
             AL(_vw, "info")
         with st.expander("Voir les données extraites de la dictée", expanded=False):
-            st.json({k: v for k, v in _last_voice.items() if k != "texte_anonymise"})
+            st.json({k: v for k, v in _last_voice.items() if k not in ("texte_anonymise", "_semantic")})
+            _sem = _last_voice.get("_semantic")
+            if _sem:
+                st.markdown("**Analyse sémantique Claude (v2.0)**")
+                _flags = _sem.get("flags_systeme") or {}
+                _cols = st.columns(3)
+                if _flags.get("news2_target_o2"):
+                    _cols[0].metric("Cible SpO2", _flags["news2_target_o2"])
+                if _flags.get("alerte_hemorragique"):
+                    _cols[1].warning("⚠️ Risque hémorragique")
+                if _flags.get("alerte_sepsis"):
+                    _cols[2].warning("⚠️ Sepsis à évaluer")
+                _atcd = _sem.get("atcd_matching") or []
+                _traitement = _sem.get("traitements_detectes") or []
+                if _atcd:
+                    st.caption("ATCD détectés : " + " · ".join(_atcd))
+                if _traitement:
+                    st.caption("Traitements : " + " · ".join(_traitement))
+                _ambigus = _sem.get("termes_ambigus") or []
+                if _ambigus:
+                    st.caption("Termes à clarifier : " + ", ".join(_ambigus))
 
     with st.expander("🎙️ Dictée Clinique — pré-remplissage sécurisé", expanded=False):
         st.caption(
@@ -339,9 +369,9 @@ def render() -> None:
             SS[WK("voice_text")] = ""
             st.rerun()
 
-    def _n2_compute() -> int:
+    def _n2_compute() -> int | None:
         sync_clinical_context(SS)
-        n2 = _calc_news2_triage(
+        n2 = _calc_news2_safe(
             SS.v_fr, SS.v_spo2, SS.o2,
             SS.v_temp, SS.v_pas, SS.v_fc, SS.v_gcs, SS.v_bpco)
         SS.v_news2 = n2
