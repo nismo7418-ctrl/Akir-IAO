@@ -79,8 +79,8 @@ def glossary_grid() -> None:
         "🩻 Traumatologie & imagerie": [
             "fast", "ottawa", "canadian_ct", "mosteller",
         ],
-        "🆘 Réadmission & comorbidités": [
-            "lace", "charlson", "cfs",
+        "🆘 Comorbidités & fragilité": [
+            "charlson", "cfs",
         ],
         "😣 Douleur & évaluation": [
             "eva", "pqrst", "borg", "algoplus",
@@ -106,8 +106,7 @@ def glossary_grid() -> None:
             "french", "sbar", "5b", "next_action", "audit_log",
         ],
         "🤖 Intelligence artificielle": [
-            "ia_triage", "ia_mortalite", "ia_readmission",
-            "mimic", "ktas", "sofa_proxy", "dfge",
+            "ia_triage", "ia_ecg", "ktas", "sofa_proxy", "dfge",
         ],
         "📚 Référentiels & standards": [
             "icd10",
@@ -158,6 +157,57 @@ def glossary_grid() -> None:
 
     if q_norm and not found_any:
         st.info(f"Aucun terme trouvé pour « {query} ». Essayez une autre recherche.")
+
+
+_PRIO_LABELS: dict[int, str] = {
+    1: "P1 — Déchocage immédiat",
+    2: "P2 — Très urgent",
+    3: "P3 — Urgent",
+    4: "P4 — Peu urgent",
+    5: "P5 — Non urgent",
+}
+
+
+def render_decision_analysis(res: dict) -> None:
+    """Affiche l'analyse pédagogique de la décision IA + garde-fous cliniques.
+
+    Met en regard la prédiction brute du modèle ML et la priorité finale
+    validée après application des règles cliniques absolues KTAS
+    (ACR, AVPU=U, hypoxie critique/sévère).
+
+    Attendu dans ``res`` (sortie de ``ml.triage_predictor.get_ml_priority``) :
+        priorite, priorite_ml, override, erreur
+    """
+    if not isinstance(res, dict) or res.get("erreur"):
+        return
+
+    prio_final = res.get("priorite")
+    prio_ml    = res.get("priorite_ml", prio_final)
+    override   = res.get("override")
+    if prio_final is None:
+        return
+
+    st.markdown("**🔬 Analyse de la décision**")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption("Prédiction initiale (IA)")
+        st.markdown(_PRIO_LABELS.get(prio_ml, f"P{prio_ml}"))
+    with col2:
+        st.caption("Garde-fou clinique")
+        if override:
+            st.warning(f"⚠️ {override}")
+        else:
+            st.success("Aucune règle de sécurité prioritaire.")
+
+    if override and prio_ml != prio_final:
+        st.info(
+            f"**Priorité finale validée :** {_PRIO_LABELS.get(prio_final, f'P{prio_final}')} "
+            f"— ajustée depuis P{prio_ml} par le garde-fou."
+        )
+    else:
+        st.success(
+            f"**Priorité finale validée :** {_PRIO_LABELS.get(prio_final, f'P{prio_final}')}"
+        )
 
 
 def info_chip(key: str) -> None:

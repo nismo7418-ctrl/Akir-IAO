@@ -273,6 +273,12 @@ def apply_new_triage_reset_to_session(SS=None, WK=None) -> bool:
         "pt_allait", "pt_chir", "pt_tabac", "pt_o2",
     }:
         SS[WK(suffix)] = False
+
+    for legacy_key in (
+        "readmission_risk", "lace_score", "lace_done",
+        "mortality_risk", "mortality_score", "mortality_done",
+    ):
+        SS.pop(legacy_key, None)
     return True
 
 

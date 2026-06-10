@@ -4,6 +4,13 @@ akir_audit.log
 akir_errors.log
 data/records/
 
+# Datasets bruts et artefacts générés (lourds, reproductibles depuis les scripts)
+data/physionet.org/
+data/ecg/images/
+data/ecg/*.png
+wget_ptbxl.log
+pip_torch.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

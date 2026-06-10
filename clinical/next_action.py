@@ -16,8 +16,7 @@ Arbre de décision priorisé (du plus critique au moins) :
   9. Délai triage dépassé         → escalade médicale
  10. Triage stable > 30 min       → réévaluation due
  11. EVA ≥ 7 sans antalgie        → initier antalgie
- 12. Triage P3-P5 + réadmission   → ré-examen médical
- 13. État OK                      → bilan / surveillance
+ 12. État OK                      → bilan / surveillance
 
 Chaque règle retourne un dict NextAction.
 """
@@ -232,21 +231,6 @@ def _eva_eleve_sans_antalgie(state: dict) -> Optional[NextAction]:
     return None
 
 
-def _readmission_elevee_sous_triage(state: dict) -> Optional[NextAction]:
-    """Risque réadmission élevé + triage non-urgent → discussion équipe."""
-    if state.get("readmission_risk") == "Élevé" and state.get("triage_level") in ("3B", "4", "5"):
-        return NextAction(
-            label="Réadmission probable malgré triage faible",
-            detail="Score LACE élevé + triage non-urgent : discussion médicale recommandée.",
-            urgency=URGENCY_MEDIUM,
-            target_tabs="Triage",
-            target_anchor="akir-anchor-triage",
-            source="LACE — Walraven 2010",
-            icon="🔁",
-        )
-    return None
-
-
 def _patient_stable(state: dict) -> NextAction:
     """Aucune règle déclenchée → patient stable."""
     if state.get("triage_validated"):
@@ -283,7 +267,6 @@ _RULES = [
     _delai_triage_depasse,
     _reevaluation_due,
     _eva_eleve_sans_antalgie,
-    _readmission_elevee_sous_triage,
 ]
 
 
@@ -314,7 +297,6 @@ def compute_next_action(state: dict) -> NextAction:
             trauma : bool
             avc_suspect : bool
             avc_delai_h : float | None
-            readmission_risk : "Faible"|"Modéré"|"Élevé"|None
 
     Returns:
         NextAction toujours non-None (fallback "stable" ou "compléter").

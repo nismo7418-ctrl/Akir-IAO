@@ -113,21 +113,6 @@ GLOSSARY: dict[str, dict[str, str]] = {
         "source": "Allgöwer & Burri, Dtsch Med Wochenschr 1967",
     },
 
-    "lace": {
-        "title": "Score LACE — Risque de réadmission J30",
-        "tldr": "Estime le risque qu'un patient revienne aux urgences dans les 30 jours.",
-        "body": (
-            "LACE combine 4 facteurs : "
-            "**L** = Length of stay (durée du séjour). "
-            "**A** = Acuity (admission via urgences ou non). "
-            "**C** = Comorbidities (index de Charlson). "
-            "**E** = Emergency visits (passages aux urgences dans les 6 mois). "
-            "Score 0-19. **≥ 10** : risque élevé de réadmission — discussion équipe, "
-            "follow-up rapproché, voire ré-examen médical avant sortie."
-        ),
-        "source": "van Walraven C et al., CMAJ 2010;182(6):551-7",
-    },
-
     "charlson": {
         "title": "Index de Charlson — Comorbidités",
         "tldr": "Liste pondérée des maladies chroniques pesant sur le pronostic vital.",
@@ -135,8 +120,7 @@ GLOSSARY: dict[str, dict[str, str]] = {
             "Chaque maladie chronique reçoit 1 à 6 points selon sa gravité : "
             "infarctus passé, insuffisance cardiaque, AVC, BPCO, diabète, cancer, démence... "
             "Plus le score est haut, plus la mortalité à 10 ans augmente. "
-            "Dans AKIR-IAO, Charlson alimente le LACE et permet aussi d'estimer le risque "
-            "de complications péri-opératoires."
+            "Permet d'estimer le risque de complications péri-opératoires."
         ),
         "source": "Charlson ME et al., J Chronic Dis 1987",
     },
@@ -264,57 +248,34 @@ GLOSSARY: dict[str, dict[str, str]] = {
     # ══════════════════════════════════════════════════════════════════════
 
     "ia_triage": {
-        "title": "IA Triage — Modèle de classification ML",
-        "tldr": "Random Forest qui prédit la priorité 1-5 à partir de 13 paramètres.",
+        "title": "IA Triage — Modèle KTAS",
+        "tldr": "Random Forest qui prédit le niveau KTAS (1-5) à partir de 13 paramètres cliniques.",
         "body": (
-            "Modèle entraîné sur **1 267 cas KTAS coréens** validés par des experts urgentistes, "
-            "augmenté de **70 séjours réels MIMIC-III** (ICU MIT) marqués P1/P2. "
+            "Modèle entraîné sur **1 267 cas KTAS coréens** validés par des experts urgentistes. "
             "Features utilisées : 6 vitaux + AVPU + douleur NRS + arrivée ambulance + traumatisme + 3 dérivés "
             "(shock index, pression moyenne, pression pulsée). "
-            "Le modèle renvoie une priorité **et** la probabilité de chaque classe. "
+            "Le modèle renvoie un niveau KTAS **et** la probabilité de chaque classe. "
             "**Alerte P1** déclenchée si probabilité P1 ≥ 25 %. "
             "F1 weighted = 0.68 — c'est un avis algorithmique, pas une décision."
         ),
-        "source": "AKIR-IAO v2 — entraîné mai 2026",
+        "source": "AKIR-IAO — modèle KTAS, entraîné mai 2026",
     },
 
-    "ia_mortalite": {
-        "title": "Mortalité ICU — Modèle MIMIC-III",
-        "tldr": "Ensemble ML qui estime le risque de décès hospitalier à partir des vitaux agrégés.",
+    "ia_ecg": {
+        "title": "IA ECG — Classifieur image 12 dérivations",
+        "tldr": "CNN qui classe une image ECG parmi 15 diagnostics urgents et propose une priorité KTAS.",
         "body": (
-            "Combine 3 modèles en soft-voting : GradientBoosting + RandomForest + Régression Logistique. "
-            "Entraîné sur **70 séjours ICU réels** de MIMIC-III (base publique du MIT, Beth Israel). "
-            "Utilise 21 features dérivées des vitaux (mean/min/max sur la durée du séjour) + démographie + type d'admission. "
-            "**AUC-ROC = 0.83** en cross-validation. "
-            "⚠️ Dataset petit : à utiliser comme aide à la discussion senior, pas comme décision finale."
+            "Architecture **EfficientNet-B2** fine-tunée sur images ECG (260×260 px). "
+            "Labels couverts : NORM · STEMI antérieur/inférieur/latéral · NSTEMI · "
+            "FA · flutter · TV · FV · BAV 1/2/3 · BBG · BBD · hyperkaliémie ECG. "
+            "Données d'entraînement : **PTB-XL** (waveforms PhysioNet plottées en images) "
+            "couvre 12 classes — VT/FV/HYPERK restent peu/pas représentés. "
+            "**Garde-fous cliniques** : tout signe critique (STEMI, TV, FV, BAV3, HYPERK) "
+            "avec ≥ 30 % de probabilité force la priorité à P1, même si ce n'est pas la "
+            "classe gagnante. Confiance ML < 40 % sur un diagnostic non normal → minimum P3. "
+            "**Outil d'aide à la décision** — confirmation cardiologue obligatoire."
         ),
-        "source": "MIMIC-III v1.4 — MIT Lab for Computational Physiology",
-    },
-
-    "ia_readmission": {
-        "title": "Réadmission J30 — Modèle RandomForest",
-        "tldr": "Prédit la probabilité qu'un patient revienne aux urgences dans 30 jours.",
-        "body": (
-            "Entraîné sur **30 000 patients** avec issue de réadmission connue (taux 12.2 %). "
-            "Combine 11 features : âge, sexe, tension, cholestérol, BMI, diabète, HTA, "
-            "nombre de médicaments, durée du séjour, destination de sortie. "
-            "Renvoie une probabilité 0-100 % + un niveau (Faible/Modéré/Élevé) + les 3 facteurs les plus influents. "
-            "Complémentaire du score LACE qui est, lui, basé sur des règles explicites."
-        ),
-        "source": "AKIR-IAO — Random Forest, balanced class weight",
-    },
-
-    "mimic": {
-        "title": "MIMIC-III — Base de données ICU publique",
-        "tldr": "60 millions de mesures cliniques anonymisées disponibles pour la recherche.",
-        "body": (
-            "MIMIC-III (Medical Information Mart for Intensive Care) est une base publiée par le MIT. "
-            "Elle contient **40 000 patients réels** passés en USI à Beth Israel Deaconess Medical Center (Boston) "
-            "entre 2001 et 2012, anonymisés selon HIPAA. "
-            "Standard de l'industrie pour entraîner et benchmarker des modèles ML cliniques. "
-            "Dans AKIR-IAO, on utilise un sous-ensemble (100 patients, 130 admissions, 758 k mesures vitaux)."
-        ),
-        "source": "Johnson AEW et al., Scientific Data 2016",
+        "source": "AKIR-IAO — modèle ECG image, PTB-XL Wagner et al. Sci Data 2020",
     },
 
     "ktas": {

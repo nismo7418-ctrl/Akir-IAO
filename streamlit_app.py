@@ -139,11 +139,9 @@ from ui.triage_tab import (
 )
 from ui.pharmacie_tab import render as render_pharmacie
 from ui.scores_tab import render as render_scores
-from ui.readmission_tab import render as render_readmission
-from ui.mortality_tab import render as render_mortality
 from clinical.next_action import compute_next_action, URGENCY_STYLE, URGENCY_DONE
 from clinical.prefill import (
-    build_triage_payload, build_mortality_payload, build_readmission_prefill,
+    build_triage_payload,
     gcs_to_avpu, motif_is_trauma,
 )
 from ui.explainer import explain, glossary_grid, info_chip
@@ -256,6 +254,12 @@ H("""<style>
 .badge-atcd  { color: #B45309; border-color: #FDE68A; background: #FFFBEB; }
 .badge-triage { font-size: .72rem; font-weight: 800; padding: 4px 12px; }
 .badge-chrono { color: var(--TM); font-family: 'IBM Plex Mono', monospace; font-size: .8rem; margin-left:auto; }
+.sticky-badge-btn {
+  font-family: 'IBM Plex Mono', monospace; cursor: pointer; line-height: 1.1;
+  transition: transform .08s, box-shadow .08s;
+}
+.sticky-badge-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+.sticky-badge-btn:active { transform: translateY(0); }
 
 /* ── Boutons d'action rapide des vitaux ─────────────────────────────── */
 .vbtn-grid {
@@ -939,7 +943,7 @@ def _sticky_bar():
       {"<span class='sticky-badge badge-atcd' style='background:#FEF2F2;color:#991B1B;border-color:#FCA5A5;'>🔴 " + alg + "</span>" if alg else ""}
       <span class="sticky-badge badge-triage {_niv_css}" style="font-size:.72rem;">{_niv_txt}</span>
       {"<span class='sticky-badge' style='color:#92400E;border-color:#F59E0B;background:#FFFBEB;'>⚠️ vitaux/tri</span>" if _smart.get("triage_incoherence") else ""}
-      {"<span class='sticky-badge' style='color:#1D4ED8;border-color:#93C5FD;background:#EFF6FF;'>ECG</span>" if _smart.get("ecg_hint") else ""}
+      {"<button class='sticky-badge sticky-badge-btn' data-tabs='IA ECG' data-anchor='akir-anchor-ecg' style='color:#1D4ED8;border-color:#93C5FD;background:#EFF6FF;cursor:pointer;' title='Ouvrir l’onglet IA ECG'>📈 ECG</button>" if _smart.get("ecg_hint") else ""}
       {"<span class='sticky-badge' style='color:#3730A3;border-color:#A5B4FC;background:#EEF2FF;'>NIHSS</span>" if _smart.get("focus_score") == "nihss" else ""}
       {("<span class='sticky-badge' style='color:#38BDF8;border-color:#7DD3FC;background:#EFF6FF;font-size:.72rem;'>" + str(len(SS.reevs)) + " réév.</span>") if SS.reevs else ""}
       {"<span class='sticky-badge' style='color:#EF4444;border-color:#FCA5A5;background:#FEF2F2;'>N2=" + str(SS.v_news2) + "</span>" if (SS.v_news2 is not None and SS.v_news2 >= 5) else ""}
@@ -1164,7 +1168,6 @@ try:
             "trauma":             _trauma,
             "avc_suspect":        _avc_suspect,
             "avc_delai_h":        _avc_delai_h,
-            "readmission_risk":   SS.get("readmission_risk"),
         }
 
     _na_state  = _build_next_action_state()
@@ -1198,8 +1201,7 @@ try:
         "🧬 Scores",
         "🛠️ Outils",
         "📋 Suivi",
-        "🔄 Réadmission J30",
-        "💀 Mortalité ICU",
+        "📈 IA ECG",
         "ℹ️ Présentation",
     ])
 
@@ -1373,13 +1375,13 @@ try:
             st.error(f"⚠️ Erreur onglet Triage — rechargez la page ({type(_e).__name__}: {_e})")
 
     # ════════════════════════════════════════════════════════════════════════════
-    # ONGLET 2 — IA TRIAGE (modèle v2 : 13 features + enrichissement MIMIC-III)
+    # ONGLET 2 — IA TRIAGE (modèle KTAS — 13 features cliniques)
     # ════════════════════════════════════════════════════════════════════════════
     with T[2]:
         H('<div style="background:linear-gradient(135deg,#7C3AED,#A855F7);color:#fff;'
           'border-radius:10px;padding:12px 16px;margin-bottom:12px;">'
           '<div style="font-size:.72rem;opacity:.75;text-transform:uppercase;letter-spacing:.1em;">'
-          'Modèle v2 · KTAS + MIMIC-III</div>'
+          'Système expert · KTAS niveaux 1-5</div>'
           '<div style="font-size:1rem;font-weight:700;">Triage par IA</div></div>')
 
         from ml.triage_predictor import get_ml_priority
@@ -1443,6 +1445,10 @@ try:
                     unsafe_allow_html=True,
                 )
 
+                if res.get("override"):
+                    AL(f"⚠️ Ajustement de sécurité appliqué : {res['override']}", "danger")
+                    AL(f"Note : le modèle ML prédisait initialement P{res.get('priorite_ml', '?')}.", "info")
+
                 if res["alerte_p1"]:
                     AL("🚨 ALERTE P1 — Probabilité critique ≥ 25 % — Vérifier hémodynamique et appeler médecin", "danger")
 
@@ -1471,6 +1477,10 @@ try:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+
+                st.divider()
+                from ui.explainer import render_decision_analysis
+                render_decision_analysis(res)
 
     # ════════════════════════════════════════════════════════════════════════════
     # ONGLET 3 — PHARMACIE (filtrée par motif, doses calculées)
@@ -1844,13 +1854,21 @@ try:
                     SS.op or "IAO", SS.gl)
                 SBAR_RENDER(_sbar, key_suffix="_suivi")
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # ONGLET 7 — IA ECG (classifieur image ECG 12 dérivations)
+    # ════════════════════════════════════════════════════════════════════════════
     with T[7]:
-        render_readmission()
+        H('<div id="akir-anchor-ecg" style="scroll-margin-top:80px;"></div>')
+        try:
+            from ui.ecg_tab import render as render_ecg
+            render_ecg()
+        except Exception as _e:
+            st.error(f"⚠️ Erreur onglet IA ECG — rechargez la page ({type(_e).__name__}: {_e})")
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # ONGLET 8 — PRÉSENTATION & GLOSSAIRE
+    # ════════════════════════════════════════════════════════════════════════════
     with T[8]:
-        render_mortality()
-
-    with T[9]:
         _intro_sub, _glossary_sub = st.tabs(["📖 Présentation", "❓ Glossaire pédagogique"])
         with _intro_sub:
             _render_presentation()

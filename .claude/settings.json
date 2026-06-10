@@ -41,7 +41,14 @@
       "Bash(python -m pytest tests/test_next_action.py -v)",
       "Bash(python -m pytest tests/ -v)",
       "Bash(python -m pytest tests/test_prefill.py -v)",
-      "Bash(python -m pytest tests/)"
+      "Bash(python -m pytest tests/)",
+      "Bash(python -c \"from ui.explainer import render_decision_analysis; print\\('Import OK:', render_decision_analysis.__doc__.splitlines\\(\\)[0]\\)\")",
+      "Bash(python -c \"import torch; print\\('torch', torch.__version__\\)\")",
+      "Bash(python -c \"import timm; print\\('timm', timm.__version__\\)\")",
+      "Bash(python -c \"from PIL import Image; print\\('PIL ok'\\)\")",
+      "Bash(wget --version)",
+      "Bash(wget -r -N -c -np -q --show-progress https://physionet.org/files/ptb-xl/1.0.3/)",
+      "Bash(pkill -f \"wget.*physionet\")"
     ]
   }
 }

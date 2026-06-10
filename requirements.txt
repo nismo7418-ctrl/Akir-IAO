@@ -6,3 +6,10 @@ anthropic>=0.49.0
 scikit-learn>=1.4.0
 joblib>=1.3.0
 numpy>=1.26.0
+
+# Module IA ECG (optionnel — lazy import, l'app fonctionne sans)
+# Décommenter pour activer l'inférence ECG image :
+# torch>=2.1.0
+# timm>=0.9.0
+# pillow>=10.0.0
+# torchvision>=0.16.0  # uniquement pour ml/train_ecg_model.py

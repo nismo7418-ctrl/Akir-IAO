@@ -128,24 +128,31 @@ def get_ml_priority(data: dict) -> dict:
             "Ré-entraîne le modèle : python ml/train_triage_model.py"
         )
 
-    prio_pred = int(clf.predict(row)[0])
-    proba     = clf.predict_proba(row)[0]
+    prio_ml = int(clf.predict(row)[0])
+    proba   = clf.predict_proba(row)[0]
 
     classes  = list(clf.classes_)
     prob_map = {int(c): float(p) for c, p in zip(classes, proba)}
 
+    # ── Garde-fous cliniques (overrides absolus KTAS) ─────────────────────────
+    prio_pred, override_rule = _apply_clinical_overrides(
+        prio_ml, fc=fc, pas=pas, spo2=spo2, avpu=avpu,
+    )
+
     confiance = prob_map.get(prio_pred, 0.0)
-    alerte_p1 = prob_map.get(1, 0.0) >= 0.25
+    alerte_p1 = prio_pred == 1 or prob_map.get(1, 0.0) >= 0.25
 
     label, couleur = _PRIORITY_LABELS.get(prio_pred, ("Inconnu", "#64748B"))
 
     return {
-        "priorite":     prio_pred,
-        "label":        label,
-        "couleur":      couleur,
-        "probabilites": prob_map,
-        "confiance":    confiance,
-        "alerte_p1":    alerte_p1,
+        "priorite":      prio_pred,
+        "priorite_ml":   prio_ml,
+        "label":         label,
+        "couleur":       couleur,
+        "probabilites":  prob_map,
+        "confiance":     confiance,
+        "alerte_p1":     alerte_p1,
+        "override":      override_rule,
         "features_input": {
             "fc": fc, "fr": fr, "pas": pas, "pad": pad,
             "spo2": spo2, "temp": temp, "avpu": avpu,
@@ -154,6 +161,35 @@ def get_ml_priority(data: dict) -> dict:
         },
         "erreur": None,
     }
+
+
+# ── Garde-fous cliniques absolus ─────────────────────────────────────────────
+
+def _apply_clinical_overrides(
+    prio_ml: int, *, fc: float, pas: float, spo2: float, avpu: int,
+) -> tuple[int, str | None]:
+    """
+    Surcharge la prédiction ML par des règles cliniques absolues KTAS.
+    Retourne (priorité_finale, libellé_règle | None si aucune règle déclenchée).
+    L'ordre est important : on évalue de la règle la plus critique à la moins.
+    """
+    # Règle 1 — Arrêt cardio-respiratoire : FC et PAS à 0 → P1 immédiat
+    if fc == 0 and pas == 0:
+        return 1, "ACR — FC et PAS nuls"
+
+    # Règle 2 — Altération majeure de conscience (AVPU = U) → P1 immédiat
+    if avpu >= 3:
+        return 1, "AVPU = U (inconscient)"
+
+    # Règle 3 — Hypoxie critique SpO2 < 75 % → P1 (au-delà de la simple sévérité)
+    if spo2 < 75:
+        return 1, "Hypoxie critique (SpO₂ < 75 %)"
+
+    # Règle 4 — Hypoxie sévère SpO2 < 85 % → minimum P2
+    if spo2 < 85 and prio_ml >= 3:
+        return 2, "Hypoxie sévère (SpO₂ < 85 %)"
+
+    return prio_ml, None
 
 
 def _error_result(msg: str) -> dict:

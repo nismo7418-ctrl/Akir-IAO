@@ -1,6 +1,7 @@
 """
-ml/train_triage_model.py — Classifieur de triage AKIR-IAO v2
+ml/train_triage_model.py — Classifieur de triage KTAS AKIR-IAO
 Données  : data/triage_enriched.csv  (KTAS réel, 1267 patients)
+           + data/synthetic_medical_triage.csv (18 000 cas synthétiques, mappés KTAS)
            + augmentation synthétique P1/P5 pour rééquilibrage
 Algo     : Random Forest (class_weight='balanced')
 Features : 13 — vitales brutes + contexte + features dérivées
@@ -22,8 +23,12 @@ from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 
 DATA_PATH          = Path("data/triage_enriched.csv")
-MIMIC_ENRICH_PATH  = Path("data/mimic_triage_enrichment.csv")
+SYNTH_MED_PATH     = Path("data/synthetic_medical_triage.csv")
 OUTPUT_PATH        = Path("ml/triage_rf_model.joblib")
+
+# triage_level (0-3) du dataset synthétique → priorité KTAS (1-5)
+# 0 = non urgent → P4 ; 3 = critique → P1 ; P5 reste géré par l'augmentation _synth_cohort
+_SYNTH_MED_PRIO_MAP = {0: 4, 1: 3, 2: 2, 3: 1}
 
 FEATURES = [
     "fc", "fr", "pas", "pad", "spo2", "temp",
@@ -104,57 +109,129 @@ def load_real_data(path: Path = DATA_PATH) -> pd.DataFrame | None:
     return df[FEATURES + [TARGET]].dropna()
 
 
-def load_mimic_enrichment(path: Path = MIMIC_ENRICH_PATH) -> pd.DataFrame | None:
+# ── Chargement dataset synthétique médical (schéma alternatif) ───────────────
+
+def load_synthetic_medical(path: Path = SYNTH_MED_PATH) -> pd.DataFrame | None:
     """
-    Charge les vitaux ICU MIMIC-III comme exemples P1/P2 réels.
-    Filtre les colonnes disponibles pour correspondre à FEATURES.
+    Convertit data/synthetic_medical_triage.csv (10 colonnes, triage_level 0-3)
+    vers le schéma KTAS 13-features attendu par le modèle.
+
+    Mapping des colonnes :
+        heart_rate                → fc
+        systolic_blood_pressure   → pas
+        oxygen_saturation         → spo2
+        body_temperature          → temp
+        pain_level                → nrs_pain
+        arrival_mode == ambulance → arrival_ambulance (binaire)
+        triage_level (0-3)        → priorite (4,3,2,1) — voir _SYNTH_MED_PRIO_MAP
+
+    Imputation conditionnelle au triage_level (les colonnes absentes
+    du dataset source sont générées par échantillonnage cohérent
+    avec la sévérité, plutôt qu'avec des valeurs uniformes).
     """
     if not path.exists():
         return None
+
     df = pd.read_csv(path)
-    available = [c for c in FEATURES + [TARGET] if c in df.columns]
-    missing   = [c for c in FEATURES + [TARGET] if c not in df.columns]
+    required = {
+        "heart_rate", "systolic_blood_pressure", "oxygen_saturation",
+        "body_temperature", "pain_level", "arrival_mode", "triage_level",
+    }
+    missing = required - set(df.columns)
     if missing:
-        print(f"  MIMIC enrichment — colonnes absentes (imputées): {missing}")
-    df_sub = df[available].copy()
-    # Imputer les colonnes manquantes par des valeurs neutres
-    for col in FEATURES:
-        if col not in df_sub.columns:
-            df_sub[col] = 0.0
-    df_sub = df_sub[FEATURES + [TARGET]].dropna(subset=["fc", "fr", "pas", "spo2", TARGET])
-    print(f"  MIMIC enrichment : {len(df_sub)} séjours ICU réels "
-          f"(P1={( df_sub[TARGET]==1).sum()}, P2={(df_sub[TARGET]==2).sum()})")
-    return df_sub
+        print(f"⚠️  Colonnes manquantes dans {path}: {sorted(missing)}")
+        return None
+
+    df = df.dropna(subset=list(required))
+    n = len(df)
+    priorite = df["triage_level"].map(_SYNTH_MED_PRIO_MAP).astype(int).to_numpy()
+
+    fc   = df["heart_rate"].astype(float).to_numpy()
+    pas  = df["systolic_blood_pressure"].astype(float).to_numpy()
+    spo2 = df["oxygen_saturation"].astype(float).to_numpy()
+    temp = df["body_temperature"].astype(float).to_numpy()
+    nrs  = df["pain_level"].astype(float).clip(0, 10).to_numpy()
+    amb  = (df["arrival_mode"].astype(str).str.lower() == "ambulance").astype(int).to_numpy()
+
+    rng = np.random.default_rng(42)
+
+    # Fréquence respiratoire — corrélée à la sévérité
+    fr_mu = {4: 14.0, 3: 18.0, 2: 23.0, 1: 28.0}
+    fr_sd = {4: 2.0,  3: 3.0,  2: 4.0,  1: 6.0}
+    fr = np.clip(
+        np.array([rng.normal(fr_mu[p], fr_sd[p]) for p in priorite]),
+        6, 50,
+    )
+
+    # PAD ≈ PAS × 0.65 avec léger bruit clinique
+    pad = np.clip(pas * rng.normal(0.65, 0.04, n), 30, 140)
+
+    # AVPU : probabilités d'altération conditionnées à la priorité
+    avpu_probs = {
+        4: [0.97, 0.02, 0.01, 0.00],
+        3: [0.92, 0.05, 0.02, 0.01],
+        2: [0.75, 0.15, 0.07, 0.03],
+        1: [0.40, 0.25, 0.20, 0.15],
+    }
+    avpu = np.array([
+        rng.choice([0, 1, 2, 3], p=avpu_probs[p]) for p in priorite
+    ])
+
+    # Injury : plus probable si ambulance et priorité haute
+    p_injury = np.where(
+        amb == 1,
+        np.where(priorite <= 2, 0.30, 0.10),
+        np.where(priorite <= 2, 0.15, 0.05),
+    )
+    injury = rng.binomial(1, p_injury)
+
+    # Features dérivées (cohérentes avec triage_predictor.py)
+    si = fc / np.where(pas > 0, pas, 1.0)
+    mv = (pas + 2 * pad) / 3
+    pp = pas - pad
+
+    return pd.DataFrame({
+        "fc": fc, "fr": fr, "pas": pas, "pad": pad,
+        "spo2": spo2, "temp": temp,
+        "avpu_enc": avpu, "nrs_pain": nrs,
+        "arrival_ambulance": amb, "injury": injury,
+        "shock_index": si, "map_val": mv, "pp": pp,
+        TARGET: priorite,
+    })
 
 
 # ── Pipeline d'entraînement ───────────────────────────────────────────────────
 
 def train(output_path: Path = OUTPUT_PATH) -> RandomForestClassifier:
-    real_df = load_real_data()
+    real_df  = load_real_data()
+    synth_md = load_synthetic_medical()
 
     if real_df is not None:
         print(f"Données KTAS réelles chargées : {len(real_df)} patients")
         dist = real_df[TARGET].value_counts().sort_index().to_dict()
         print(f"  Distribution KTAS : {dist}")
 
-        # Enrichissement MIMIC-III (vitaux ICU réels → P1/P2)
-        mimic_df = load_mimic_enrichment()
+        sources = [real_df]
+        labels  = ["KTAS réel"]
+
+        if synth_md is not None:
+            dist_md = synth_md[TARGET].value_counts().sort_index().to_dict()
+            print(f"Dataset synthétique médical chargé : {len(synth_md)} patients")
+            print(f"  Distribution (après mapping KTAS) : {dist_md}")
+            sources.append(synth_md)
+            labels.append("synthetic_medical_triage")
 
         # Augmentation synthétique P1/P5 pour rééquilibrer les extrêmes
         synth_p1 = _synth_cohort(1, 200)
         synth_p5 = _synth_cohort(5, 200)
+        sources += [synth_p1, synth_p5]
+        labels  += ["augmentation P1", "augmentation P5"]
 
-        parts = [real_df, synth_p1, synth_p5]
-        if mimic_df is not None:
-            parts.append(mimic_df)
-
-        df = pd.concat(parts, ignore_index=True)
-        n_mimic = len(mimic_df) if mimic_df is not None else 0
-        print(f"  Après augmentation (synth P1/P5 + {n_mimic} MIMIC) : {len(df)} patients")
-        source = f"KTAS réel + MIMIC-III + augmentation synthétique"
+        df = pd.concat(sources, ignore_index=True)
+        print(f"  Cohorte totale après fusion : {len(df)} patients")
+        source = " + ".join(labels)
     else:
         print("⚠️  triage_enriched.csv introuvable — génération 100 % synthétique")
-        print("   Lance d'abord : python nettoyage_IA.py")
         # Fallback : jeu entièrement synthétique (comportement v1)
         from ml._synth_fallback import generate_training_data_v2
         df = generate_training_data_v2()

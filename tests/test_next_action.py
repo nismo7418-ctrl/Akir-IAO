@@ -27,7 +27,6 @@ def _base_state(**overrides) -> dict:
         "sbar_generated": False, "antalgie_initiee": False,
         "aod_or_avk": False, "trauma": False,
         "avc_suspect": False, "avc_delai_h": None,
-        "readmission_risk": None,
     }
     state.update(overrides)
     return state
@@ -142,17 +141,7 @@ def test_eva_eleve_sans_antalgie():
     assert "Antalgie" in action.label
 
 
-# ─── 12. Réadmission élevée sous-triée ───────────────────────────────────────
-def test_readmission_elevee_triage_4():
-    action = compute_next_action(_base_state(
-        triage_validated=True, triage_level="4",
-        readmission_risk="Élevé",
-    ))
-    assert action.urgency == URGENCY_MEDIUM
-    assert "Réadmission" in action.label
-
-
-# ─── 13. État stable ─────────────────────────────────────────────────────────
+# ─── 12. État stable ─────────────────────────────────────────────────────────
 def test_patient_stable_apres_triage():
     action = compute_next_action(_base_state(
         triage_validated=True, triage_level="4",
