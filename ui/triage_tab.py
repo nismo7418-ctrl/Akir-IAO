@@ -783,6 +783,36 @@ def render() -> None:
               <div style="font-size:.72rem;color:#94A3B8;margin-top:2px;">{SS.just}</div>
             </div>''')
 
+        # ── Injection IA ECG (onglet 7) — majoration UPGRADE-ONLY ─────────────
+        # L'ECG ne peut que MAJORER le niveau (jamais le réduire) : un tracé
+        # rassurant ne doit pas sous-trier un patient grave sur d'autres critères.
+        _ecg_prio = SS.get("ecg_priorite")
+        if _ecg_prio:
+            _ECG_TO_NIV = {1: "1", 2: "2", 3: "3A", 4: "4", 5: "5"}
+            _NIV_ORDER  = {"M": 0, "1": 1, "2": 2, "3": 3, "3A": 3, "3B": 4, "4": 5, "5": 6}
+            _ecg_niv = _ECG_TO_NIV.get(int(_ecg_prio))
+            _majore  = _ecg_niv and _NIV_ORDER.get(_ecg_niv, 9) < _NIV_ORDER.get(SS.niv, 9)
+            _old_niv = SS.niv
+            if _majore:
+                SS.niv = _ecg_niv
+            _ovr = SS.get("ecg_override")
+            _txt = (f"Niveau majoré <strong>{_old_niv} → {_ecg_niv}</strong>"
+                    if _majore else
+                    f"Suggestion ECG <strong>P{_ecg_prio}</strong> ≤ niveau courant — pas de majoration")
+            H(f'''<div style="background:#7C2D1220;border-left:4px solid #DC2626;
+                border-radius:0 8px 8px 0;padding:10px 14px;margin:6px 0;">
+              <div style="font-size:.72rem;font-weight:700;color:#F87171;">
+                📈 IA ECG injectée — {_txt}
+              </div>
+              <div style="font-size:.72rem;color:#94A3B8;margin-top:2px;">
+                {_ovr or "Outil expérimental — confirmation cardiologue obligatoire."}
+              </div>
+            </div>''')
+            if st.button("✖ Ignorer la suggestion ECG", key="tr_clear_ecg"):
+                SS.pop("ecg_priorite", None)
+                SS.pop("ecg_override", None)
+                st.rerun()
+
         if _smart.get("triage_incoherence"):
             _ctx_no_ecg = dict(_smart)
             _ctx_no_ecg["ecg_hint"] = False

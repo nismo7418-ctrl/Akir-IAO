@@ -15,6 +15,7 @@ from __future__ import annotations
 import streamlit as st
 
 from clinical.ecg_labels import display_name, data_support, FULL, PARTIAL
+from ui.explainer import explain
 
 _PRIO_LIBELLE = {
     1: ("P1", "Détresse vitale — prise en charge immédiate", "#DC2626"),
@@ -51,10 +52,25 @@ def _avert_fiabilite(support: str) -> None:
 
 def render() -> None:
     st.subheader("📷 ECG — aide à la priorisation")
+    explain("ia_ecg", compact=True)
     st.caption(
         "Outil **expérimental** d'aide à la décision. Confirmation cardiologue "
         "**obligatoire**. Aucune image ni donnée nominative n'est enregistrée."
     )
+
+    # ── Mode dégradé : dépendances ou poids absents ──────────────────────
+    try:
+        from ml.ecg_predictor import model_available
+        _avail = model_available()
+    except Exception:
+        _avail = False
+    if not _avail:
+        st.warning(
+            "Module ECG en mode dégradé — dépendances (`torch`/`timm`) ou poids "
+            "du modèle manquants. Installer `torch timm pillow`, puis entraîner : "
+            "`python ml/train_ecg_model.py --ptbxl /chemin/ptbxl`."
+        )
+        return
 
     age = st.number_input("Âge du patient (ans)", min_value=0, max_value=120, value=50)
 
