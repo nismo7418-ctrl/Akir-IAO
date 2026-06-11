@@ -1,198 +1,122 @@
-"""
-ui/ecg_tab.py — Onglet IA ECG AKIR-IAO
+# ui/ecg_tab.py — Onglet ECG (aide à la priorisation IAO) — AKIR-IAO v21
+# Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
+#
+# Étape 3 de la finalisation ECG : la vue. Elle relie predictor + garde-fous +
+# taxonomie honnête, et impose deux sécurités UX :
+#   - signalement de la FIABILITÉ par classe (data_support) ;
+#   - CONFIRMATION explicite avant d'injecter la priorité dans le triage.
+#
+# Contrat : streamlit_app.py (onglet 7) fait `from ui.ecg_tab import render`.
+# RGPD : aucune image ni donnée nominative persistée — traitement en mémoire.
+# Outil expérimental d'aide à la décision — confirmation cardiologue obligatoire.
 
-Upload d'une image ECG 12 dérivations → classification par CNN
-(EfficientNet-B2) → priorité KTAS suggérée + alerte clinique + garde-fous.
-
-Le module fonctionne en mode dégradé si :
-  - torch/timm ne sont pas installés (message d'install)
-  - le fichier de poids ml/ecg_model.pth n'existe pas (lien vers le script
-    d'entraînement)
-
-Aucun appel ML n'est fait tant que l'utilisateur n'a pas cliqué "Analyser".
-"""
 from __future__ import annotations
 
 import streamlit as st
 
-from ml.ecg_predictor import (
-    ECG_LABEL_FR,
-    model_available,
-    predict_ecg,
-)
-from ui.components import AL, H
-from ui.explainer import explain
+from clinical.ecg_labels import display_name, data_support, FULL, PARTIAL
 
-_DISCLAIMER = (
-    "⚠️ Outil d'aide à la décision — pas un substitut au diagnostic cardiologue. "
-    "Toujours confronter à la clinique et obtenir une lecture experte."
-)
+_PRIO_LIBELLE = {
+    1: ("P1", "Détresse vitale — prise en charge immédiate", "#DC2626"),
+    2: ("P2", "Très urgent", "#EA580C"),
+    3: ("P3", "Urgent", "#CA8A04"),
+    4: ("P4", "Peu urgent", "#16A34A"),
+    5: ("P5", "Non urgent", "#2563EB"),
+}
 
 
-def render() -> None:
-    """Rendu de l'onglet IA ECG."""
-    H(
-        '<div style="background:linear-gradient(135deg,#7C2D12,#DC2626);color:#fff;'
-        'border-radius:10px;padding:12px 16px;margin-bottom:12px;">'
-        '<div style="font-size:.72rem;opacity:.8;text-transform:uppercase;letter-spacing:.1em;">'
-        'Classification d\'image · 15 diagnostics</div>'
-        '<div style="font-size:1rem;font-weight:700;">IA ECG — Analyse de tracé</div></div>'
-    )
-
-    explain("ia_ecg", compact=True)
-
-    if not model_available():
-        _render_unavailable()
-        return
-
-    st.caption(
-        "Importez une photo ou scan d'un ECG 12 dérivations standard. "
-        "Le modèle classe le tracé parmi 15 diagnostics urgents et suggère "
-        "une priorité KTAS."
-    )
-
-    uploaded = st.file_uploader(
-        "Image ECG (PNG, JPG)",
-        type=["png", "jpg", "jpeg"],
-        accept_multiple_files=False,
-        key="ecg_upload",
-        help="Idéalement un ECG complet 12 dérivations, image nette, peu de reflets.",
-    )
-
-    if uploaded is None:
-        st.info("Aucune image chargée. Importez un ECG pour lancer l'analyse.")
-        return
-
-    col_img, col_btn = st.columns([3, 1])
-    with col_img:
-        st.image(uploaded, caption=uploaded.name, use_container_width=True)
-    with col_btn:
-        st.markdown("&nbsp;")
-        analyze = st.button(
-            "🔬 Analyser l'ECG",
-            type="primary",
-            use_container_width=True,
-            key="ecg_analyze",
-        )
-        st.caption(_DISCLAIMER)
-
-    if not analyze:
-        return
-
-    with st.spinner("Inférence ECG en cours…"):
-        uploaded.seek(0)
-        res = predict_ecg(uploaded.read())
-
-    if res.get("erreur"):
-        AL(f"Erreur prédiction ECG : {res['erreur']}", "danger")
-        return
-
-    _render_result(res)
-
-
-def _render_result(res: dict) -> None:
-    """Affiche le résultat de la classification + garde-fous + suggestion KTAS."""
-    couleur = res["couleur"]
-    prio    = res["priorite"]
-    label_fr = res["top_label_fr"]
-    proba   = res["top_proba"]
-
+def _badge_priorite(prio: int) -> None:
+    code, libelle, couleur = _PRIO_LIBELLE.get(prio, ("?", "Indéterminé", "#64748B"))
     st.markdown(
-        f'<div style="background:{couleur};color:white;padding:18px;'
-        f'border-radius:10px;text-align:center;font-weight:900;'
-        f'box-shadow:0 4px 12px rgba(0,0,0,.2);margin:8px 0;">'
-        f'<div style="font-size:1.5rem;">{label_fr}</div>'
-        f'<div style="font-size:.85rem;opacity:.9;margin-top:6px;">'
-        f'Priorité KTAS suggérée : P{prio} · Confiance ML : {proba:.0%}</div></div>',
+        f"<div style='background:{couleur};color:#fff;border-radius:10px;"
+        f"padding:14px 18px;font-weight:700;font-size:1.05rem;text-align:center'>"
+        f"{code} — {libelle}</div>",
         unsafe_allow_html=True,
     )
 
-    alerte = res.get("alerte_clinique")
-    if alerte:
-        AL(f"🩺 Conduite à tenir : {alerte}", "danger" if prio == 1 else "warning")
 
-    override = res.get("override")
-    if override:
-        AL(f"⚠️ Ajustement de sécurité appliqué : {override}", "danger")
-        prio_ml = res.get("priorite_ml")
-        if prio_ml and prio_ml != prio:
-            AL(f"Note : la priorité ML initiale était P{prio_ml}.", "info")
+def _avert_fiabilite(support: str) -> None:
+    if support == FULL:
+        return
+    msg = {
+        PARTIAL: "Fiabilité limitée — cette classe est partiellement couverte par "
+                 "les données d'entraînement. À confirmer cliniquement.",
+    }.get(
+        support,
+        "Fiabilité NON garantie — cette classe est quasi absente des données "
+        "d'entraînement. Ne pas s'y fier ; interprétation médicale requise.",
+    )
+    st.warning(msg)
+
+
+def render() -> None:
+    st.subheader("📷 ECG — aide à la priorisation")
+    st.caption(
+        "Outil **expérimental** d'aide à la décision. Confirmation cardiologue "
+        "**obligatoire**. Aucune image ni donnée nominative n'est enregistrée."
+    )
+
+    age = st.number_input("Âge du patient (ans)", min_value=0, max_value=120, value=50)
+
+    source = st.camera_input("Photographier l'ECG 12 dérivations")
+    if source is None:
+        source = st.file_uploader(
+            "…ou importer une image d'ECG", type=["jpg", "jpeg", "png"]
+        )
+    if source is None:
+        st.info("Capturez ou importez un ECG pour lancer l'analyse.")
+        return
+
+    # ── Inférence (le predictor dégrade proprement si torch/poids absents) ──
+    try:
+        from ml.ecg_predictor import predict_ecg
+    except Exception:
+        st.error("Module ECG indisponible (dépendances non installées).")
+        return
+
+    with st.spinner("Analyse de l'ECG…"):
+        res = predict_ecg(source.getvalue(), age_years=age)
+
+    if res.get("erreur"):
+        st.warning(res["erreur"])
+        return
+
+    verdict = res["verdict"]
+    probs = res["probabilities"]
+
+    # ── Abstention pédiatrique (R0) ──────────────────────────────────────
+    if verdict.get("abstain"):
+        st.info(verdict.get("override", "Abstention — interprétation médicale requise."))
+        return
+
+    # ── Priorité + garde-fou déclenché ───────────────────────────────────
+    _badge_priorite(verdict["priorite"])
+    if verdict.get("override"):
+        st.markdown(f"🛡️ **Garde-fou appliqué** — {verdict['override']}")
+    if verdict.get("critical_flags"):
+        st.error("Signe(s) critique(s) : " + ", ".join(verdict["critical_flags"]))
+
+    # ── Fiabilité de la classe dominante ─────────────────────────────────
+    _avert_fiabilite(verdict.get("data_support", FULL))
+
+    # ── Probabilités (libellés honnêtes, triées) ─────────────────────────
+    st.markdown("**Lecture du modèle** (probabilités) :")
+    top = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    for label, p in top:
+        marqueur = "" if data_support(label) == FULL else " ⚠️"
+        st.write(f"- {display_name(label)} — {p:.0%}{marqueur}")
 
     st.divider()
-    st.markdown("**📊 Top 5 — autres hypothèses diagnostiques**")
-    visible = [(c, l, p) for c, l, p in res["top_k"] if p > 0.0][:5]
-    for code, lbl_fr, p in visible:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;margin:4px 0;">'
-            f'<div style="min-width:180px;font-size:.85rem;color:#E2E8F0;">{lbl_fr}</div>'
-            f'<div style="flex:1;background:#1E293B;border-radius:6px;height:14px;position:relative;">'
-            f'<div style="width:{p*100:.1f}%;background:{couleur};height:100%;border-radius:6px;"></div>'
-            f'</div>'
-            f'<div style="min-width:50px;text-align:right;font-weight:700;color:#E2E8F0;">{p:.0%}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
+
+    # ── Confirmation explicite avant injection dans le triage ────────────
+    st.caption(
+        "L'injection remplace la priorité de triage courante. Action à valider "
+        "par l'IAO après lecture du tracé."
+    )
+    if st.button("✅ Injecter la priorité dans le triage", use_container_width=True):
+        st.session_state["ecg_priorite"] = verdict["priorite"]
+        st.session_state["ecg_override"] = verdict.get("override")
+        st.success(
+            f"Priorité P{verdict['priorite']} transmise au triage "
+            "(modifiable manuellement)."
         )
-
-    # Avertissement sur les classes non couvertes par ce modèle
-    try:
-        from ml.ecg_predictor import ECG_LABELS, get_active_labels
-        active = set(get_active_labels())
-        uncovered = [c for c in ECG_LABELS if c not in active]
-        if uncovered:
-            from ml.ecg_predictor import ECG_LABEL_FR as _LF
-            st.caption(
-                f"⚠️ Ce modèle n'a pas été entraîné sur : "
-                f"{', '.join(_LF[c] for c in uncovered)}. "
-                f"Ne pas s'y fier pour exclure ces diagnostics."
-            )
-    except Exception:
-        pass
-
-    with st.expander("🔬 Analyse de la décision IA"):
-        from ui.explainer import render_decision_analysis
-        ml_prio = res.get("priorite_ml") or prio
-        render_decision_analysis({
-            "priorite":    prio,
-            "priorite_ml": ml_prio,
-            "override":    override,
-            "erreur":      None,
-        })
-        st.caption(
-            f"Modèle : {res['features_input'].get('model', '?')} · "
-            f"Résolution {res['features_input'].get('resolution', '?')}px · "
-            f"{res['features_input'].get('n_classes', '?')} classes"
-        )
-
-    st.caption(_DISCLAIMER)
-
-
-def _render_unavailable() -> None:
-    """Affiche le mode dégradé : dépendances manquantes ou poids absents."""
-    import importlib.util
-
-    torch_ok = importlib.util.find_spec("torch") is not None
-    timm_ok  = importlib.util.find_spec("timm") is not None
-
-    if not torch_ok or not timm_ok:
-        manquants = []
-        if not torch_ok: manquants.append("torch")
-        if not timm_ok:  manquants.append("timm")
-        AL(
-            f"📦 Dépendances ECG manquantes : `{'`, `'.join(manquants)}`. "
-            f"Installer : `pip install {' '.join(manquants)} pillow`",
-            "warning",
-        )
-    else:
-        AL(
-            "🧠 Modèle ECG non entraîné. Lancer l'entraînement : "
-            "`python ml/train_ecg_model.py` (voir le module pour le format de dataset).",
-            "info",
-        )
-
-    st.markdown("### Labels diagnostiques couverts par le module")
-    cols = st.columns(3)
-    for i, (code, lbl_fr) in enumerate(ECG_LABEL_FR.items()):
-        with cols[i % 3]:
-            st.markdown(f"- **{code}** — {lbl_fr}")
-
-    st.caption(_DISCLAIMER)

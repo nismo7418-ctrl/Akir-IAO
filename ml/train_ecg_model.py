@@ -1,336 +1,335 @@
-"""
-ml/train_ecg_model.py — Entraînement du classifieur ECG image AKIR-IAO
-
-Architecture : EfficientNet-B2 fine-tuné (timm) — 15 classes diagnostiques
-Loss         : CrossEntropyLoss (single-label) avec class weights pour
-               compenser le déséquilibre habituel des datasets ECG.
-
-╔══ Format dataset attendu ══════════════════════════════════════════════════╗
-║                                                                            ║
-║   data/ecg/                                                                ║
-║     images/                                                                ║
-║       <image_id>.png  (ou .jpg)                                            ║
-║       ...                                                                  ║
-║     labels.csv                                                             ║
-║       image_id,label                                                       ║
-║       0001,STEMI_ANT                                                       ║
-║       0002,NORM                                                            ║
-║       ...                                                                  ║
-║                                                                            ║
-║   Les codes de label doivent appartenir à ml.ecg_predictor.ECG_LABELS      ║
-║                                                                            ║
-╚════════════════════════════════════════════════════════════════════════════╝
-
-Datasets compatibles :
-    - PTB-XL (waveforms convertibles en images via matplotlib + script de plot)
-    - CPSC2018 / CinC Challenge 2020
-    - Datasets internes (ECG photographiés en triage)
-
-Sortie : ml/ecg_model.pth
-
-Usage :
-    python ml/train_ecg_model.py
-    python ml/train_ecg_model.py --epochs 30 --batch-size 16 --lr 1e-4
-"""
+# ml/train_ecg_model.py — Entraînement du classifieur ECG — AKIR-IAO v21
+# Développeur : Ismail Ibn-Daifa — Hainaut, Belgique
+#
+# À LANCER SUR TA MACHINE (GPU + accès PhysioNet) :
+#     pip install torch timm --index-url https://download.pytorch.org/whl/cpu  # ou cu121
+#     pip install wfdb pandas numpy matplotlib pillow scikit-learn
+#     python ml/train_ecg_model.py --ptbxl /chemin/ptbxl --epochs 15
+#     python ml/train_ecg_model.py --smoke      # vérifie le pipeline sans PTB-XL
+#
+# Principes (issus de l'audit) :
+#   - Libellés HONNÊTES : on n'invente pas STEMI/NSTEMI/TV/FV/HYPERK que PTB-XL
+#     ne couvre pas. Les classes sans données (UNSUPPORTED_CODES) sont EXCLUES
+#     de l'entraînement. Voir clinical/ecg_labels.py.
+#   - Split PATIENT (strat_fold PTB-XL) — aucune fuite entre train/val/test.
+#   - Déséquilibre traité par pondération de classes (CrossEntropy weights).
+#   - Le « meilleur » modèle est choisi sur le RAPPEL STEMI, pas l'accuracy.
+#   - Après entraînement : métriques par classe + calibration (T*) + gate de
+#     déployabilité via ml/ecg_eval.py, écrits dans un JSON pour le model card.
+#
+# torch / timm / wfdb / matplotlib sont importés PARESSEUSEMENT : ce fichier
+# s'importe (et son mapping se teste) sans aucune de ces dépendances.
 
 from __future__ import annotations
 
 import argparse
-import logging
-from collections import Counter
+import hashlib
+import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Dict, Iterable, List, Optional
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-_LOG = logging.getLogger(__name__)
+# Permet `python ml/train_ecg_model.py` depuis la racine du dépôt.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ml.ecg_predictor import (
-    ECG_LABELS,
-    INPUT_RESOLUTION,
-    IMAGENET_MEAN,
-    IMAGENET_STD,
-    MODEL_NAME,
+from clinical.ecg_labels import (
+    LABELS, UNSUPPORTED_CODES, classify, resolve_code,
 )
 
-DATA_DIR     = Path("data/ecg")
-IMAGES_DIR   = DATA_DIR / "images"
-LABELS_CSV   = DATA_DIR / "labels.csv"
-OUTPUT_PATH  = Path("ml/ecg_model.pth")
+IMG_SIZE = 260
+SEED = 42
+MODEL_NAME = "efficientnet_b2"
 
-DEFAULT_EPOCHS     = 20
-DEFAULT_BATCH_SIZE = 16
-DEFAULT_LR         = 1e-4
-DEFAULT_WORKERS    = 2
-DEFAULT_VAL_RATIO  = 0.15
-SEED               = 42
+# Le predictor (ml/ecg_predictor.py) charge ce fichier ; on garde le même nom
+# pour que train et inférence restent cohérents.
+DEFAULT_CHECKPOINT = "ecg_model.pth"
 
-
-def _lazy_imports():
-    try:
-        import torch  # noqa: F401
-        import timm   # noqa: F401
-        from PIL import Image  # noqa: F401
-    except ImportError as exc:
-        raise SystemExit(
-            "❌ Dépendances manquantes pour l'entraînement ECG.\n"
-            "    pip install torch torchvision timm pillow pandas\n"
-            f"    (vu : {exc})"
-        )
+# Classes réellement entraînables = taxonomie honnête MOINS les classes sans données.
+TRAINABLE_LABELS: List[str] = [c for c in LABELS if c not in UNSUPPORTED_CODES
+                               and c != "UNKNOWN"]
 
 
-# ── Dataset ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Mapping SCP-ECG (PTB-XL) — libellés canoniques honnêtes  [PUR — testé ici]
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ⚠️ PTB-XL annote surtout des MI SÉQUELLAIRES, pas la lésion aiguë : le mapping
+# vers ST_ELEVATION est donc APPROXIMATIF (data_support = PARTIAL). À vérifier
+# contre scp_statements.csv. Codes non pertinents — None (ignorés).
 
-def _build_dataset():
-    """Crée le Dataset PyTorch ; vérifie présence des images + cohérence labels."""
-    import pandas as pd
-    from PIL import Image
-    import torch
-    from torch.utils.data import Dataset
+_SCP_TO_CANONICAL: Dict[str, str] = {
+    # Normal
+    "NORM": "NORM",
+    # Infarctus (territoires) — sus-décalage / ischémie aiguë (approximatif)
+    "AMI": "ST_ELEVATION", "ASMI": "ST_ELEVATION", "ALMI": "ST_ELEVATION",
+    "IMI": "ST_ELEVATION", "ILMI": "ST_ELEVATION", "IPMI": "ST_ELEVATION",
+    "IPLMI": "ST_ELEVATION", "INJAS": "ST_ELEVATION", "INJAL": "ST_ELEVATION",
+    "INJIN": "ST_ELEVATION", "INJIL": "ST_ELEVATION", "INJLA": "ST_ELEVATION",
+    "LMI": "ST_ELEVATION", "PMI": "ST_ELEVATION",
+    # Anomalies ST/T sans sus-décalage — ischémie non-ST (— contexte NSTEMI)
+    "ISCAL": "ISCHEMIA_NONST", "ISCAS": "ISCHEMIA_NONST", "ISCLA": "ISCHEMIA_NONST",
+    "ISCAN": "ISCHEMIA_NONST", "ISCIN": "ISCHEMIA_NONST", "ISCIL": "ISCHEMIA_NONST",
+    "ISC_": "ISCHEMIA_NONST", "NDT": "ISCHEMIA_NONST", "NST_": "ISCHEMIA_NONST",
+    "STD_": "ISCHEMIA_NONST", "DIG": "ISCHEMIA_NONST",
+    # Rythme
+    "AFIB": "AFIB", "AFLT": "AFLUTTER",
+    # Conduction
+    "1AVB": "AVB1", "2AVB": "AVB2", "3AVB": "AVB3",
+    "CLBBB": "LBBB", "ILBBB": "LBBB",
+    "CRBBB": "RBBB", "IRBBB": "RBBB",
+}
 
-    if not LABELS_CSV.exists():
-        raise SystemExit(
-            f"❌ {LABELS_CSV} introuvable.\n"
-            "    Place ton fichier labels.csv (image_id,label) sous data/ecg/."
-        )
-    if not IMAGES_DIR.exists():
-        raise SystemExit(
-            f"❌ {IMAGES_DIR} introuvable.\n"
-            "    Place les images ECG (.png/.jpg) sous data/ecg/images/."
-        )
 
-    df = pd.read_csv(LABELS_CSV, dtype={"image_id": str})
-    if not {"image_id", "label"}.issubset(df.columns):
-        raise SystemExit("❌ labels.csv doit contenir les colonnes image_id,label")
-
-    unknown = set(df["label"]) - set(ECG_LABELS)
-    if unknown:
-        raise SystemExit(
-            f"❌ Labels inconnus dans labels.csv : {sorted(unknown)}\n"
-            f"    Codes autorisés : {ECG_LABELS}"
-        )
-
-    # Résolution des chemins (.png ou .jpg)
-    def _resolve_path(image_id: str) -> Path | None:
-        for ext in (".png", ".jpg", ".jpeg"):
-            p = IMAGES_DIR / f"{image_id}{ext}"
-            if p.exists():
-                return p
+def scp_to_canonical(code: str) -> Optional[str]:
+    """Mappe un code SCP-ECG vers un libellé canonique honnête, ou None si ignoré."""
+    if not code:
         return None
-
-    paths = []
-    raw_labels = []
-    missing = 0
-    for _, row in df.iterrows():
-        p = _resolve_path(str(row["image_id"]))
-        if p is None:
-            missing += 1
-            continue
-        paths.append(p)
-        raw_labels.append(row["label"])
-
-    if missing:
-        _LOG.warning("%d images référencées dans labels.csv mais absentes du disque", missing)
-    if not paths:
-        raise SystemExit("❌ Aucune image valide trouvée — vérifier IMAGES_DIR et labels.csv")
-
-    # Labels actifs = ceux réellement présents (préserve l'ordre canonique de ECG_LABELS)
-    present = set(raw_labels)
-    active_labels = [l for l in ECG_LABELS if l in present]
-    label_to_idx = {l: i for i, l in enumerate(active_labels)}
-    labels = [label_to_idx[l] for l in raw_labels]
-
-    _LOG.info("Dataset : %d images sur %d classes actives", len(paths), len(active_labels))
-    _LOG.info("Distribution : %s",
-              {l: c for l, c in zip(active_labels, [Counter(raw_labels)[l] for l in active_labels])})
-    skipped = [l for l in ECG_LABELS if l not in present]
-    if skipped:
-        _LOG.warning("Classes absentes du dataset (modèle aveugle dessus) : %s", skipped)
-
-    class ECGImageDataset(Dataset):
-        def __init__(self, paths, labels, transform):
-            self.paths = paths
-            self.labels = labels
-            self.transform = transform
-
-        def __len__(self):
-            return len(self.paths)
-
-        def __getitem__(self, idx):
-            img = Image.open(self.paths[idx]).convert("RGB")
-            return self.transform(img), self.labels[idx]
-
-    return paths, labels, active_labels, ECGImageDataset
+    c = _SCP_TO_CANONICAL.get(code.strip().upper())
+    if c is None:
+        return None
+    # Filtre de sûreté : on n'entraîne jamais une classe sans données.
+    return c if c in TRAINABLE_LABELS else None
 
 
-def _build_transforms():
-    """Augmentations : modérées car ECG est sensible à la déformation."""
-    import torchvision.transforms as T
+def select_primary_label(codes: Iterable[str]) -> Optional[str]:
+    """Parmi les codes SCP d'un enregistrement, retient le libellé le PLUS urgent.
 
-    train_tf = T.Compose([
-        T.Resize((INPUT_RESOLUTION, INPUT_RESOLUTION)),
-        T.ColorJitter(brightness=0.15, contrast=0.15),  # variations photo
-        T.RandomAffine(degrees=2, translate=(0.02, 0.02)),  # mini-rotation
-        T.ToTensor(),
-        T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-    val_tf = T.Compose([
-        T.Resize((INPUT_RESOLUTION, INPUT_RESOLUTION)),
-        T.ToTensor(),
-        T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-    return train_tf, val_tf
+    Logique « pire cas » : un tracé avec MI + trouble de conduction est étiqueté
+    sur l'anomalie la plus critique. NORM n'est retenu que s'il est seul.
+    """
+    cands = [c for c in (scp_to_canonical(x) for x in codes) if c]
+    if not cands:
+        return None
+    non_norm = [c for c in cands if c != "NORM"]
+    if not non_norm:
+        return "NORM"
+    # priorité de base : 1 = plus urgent — on prend le min
+    return min(non_norm, key=lambda c: classify(c)[1])
 
 
-def _split_indices(labels: list[int], val_ratio: float, seed: int) -> tuple[list[int], list[int]]:
-    """Split stratifié sur les labels."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Rendu waveform — image (PTB-XL)            [paresseux : wfdb/matplotlib/PIL]
+# ─────────────────────────────────────────────────────────────────────────────
+
+def waveform_to_image(signal, fs: int = 100):
+    """Trace 12 dérivations empilées en une image RGB IMG_SIZE×IMG_SIZE.
+
+    ⚠️ COHÉRENCE TRAIN/PROD : ce rendu doit ressembler à ce que verra le modèle
+    en production. Si tu déploies sur des PHOTOS de tracés papier, entraîne sur
+    des photos (ou ajoute un prétraitement de redressement) — sinon décalage.
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    n_leads = signal.shape[1]
+    fig, axes = plt.subplots(n_leads, 1, figsize=(4, 4), dpi=IMG_SIZE / 4)
+    if n_leads == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        ax.plot(signal[:, i], linewidth=0.5, color="black")
+        ax.axis("off")
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0, hspace=0)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB").resize((IMG_SIZE, IMG_SIZE))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dataset PTB-XL                                                  [paresseux]
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_dataframe(ptbxl_dir: Path):
+    """Charge ptbxl_database.csv + scp_statements.csv et calcule le label primaire."""
+    import ast
+    import pandas as pd
+
+    df = pd.read_csv(ptbxl_dir / "ptbxl_database.csv", index_col="ecg_id")
+    df["scp_codes"] = df["scp_codes"].apply(ast.literal_eval)
+    df["label"] = df["scp_codes"].apply(lambda d: select_primary_label(d.keys()))
+    df = df[df["label"].notna()].copy()
+    return df
+
+
+class PTBXLDataset:
+    """Dataset torch (importé paresseusement pour rester testable sans torch)."""
+
+    def __init__(self, df, ptbxl_dir: Path, label_to_idx: Dict[str, int], fs: int = 100):
+        self.df = df.reset_index()
+        self.dir = Path(ptbxl_dir)
+        self.label_to_idx = label_to_idx
+        self.fs = fs
+        self.fcol = "filename_lr" if fs == 100 else "filename_hr"
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, i):
+        import numpy as np
+        import torch
+        import wfdb
+        from torchvision import transforms
+
+        row = self.df.iloc[i]
+        sig, _ = wfdb.rdsamp(str(self.dir / row[self.fcol]))
+        img = waveform_to_image(np.asarray(sig), self.fs)
+        x = transforms.ToTensor()(img)
+        x = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])(x)
+        y = self.label_to_idx[row["label"]]
+        return x, y
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entraînement
+# ─────────────────────────────────────────────────────────────────────────────
+
+def train(ptbxl_dir: Path, epochs: int = 15, batch_size: int = 32,
+          lr: float = 3e-4, out_dir: Path = Path("ml")) -> None:
     import numpy as np
-    rng = np.random.default_rng(seed)
-    by_class: dict[int, list[int]] = {}
-    for i, lbl in enumerate(labels):
-        by_class.setdefault(lbl, []).append(i)
-    train_idx, val_idx = [], []
-    for lbl, idxs in by_class.items():
-        rng.shuffle(idxs)
-        n_val = max(1, int(len(idxs) * val_ratio))
-        val_idx.extend(idxs[:n_val])
-        train_idx.extend(idxs[n_val:])
-    rng.shuffle(train_idx); rng.shuffle(val_idx)
-    return train_idx, val_idx
-
-
-# ── Entraînement ────────────────────────────────────────────────────────────
-
-def train(
-    epochs: int = DEFAULT_EPOCHS,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    lr: float = DEFAULT_LR,
-    workers: int = DEFAULT_WORKERS,
-    val_ratio: float = DEFAULT_VAL_RATIO,
-    output_path: Path = OUTPUT_PATH,
-):
-    _lazy_imports()
     import torch
-    import torch.nn as nn
     import timm
-    from torch.utils.data import DataLoader, Subset
+    from torch.utils.data import DataLoader
+    from sklearn.utils.class_weight import compute_class_weight
 
-    paths, labels, active_labels, DatasetCls = _build_dataset()
-    n_classes = len(active_labels)
-    train_tf, val_tf = _build_transforms()
+    from ml.ecg_eval import per_class_metrics, grouped_sensitivity, safety_gate, STEMI_GROUP
 
-    train_idx, val_idx = _split_indices(labels, val_ratio, SEED)
-    _LOG.info("Split : %d train / %d val", len(train_idx), len(val_idx))
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    train_ds = DatasetCls(paths, labels, train_tf)
-    val_ds   = DatasetCls(paths, labels, val_tf)
+    ckpt_path = out_dir / DEFAULT_CHECKPOINT
 
-    train_loader = DataLoader(
-        Subset(train_ds, train_idx),
-        batch_size=batch_size, shuffle=True,
-        num_workers=workers, pin_memory=True,
-    )
-    val_loader = DataLoader(
-        Subset(val_ds, val_idx),
-        batch_size=batch_size, shuffle=False,
-        num_workers=workers, pin_memory=True,
-    )
+    df = build_dataframe(ptbxl_dir)
+    labels = sorted(df["label"].unique())
+    label_to_idx = {l: i for i, l in enumerate(labels)}
+    idx_to_label = {i: l for l, i in label_to_idx.items()}
+    print(f"Classes entraînées : {labels}")
+    print(f"Exclues (sans données) : {sorted(UNSUPPORTED_CODES)}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    _LOG.info("Device : %s", device)
+    # Split patient via strat_fold PTB-XL (8 train / 9 val / 10 test).
+    tr = df[df.strat_fold <= 8]
+    va = df[df.strat_fold == 9]
+    te = df[df.strat_fold == 10]
 
-    net = timm.create_model(
-        MODEL_NAME, pretrained=True, num_classes=n_classes,
-    ).to(device)
+    def loader(frame, shuffle):
+        ds = PTBXLDataset(frame, ptbxl_dir, label_to_idx)
+        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=4)
 
-    # Class weights inversement proportionnels à la fréquence (gère déséquilibre)
-    counts = Counter(labels)
-    weights = torch.tensor(
-        [1.0 / counts.get(i, 1) for i in range(n_classes)],
-        dtype=torch.float32, device=device,
-    )
-    weights = weights * (n_classes / weights.sum())
-    _LOG.info("Class weights : %s", {active_labels[i]: f"{w:.2f}" for i, w in enumerate(weights.tolist())})
+    dl_tr, dl_va, dl_te = loader(tr, True), loader(va, False), loader(te, False)
 
-    criterion = nn.CrossEntropyLoss(weight=weights)
-    optimizer = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    # Pondération de classes (déséquilibre — protège le rappel des classes rares).
+    cw = compute_class_weight("balanced", classes=np.arange(len(labels)),
+                              y=tr["label"].map(label_to_idx).values)
+    weights = torch.tensor(cw, dtype=torch.float32, device=device)
 
-    best_val_acc = 0.0
-    for epoch in range(1, epochs + 1):
-        # ── Train ──
-        net.train()
-        train_loss = 0.0
-        train_correct = 0
-        train_total = 0
-        for imgs, lbls in train_loader:
-            imgs = imgs.to(device, non_blocking=True)
-            lbls = torch.tensor(lbls, device=device) if not isinstance(lbls, torch.Tensor) else lbls.to(device)
+    model = timm.create_model(MODEL_NAME, pretrained=True,
+                              num_classes=len(labels)).to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    crit = torch.nn.CrossEntropyLoss(weight=weights)
 
-            optimizer.zero_grad()
-            logits = net(imgs)
-            loss = criterion(logits, lbls)
-            loss.backward()
-            optimizer.step()
+    def _save_checkpoint():
+        # Checkpoint riche : le predictor lit labels / model_name / input_resolution.
+        torch.save({
+            "state_dict": model.state_dict(),
+            "labels": labels,
+            "model_name": MODEL_NAME,
+            "input_resolution": IMG_SIZE,
+        }, ckpt_path)
 
-            train_loss += loss.item() * imgs.size(0)
-            train_correct += (logits.argmax(1) == lbls).sum().item()
-            train_total += imgs.size(0)
+    best_stemi = -1.0
+    for ep in range(1, epochs + 1):
+        model.train()
+        for x, y in dl_tr:
+            x, y = x.to(device), y.to(device)
+            opt.zero_grad()
+            crit(model(x), y).backward()
+            opt.step()
 
-        scheduler.step()
-
-        # ── Validation ──
-        net.eval()
-        val_correct = 0
-        val_total = 0
+        # Validation — rappel STEMI comme critère de sélection.
+        model.eval()
+        yt, yp = [], []
         with torch.no_grad():
-            for imgs, lbls in val_loader:
-                imgs = imgs.to(device, non_blocking=True)
-                lbls = torch.tensor(lbls, device=device) if not isinstance(lbls, torch.Tensor) else lbls.to(device)
-                logits = net(imgs)
-                val_correct += (logits.argmax(1) == lbls).sum().item()
-                val_total += imgs.size(0)
+            for x, y in dl_va:
+                pred = model(x.to(device)).argmax(1).cpu().numpy()
+                yt += [idx_to_label[int(i)] for i in y.numpy()]
+                yp += [idx_to_label[int(i)] for i in pred]
+        stemi = grouped_sensitivity(yt, yp, STEMI_GROUP) or 0.0
+        print(f"Epoch {ep}: rappel STEMI (val) = {stemi:.1%}")
+        if stemi > best_stemi:
+            best_stemi = stemi
+            _save_checkpoint()
 
-        train_acc = train_correct / max(1, train_total)
-        val_acc   = val_correct / max(1, val_total)
-        _LOG.info(
-            "Epoch %02d/%d — loss %.4f — train acc %.3f — val acc %.3f",
-            epoch, epochs, train_loss / max(1, train_total), train_acc, val_acc,
-        )
+    # Évaluation finale sur le fold test + écriture des métriques pour le model card.
+    ckpt = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+    yt, yp = [], []
+    with torch.no_grad():
+        for x, y in dl_te:
+            pred = model(x.to(device)).argmax(1).cpu().numpy()
+            yt += [idx_to_label[int(i)] for i in y.numpy()]
+            yp += [idx_to_label[int(i)] for i in pred]
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({
-                "state_dict":       net.state_dict(),
-                "labels":           active_labels,
-                "model_name":       MODEL_NAME,
-                "input_resolution": INPUT_RESOLUTION,
-                "val_acc":          val_acc,
-            }, output_path)
-            _LOG.info("  ✓ Meilleur modèle sauvegardé → %s (val acc %.3f)", output_path, val_acc)
-
-    _LOG.info("Entraînement terminé. Meilleure val acc : %.3f", best_val_acc)
-    return best_val_acc
+    metrics = {
+        "labels": labels,
+        "per_class": per_class_metrics(yt, yp, labels),
+        "stemi_recall": grouped_sensitivity(yt, yp, STEMI_GROUP),
+        "gate": safety_gate(yt, yp, labels),
+        "weights_sha256": _sha256(ckpt_path),
+    }
+    (out_dir / "ecg_metrics.json").write_text(json.dumps(metrics, indent=2, default=str))
+    print("\n=== GATE DE DÉPLOYABILITÉ ===")
+    print(json.dumps(metrics["gate"], indent=2, ensure_ascii=False, default=str))
+    print("Métriques écrites dans ml/ecg_metrics.json (à reporter dans le model card).")
 
 
-def _cli():
-    p = argparse.ArgumentParser(description="Entraînement classifieur ECG image AKIR-IAO")
-    p.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
-    p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    p.add_argument("--lr", type=float, default=DEFAULT_LR)
-    p.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
-    p.add_argument("--val-ratio", type=float, default=DEFAULT_VAL_RATIO)
-    p.add_argument("--output", type=Path, default=OUTPUT_PATH)
-    return p.parse_args()
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(Path(path).read_bytes())
+    return h.hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Smoke test (sans PTB-XL) : vérifie le câblage du pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+def smoke() -> None:
+    """Vérifie le pipeline pur (mapping + sélection) sans torch ni dataset."""
+    samples = [
+        (["NORM"], "NORM"),
+        (["IMI", "1AVB"], "ST_ELEVATION"),       # le plus urgent l'emporte
+        (["1AVB"], "AVB1"),
+        (["AFIB", "CRBBB"], "AFIB"),             # AFIB (P3) vs RBBB (P3) — 1er trouvé urgent
+        (["ZZZ"], None),                         # code inconnu ignoré
+    ]
+    ok = True
+    for codes, expected in samples:
+        got = select_primary_label(codes)
+        flag = "OK" if got == expected else "ÉCHEC"
+        if got != expected:
+            ok = False
+        print(f"[{flag}] {codes} — {got} (attendu {expected})")
+    print(f"\nClasses entraînables : {TRAINABLE_LABELS}")
+    print(f"Exclues faute de données : {sorted(UNSUPPORTED_CODES)}")
+    print("Smoke OK" if ok else "Smoke ÉCHEC")
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
-    args = _cli()
-    train(
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        workers=args.workers,
-        val_ratio=args.val_ratio,
-        output_path=args.output,
-    )
+    ap = argparse.ArgumentParser(description="Entraînement ECG AKIR-IAO")
+    ap.add_argument("--ptbxl", type=Path, help="Dossier PTB-XL décompressé")
+    ap.add_argument("--epochs", type=int, default=15)
+    ap.add_argument("--batch-size", type=int, default=32)
+    ap.add_argument("--smoke", action="store_true", help="Vérifier le pipeline sans données")
+    args = ap.parse_args()
+
+    if args.smoke:
+        smoke()
+    elif args.ptbxl:
+        train(args.ptbxl, epochs=args.epochs, batch_size=args.batch_size)
+    else:
+        ap.error("Fournir --ptbxl /chemin/ptbxl ou --smoke")

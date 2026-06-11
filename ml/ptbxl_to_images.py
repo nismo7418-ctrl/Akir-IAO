@@ -64,7 +64,9 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 _LOG = logging.getLogger(__name__)
 
-from ml.ecg_predictor import ECG_DEFAULT_PRIORITY, ECG_LABELS
+# v21 : la taxonomie honnête est la source unique. Le mapping SCP → code
+# canonique et la sélection « pire cas » vivent désormais dans ml.train_ecg_model.
+from ml.train_ecg_model import select_primary_label, TRAINABLE_LABELS as ECG_LABELS
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
 PTBXL_ROOT  = Path("data/physionet.org/files/ptb-xl/1.0.3")
@@ -73,43 +75,8 @@ OUT_ROOT    = Path("data/ecg")
 OUT_IMAGES  = OUT_ROOT / "images"
 OUT_LABELS  = OUT_ROOT / "labels.csv"
 
-# ── Mapping SCP-ECG → nos 15 labels ──────────────────────────────────────────
-SCP_TO_LABEL: dict[str, str] = {
-    # Normal
-    "NORM": "NORM",
-    # Infarctus antérieurs (STEMI_ANT)
-    "AMI":   "STEMI_ANT",   # anterior MI
-    "ASMI":  "STEMI_ANT",   # antero-septal MI
-    "ALMI":  "STEMI_ANT",   # antero-lateral MI
-    # Infarctus inférieurs (STEMI_INF)
-    "IMI":   "STEMI_INF",
-    "ILMI":  "STEMI_INF",
-    # Infarctus latéraux (STEMI_LAT)
-    "LMI":   "STEMI_LAT",
-    "IPLMI": "STEMI_LAT",
-    "PMI":   "STEMI_LAT",
-    # Ischémie / NSTEMI (anomalies ST/T sans STEMI)
-    "ISC_":  "NSTEMI",
-    "ISCAL": "NSTEMI",
-    "ISCAS": "NSTEMI",
-    "ISCIL": "NSTEMI",
-    "ISCIN": "NSTEMI",
-    "ISCLA": "NSTEMI",
-    "NDT":   "NSTEMI",
-    "NST_":  "NSTEMI",
-    # Arythmies atriales
-    "AFIB":  "AF",
-    "AFLT":  "AFL",
-    # BAV
-    "1AVB":  "AVB1",
-    "2AVB":  "AVB2",
-    "3AVB":  "AVB3",
-    # Blocs de branche
-    "CLBBB": "LBBB",
-    "ILBBB": "LBBB",
-    "CRBBB": "RBBB",
-    "IRBBB": "RBBB",
-}
+# Le mapping SCP-ECG → code canonique honnête est centralisé dans
+# ml.train_ecg_model (scp_to_canonical / select_primary_label).
 
 LEAD_ORDER = ["I", "II", "III", "aVR", "aVL", "aVF",
               "V1", "V2", "V3", "V4", "V5", "V6"]
@@ -130,25 +97,6 @@ def _lazy_imports():
         )
 
 
-# ── Sélection du label le plus critique ──────────────────────────────────────
-
-def _pick_best_label(scp_codes: dict[str, float]) -> str | None:
-    """
-    Un enregistrement peut avoir plusieurs codes SCP. On garde le label avec
-    la priorité KTAS la plus basse (= la plus critique).
-    Retourne None si aucun code ne map vers nos 15 labels.
-    """
-    candidates = []
-    for code, _confidence in scp_codes.items():
-        lbl = SCP_TO_LABEL.get(code)
-        if lbl is not None:
-            candidates.append((ECG_DEFAULT_PRIORITY[lbl], lbl))
-    if not candidates:
-        return None
-    candidates.sort()  # tri croissant sur priorité (1 = plus urgent)
-    return candidates[0][1]
-
-
 # ── Chargement du dataset ────────────────────────────────────────────────────
 
 def _load_metadata(rate: int):
@@ -164,7 +112,7 @@ def _load_metadata(rate: int):
 
     df = pd.read_csv(PTBXL_CSV, index_col="ecg_id")
     df["scp_codes"] = df["scp_codes"].apply(ast.literal_eval)
-    df["label"]     = df["scp_codes"].apply(_pick_best_label)
+    df["label"]     = df["scp_codes"].apply(lambda d: select_primary_label(d.keys()))
     df = df.dropna(subset=["label"])
 
     fname_col = "filename_hr" if rate == 500 else "filename_lr"
