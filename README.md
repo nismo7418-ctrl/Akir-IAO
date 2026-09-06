@@ -99,6 +99,39 @@ streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
 
 Puis ouvrir `http://IP_DU_POSTE:8501` depuis le navigateur mobile.
 
+### Lancement rapide (Windows)
+
+Double-cliquer sur `LANCER_AKIR-IAO.bat` : le lanceur force le mode local sécurisé (télémétrie off, serveur sur `localhost`), vérifie Python, ouvre `http://localhost:8501` et démarre l'application.
+
+## Mode local sécurisé (zéro fuite de données)
+
+AKIR-IAO est conçu pour tourner **100 % en local**, sans aucune transmission de données médicales hors du poste :
+
+- **Aucune télémétrie Streamlit** : `gatherUsageStats = false` dans `.streamlit/config.toml` (et `STREAMLIT_BROWSER_GATHER_USAGE_STATS=false` dans le lanceur).
+- **Aucune ressource distante** : les polices sont celles du système (aucun `@import` Google Fonts), aucune requête réseau n'est émise au démarrage.
+- **Serveur borné à `localhost`** par défaut : l'application n'est accessible que depuis le poste (à ouvrir explicitement avec `--server.address 0.0.0.0` pour un usage tablette sur le même réseau, à votre propre responsabilité réseau).
+- **NLP local par défaut** : l'extraction de dictée et l'analyse sémantique tournent en local. Les chemins NLP cloud (Claude / GPT) sont **inactifs par défaut**, même si des clés API sont présentes dans l'environnement.
+
+### Activer le NLP cloud (opt-in, à votre propre responsabilité)
+
+Le NLP cloud n'est activé que si **les trois** conditions sont réunies :
+
+1. la variable d'environnement `AKIR_ALLOW_CLOUD_NLP=1` est posée ;
+2. les dépendances optionnelles sont installées : `pip install anthropic pydantic openai` (section commentée de `requirements.txt`) ;
+3. une clé API valide est fournie dans l'environnement.
+
+Sans le flag, toute clé API présente est **ignorée** et un avertissement est affiché dans l'interface. Aucune donnée n'est alors envoyée à un service tiers.
+
+### Modèles ML et données (Git LFS)
+
+Les fichiers binaires volumineux (`ml/triage_rf_model.joblib`, `ml/triage_model.joblib`, `ml/ecg_model.pth`, `data/*.csv`) sont stockés via **Git LFS**. Après un clone, ils peuvent apparaître comme de petits fichiers texte « pointeur » (~130 octets) : les modules ML/ECG détectent ce cas et affichent un message d'aide au lieu de planter.
+
+```bash
+git lfs pull
+```
+
+Cette commande restaure les vrais binaires. Sans elle, le moteur clinique FRENCH reste pleinement opérationnel ; seules les aides ML/ECG expérimentales sont indisponibles.
+
 ## Tests
 
 ```bash
@@ -108,6 +141,8 @@ pytest
 Les tests couvrent notamment le moteur de triage FRENCH, NEWS2, les scores, la pharmacologie, les perfusions, la compatibilité IV et le pré-remplissage par dictée.
 
 ## Confidentialité
+
+Voir la section [Mode local sécurisé](#mode-local-sécurisé-zéro-fuite-de-données) : par défaut, aucune donnée ne quitte le poste.
 
 - Aucune identité patient n'est nécessaire au fonctionnement.
 - Le registre utilise des UID de session anonymes.

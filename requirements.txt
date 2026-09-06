@@ -1,13 +1,29 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AKIR-IAO — Dépendances
+# Cœur : l'application tourne à 100 % en local avec ces paquets uniquement.
+# Aucune donnée ne quitte le poste par défaut.
+# ══════════════════════════════════════════════════════════════════════════════
 streamlit>=1.35.0
 pandas>=2.0.0
 plotly>=5.18.0
 pytest>=7.0.0
-anthropic>=0.49.0
 scikit-learn>=1.4.0
 joblib>=1.3.0
 numpy>=1.26.0
 
-# Module IA ECG (optionnel — lazy import, l'app fonctionne sans)
+# ── OPTIONNEL : NLP cloud (DÉSACTIVÉ par défaut) ─────────────────────────────
+# Ces paquets ne sont PAS requis. Le NLP cloud (Claude / GPT) n'est activé
+# que si les trois conditions sont réunies :
+#   1. ces dépendances sont installées,
+#   2. la variable d'environnement AKIR_ALLOW_CLOUD_NLP=1 est posée,
+#   3. la clé API correspondante est présente.
+# En mode local (par défaut), rien n'est envoyé en externe.
+# Pour activer l'option cloud :  pip install anthropic pydantic openai
+# anthropic>=0.49.0
+# pydantic>=2.0.0
+# openai>=1.40.0
+
+# ── OPTIONNEL : Module IA ECG (lazy import, l'app fonctionne sans) ───────────
 # Décommenter pour activer l'inférence ECG image :
 # torch>=2.1.0
 # timm>=0.9.0

@@ -3,6 +3,7 @@
 # UX refonte : "One-screen workflow" — confort IAO urgences — Mobile-first
 
 import streamlit as st
+import os
 import uuid, io, csv as csv_mod, traceback
 from datetime import datetime
 import joblib
@@ -56,6 +57,30 @@ st.markdown("""
   setInterval(harden, 1200);   // ré-appliquer après chaque re-run Streamlit
 })();
 </script>
+
+
+<style>
+/* Touch buttons >= 48px WCAG AA */
+.stButton > button {
+    min-height: 48px !important;
+    min-width: 48px !important;
+    padding: 12px 24px !important;
+}
+
+/* Vital inputs larger */
+.stNumberInput input {
+    min-height: 48px !important;
+    font-size: 16px !important;
+}
+
+/* iOS safe-area */
+@media screen and (max-width: 768px) {
+    body {
+        padding-top: env(safe-area-inset-top, 20px);
+        padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+}
+</style>
 """, unsafe_allow_html=True)
 
 from config import *
@@ -126,6 +151,60 @@ from akir_iao_enhancements import (
 )
 from persistence.audit import audit_verifier_integrite
 from ui.styles import load_css
+
+
+# ── Export FHIR R4 — intégration DPI Maincare/CGM ─────────────────────────────
+# Génération locale d'une ressource FHIR R4 standard : cette fonction ne
+# transmet AUCUNE donnée sur le réseau (consignation locale dans le DPI/EMR).
+_FHIR_VITALS = [
+    # (clé, code LOINC, libellé, unité UCUM)
+    ("fr",   "9279-1", "Respiratory rate",                    "1/min"),
+    ("spo2", "2708-6", "Oxygen saturation in Arterial blood",  "%"),
+    ("pas",  "8480-6", "Systolic blood pressure",             "mmHg"),
+    ("fc",   "8867-4", "Heart rate",                          "1/min"),
+    ("temp", "8310-5", "Body temperature",                    "Cel"),
+    ("gcs",  "9226-6", "Glasgow Coma Score total",            "{score}"),
+]
+
+
+def export_vitaux_fhir_r4(fr_val, spo2_val, pas_val, fc_val, temp_val, gcs_val=15):
+    """Génère une observation FHIR R4 avec les vitaux du patient.
+
+    Args:
+        fr_val:   fréquence respiratoire (/min)
+        spo2_val: saturation O2 (%)
+        pas_val:  pression artérielle systolique (mmHg)
+        fc_val:   fréquence cardiaque (/min)
+        temp_val: température (°C)
+        gcs_val:  score de Glasgow total (1-15)
+
+    Returns:
+        dict — Bundle FHIR R4 JSON-serialisable, prêt à être consigné dans un
+        DPI/EMR local (Maincare, CGM). Aucune transmission réseau effectuée ici.
+    """
+    valeurs = {"fr": fr_val, "spo2": spo2_val, "pas": pas_val,
+               "fc": fc_val, "temp": temp_val, "gcs": gcs_val}
+    entries = []
+    for key, loinc, display, unit in _FHIR_VITALS:
+        val = valeurs[key]
+        try:
+            qty = {"value": float(val), "unit": unit, "system": "http://unitsofmeasure.org"}
+        except (TypeError, ValueError):
+            qty = {"valueString": str(val), "unit": unit}
+        entries.append({
+            "resource": {
+                "resourceType": "Observation",
+                "status": "final",
+                "category": [{
+                    "coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                                "code": "vital-signs", "display": "Vital signs"}],
+                }],
+                "code": {"coding": [{"system": "http://loinc.org", "code": loinc, "display": display}]},
+                "valueQuantity": qty,
+            }
+        })
+    return {"resourceType": "Bundle", "type": "collection", "entry": entries}
+
 from ui.components import (
     H, SEC, AL, CARD, CARD_END, PURPURA, N2_BANNER,
     GAUGE, VITAUX, TRI_CARD_INLINE, TRI_BANNER_FIXED,
@@ -145,6 +224,7 @@ from clinical.prefill import (
     gcs_to_avpu, motif_is_trauma,
 )
 from ui.explainer import explain, glossary_grid, info_chip
+from ui.stats_tab import render as render_stats
 
 MOTS_CAT       = FRENCH_MOTS_CAT
 MOTIFS_RAPIDES = FRENCH_MOTIFS_RAPIDES
@@ -1077,6 +1157,22 @@ try:
       </div>
     </div>""")
 
+    # ── Bannière de confidentialité — mode local sécurisé ───────────────────
+    _nlp_cloud_on = os.environ.get("AKIR_ALLOW_CLOUD_NLP", "").strip().lower() in ("1", "true", "yes", "on")
+    if _nlp_cloud_on:
+        H('<div style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;'
+          'padding:8px 14px;border-radius:8px;margin-bottom:10px;font-size:.85rem;'
+          'font-weight:600;">'
+          '☁️ <b>NLP cloud ACTIVÉ</b> (AKIR_ALLOW_CLOUD_NLP) — les dictées sont anonymisées '
+          'mais peuvent être traitées par un service externe. Passez AKIR_ALLOW_CLOUD_NLP=0 '
+          'pour un fonctionnement 100 % local.</div>')
+    else:
+        H('<div style="background:#ECFDF5;border:1px solid #10B981;color:#065F46;'
+          'padding:8px 14px;border-radius:8px;margin-bottom:10px;font-size:.85rem;'
+          'font-weight:600;">'
+          '🔒 <b>100 % local — aucune donnée ne quitte ce poste.</b> Télémétrie Streamlit '
+          'désactivée · NLP local par défaut · registre et audit anonymisés sur ce disque.</div>')
+
     _sticky_bar()
 
     # ══ TOGGLE MODE COMPACT (onglets emoji-only) ════════════════════════════
@@ -1424,12 +1520,19 @@ try:
         if submitted:
             _avpu = _avpu_lbl.split(" ", 1)[0]   # "A", "V", "P", "U"
 
-            res = get_ml_priority({
-                "fc":   _fc,   "fr":   _fr,   "pas":  _pas,  "pad":  _pad,
-                "spo2": _spo2, "temp": _temp, "avpu": _avpu, "nrs_pain": _nrs,
-                "arrival_ambulance": int(_amb),
-                "injury":            int(_inj),
-            })
+            try:
+                res = get_ml_priority({
+                    "fc":   _fc,   "fr":   _fr,   "pas":  _pas,  "pad":  _pad,
+                    "spo2": _spo2, "temp": _temp, "avpu": _avpu, "nrs_pain": _nrs,
+                    "arrival_ambulance": int(_amb),
+                    "injury":            int(_inj),
+                })
+            except Exception as _ml_exc:  # noqa: BLE001 — défense en profondeur : l'onglet ne doit jamais planter
+                res = {"erreur": (f"Module IA indisponible ({type(_ml_exc).__name__} : {_ml_exc}). "
+                                  "Le moteur clinique FRENCH (onglet ⚡ Triage) reste la référence."),
+                       "priorite": None, "label": "—", "couleur": "#64748B",
+                       "probabilites": {}, "confiance": 0.0, "alerte_p1": False,
+                       "features_input": {}, "override": None}
 
             if res["erreur"]:
                 AL(f"Erreur prédiction : {res['erreur']}", "danger")
